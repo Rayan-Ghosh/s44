@@ -1,0 +1,121 @@
+# ==========================================================================
+# S40 — .gitignore
+# See CLAUDE.md / docs/SECURITY.md for the rationale behind secret handling.
+# ==========================================================================
+
+# --------------------------------------------------------------------------
+# Node / Next.js (apps/web)
+# --------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo/
+.vercel/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/install-state.gz
+
+# --------------------------------------------------------------------------
+# Python (apps/api, ml/, voice/, scripts/)
+# --------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# --------------------------------------------------------------------------
+# Environment / secrets
+# --------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+*.pem
+*.key
+*.crt
+*.p12
+*credentials*.json
+*secret*
+!*.example
+!.env.example
+
+# --------------------------------------------------------------------------
+# IDE / OS
+# --------------------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
+
+# --------------------------------------------------------------------------
+# ML — generated artifacts, not source
+# --------------------------------------------------------------------------
+ml/data/raw/
+ml/data/processed/
+ml/data/synthetic/
+ml/models/*.pkl
+ml/models/*.joblib
+ml/models/*.onnx
+*.h5
+*.pt
+*.pth
+# Model metadata/config that IS meant to be reviewed/tracked should live
+# outside the above generated-artifact paths (e.g. ml/models/metadata.json
+# describing a released model version) — do not add a blanket ignore for
+# ml/models/ itself.
+
+# --------------------------------------------------------------------------
+# Logs / generated reports
+# --------------------------------------------------------------------------
+*.log
+logs/
+*.report.json
+coverage/
+
+# --------------------------------------------------------------------------
+# Database
+# --------------------------------------------------------------------------
+# Decision (documented in the version-control foundation report): no
+# Avaran.db file exists in this repository yet. When the SQLite dev/test
+# scaffold is introduced, the default is to treat it as generated/local-only
+# data and NOT track it — reproducibility should come from a seed script
+# (scripts/seed_database.py, per docs/DEVELOPMENT_PLAN.md Phase 3), not from
+# committing a binary database file. Reassess if a specific small, hand
+# curated Avaran.db is later designated as a tracked fixture.
+Avaran.db
+*.sqlite3
+*.sqlite3-journal
+*.db-journal
+
+# --------------------------------------------------------------------------
+# Docker / infra local overrides
+# --------------------------------------------------------------------------
+docker-compose.override.yml
