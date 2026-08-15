@@ -1,20 +1,27 @@
 """
 S40 API — application entry point.
 
-Bootstrap scope only (see docs/DEVELOPMENT_PLAN.md Phase 1/2). This module
-wires up the FastAPI app, its database dependency, and a health check.
-It intentionally contains no risk-engine, ML, or voice logic — those are
-later, controlled phases per CLAUDE.md.
+Phase 2 scope (see docs/DEVELOPMENT_PLAN.md): real database schema,
+database layer, and initial API contracts for users/transactions/risk/
+alerts. No risk engine, ML inference, or voice logic — those are later,
+controlled phases per CLAUDE.md. Schema is owned by Alembic
+(apps/api/alembic/) — this module does not create tables itself.
 """
 
 from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.api.routers import alerts, risk, transactions, users
 from app.core.config import settings
 from app.core.database import get_db
 
 app = FastAPI(title=settings.app_name)
+
+app.include_router(users.router)
+app.include_router(transactions.router)
+app.include_router(risk.router)
+app.include_router(alerts.router)
 
 
 @app.get("/health")

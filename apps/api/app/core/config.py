@@ -36,5 +36,11 @@ class Settings(BaseSettings):
     # not decided or implemented here.
     database_url: str = f"sqlite:///{BASE_DIR / 'Avaran.db'}"
 
+    # Prototype-only pepper for hashing sensitive identifiers (see
+    # app/core/security.py). The default below is intentionally obvious
+    # and MUST be overridden via .env for anything beyond local dev — see
+    # docs/SECURITY.md's open item on hashing/key management.
+    hash_pepper: str = "s40-dev-only-pepper-change-me"
+
 
 settings = Settings()

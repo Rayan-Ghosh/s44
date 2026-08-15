@@ -17,13 +17,21 @@ social-engineering detectors through a configurable risk-fusion layer.
 
 ## Project status
 
-**Minimal development scaffold.**
+**Phase 2 — real database schema, database layer, initial API contracts.**
 
-A minimal, verified backend scaffold exists (`apps/api`) — a health-checked
-FastAPI application backed by a local SQLite development database
-(`Avaran.db`). This is infrastructure only: no fraud ML, anomaly detection,
-voice ML, Support AI, real frontend, or authentication has been
-implemented. See `docs/DEVELOPMENT_PLAN.md` for what comes next.
+The backend (`apps/api`) now has: a real SQLAlchemy schema for all 12 spec
+entities (users, devices, recipients, transactions, risk_scores,
+risk_factors, voice_analysis, alerts, user_feedback, fraud_cases,
+model_predictions, audit_logs), Alembic-managed migrations, and a first
+API surface (`/api/v1/users`, `/api/v1/transactions`, `/api/v1/risk`,
+`/api/v1/alerts`) backed by a repository/service layer. `Avaran.db` is the
+local SQLite development database.
+
+Explicitly **not** implemented yet: fraud ML, anomaly detection, voice ML,
+risk fusion/decision engine, Support AI, real frontend, authentication.
+`POST /api/v1/risk/evaluate` exists as a contract only — it returns `501`
+rather than a fabricated score, since no model exists to produce one. See
+`docs/DEVELOPMENT_PLAN.md` for what comes next.
 
 ## Specification and documentation
 
@@ -115,16 +123,29 @@ py -m venv .venv
 
 (macOS/Linux: `python3 -m venv .venv && .venv/bin/python -m pip install -r apps/api/requirements.txt`)
 
-### Initialize the development database
+### Initialize / migrate the development database
 
 ```bash
 .venv\Scripts\python.exe scripts/seed_database.py
 ```
 
-Creates `Avaran.db` at the repository root with the current bootstrap
-schema (see `apps/api/app/models/dev_check.py` — a placeholder table used
-only to prove the database connection works, not part of the final S40
-schema).
+Runs `alembic upgrade head` against `Avaran.db` (creating it if it doesn't
+exist yet) and then inserts a small set of deterministic, synthetic demo
+rows (Indian names/context per `docs/PRODUCT_DIRECTIVES.md` §A — no real
+people, no real financial data). Safe to run repeatedly: it is idempotent
+and will not create duplicate rows or re-run migrations that already
+applied.
+
+To work with Alembic directly (from `apps/api`):
+
+```bash
+cd apps/api
+../../.venv/Scripts/python.exe -m alembic upgrade head     # apply migrations
+../../.venv/Scripts/python.exe -m alembic revision --autogenerate -m "..."  # new migration after a model change
+```
+
+Schema is owned by Alembic (`apps/api/alembic/`) — the application never
+creates tables itself at startup.
 
 ### Start the backend
 
@@ -148,7 +169,20 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/health/db
 ```
 
-Both were verified to return `200 OK` during scaffold setup.
+### Exercise the API
+
+With the backend running (and the database seeded):
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test User","phone_number":"+91-90000-00000"}'
+
+curl http://127.0.0.1:8000/api/v1/alerts
+curl http://127.0.0.1:8000/api/v1/risk/2
+```
+
+All verified against a live run of the server during Phase 2 development.
 
 ### Run tests
 
@@ -157,5 +191,7 @@ cd apps/api
 ../../.venv/Scripts/python.exe -m pytest -v
 ```
 
-Verified: 3 passed (backend startup, `/health` response, database
-write/read round trip) — see `apps/api/tests/test_health.py`.
+Verified: 28 passed — health endpoints, Alembic migration against a fresh
+database, ORM relationship integrity, and full CRUD/validation coverage
+for the users/transactions/risk/alerts API surface. Tests run against an
+isolated temporary SQLite database and never touch `Avaran.db`.
