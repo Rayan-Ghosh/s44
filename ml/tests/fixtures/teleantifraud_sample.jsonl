@@ -1,0 +1,6 @@
+{"id": "fx-001", "transcript": "您好，请问是张先生吗？我们是快递公司。", "label": 0, "fraud_type": "none", "audio_path": "audio/fx-001.wav"}
+{"id": "fx-002", "transcript": "您的银行账户涉嫌洗钱，请立即将资金转入安全账户。", "label": 1, "fraud_type": "authority_impersonation", "audio_path": "audio/fx-002.wav"}
+{"id": "fx-003", "transcript": "妈妈，我明天回家吃饭。", "label": 0, "fraud_type": "none", "audio_path": "audio/fx-003.wav"}
+{"id": "fx-004", "transcript": "您中奖了，请先支付手续费领取奖金。", "label": 1, "fraud_type": "prize_scam", "audio_path": "audio/fx-004.wav"}
+{"id": "fx-005", "transcript": "您的账户将在十分钟内被冻结，请马上操作。", "label": 1, "fraud_type": "account_block_threat", "audio_path": "audio/fx-005.wav"}
+{"id": "fx-006", "transcript": "请问您预约的时间是下午三点吗？", "label": 0, "fraud_type": "none", "audio_path": "audio/fx-006.wav"}

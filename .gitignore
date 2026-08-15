@@ -78,19 +78,34 @@ Desktop.ini
 # --------------------------------------------------------------------------
 # ML — generated artifacts, not source
 # --------------------------------------------------------------------------
+# Downloaded external datasets. NEVER commit these — several carry licences
+# that restrict redistribution, and the repository must not become a
+# distribution channel for them (see docs/DATA_STRATEGY.md).
 ml/data/raw/
 ml/data/processed/
 ml/data/synthetic/
+# Large columnar/archive formats that only ever appear as dataset dumps.
+*.parquet
+*.feather
+*.zip.part
 ml/models/*.pkl
 ml/models/*.joblib
 ml/models/*.onnx
 *.h5
 *.pt
 *.pth
+# Experiment/evaluation outputs.
+ml/experiments/
+ml/reports/
 # Model metadata/config that IS meant to be reviewed/tracked should live
 # outside the above generated-artifact paths (e.g. ml/models/metadata.json
 # describing a released model version) — do not add a blanket ignore for
 # ml/models/ itself.
+#
+# Tiny hand-authored adapter fixtures ARE source and must stay tracked. They
+# are not excerpts of any public dataset (see ml/tests/fixtures/README.md).
+!ml/tests/fixtures/
+!ml/tests/fixtures/**
 
 # --------------------------------------------------------------------------
 # Logs / generated reports

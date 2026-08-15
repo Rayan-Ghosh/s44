@@ -1,0 +1,15 @@
+# S40 ML / data-foundation dependencies (Phase 3).
+#
+# Deliberately minimal. Phase 3 builds the DATA foundation — adapters,
+# canonical schema, validation, leakage-safe splits, feature engineering,
+# synthetic generation — and trains NO models. The modelling libraries the
+# specification names (XGBoost/LightGBM for the fraud model, scikit-learn's
+# Isolation Forest for the anomaly model, and whatever the voice pipeline
+# settles on) belong to Phase 4/5 and are intentionally NOT installed yet.
+#
+# Versions below are the ones actually installed and verified for this phase.
+# Install alongside the backend requirements:
+#     .venv\Scripts\python.exe -m pip install -r ml/requirements.txt
+
+pandas==3.0.5
+numpy==2.5.2

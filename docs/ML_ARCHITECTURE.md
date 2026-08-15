@@ -209,10 +209,42 @@ Raw data is stored outside Git (spec §51 checklist item).
 **CONFIRMED** (spec §36.3, §51): license/usage-terms verification for
 PaySim, IEEE-CIS, and TeleAntiFraud-28k is required before use, and must
 happen before any dataset or derived model appears in a public submission.
-**Status: not yet performed** — flagged as an open item, not yet actioned
-in this foundation phase.
+
+**Status: performed in Phase 3 (2026-08-15).** Full evidence trail in
+[`docs/DATA_STRATEGY.md`](DATA_STRATEGY.md) §2. Summary:
+- TeleAntiFraud-28k — Apache-2.0, VERIFIED.
+- Credit Card / ULB — DbCL v1.0, VERIFIED (owner-added dataset, not in the
+  original specification).
+- PaySim — simulator GPL-3.0 verified; the Kaggle CSV's own licence could
+  not be read programmatically, so PARTIALLY VERIFIED.
+- IEEE-CIS — **PENDING**; competition terms unreadable programmatically
+  and it is real customer data, so it has not been downloaded.
+
+No dataset has been downloaded. Phase 3 was design-and-verify only.
+
+⚠ **TeleAntiFraud-28k is Chinese-language**, which the specification does
+not note. S40 is India-first, so a classifier trained on it cannot be
+evaluated on Indian audio without an Indian-language evaluation set. This
+is an open owner decision — see `docs/DATA_STRATEGY.md` §9.1.
 
 ------------------------------------------------------------------------
+
+## 16. Phase 3 data foundation (implemented)
+
+The data layer these models will consume is built and tested — see
+[`docs/DATA_STRATEGY.md`](DATA_STRATEGY.md) for the full design:
+
+- Canonical transaction and voice schemas, with per-dataset
+  `FeatureAvailability` so an unobserved concept is never fabricated.
+- Dataset adapters for all five sources, keeping dataset quirks contained.
+- Leakage-safe chronological/grouped splitting and a validation reporter.
+- A feature layer where each feature declares its source, inputs,
+  missing-data behaviour and leakage safety — all assertable in tests.
+- The User Risk Profile foundation (interpretable statistics only, never a
+  hidden second model).
+- A deterministic synthetic scenario generator for the India/UPI cases.
+- The dataset→model mapping, enforced in code so unlike labels cannot be
+  pooled.
 
 ## Summary of open ML items requiring a decision
 
@@ -220,5 +252,10 @@ in this foundation phase.
 - Rule-engine thresholds beyond the spec's illustrative examples.
 - STT engine and voice classifier architecture (local/open-weight,
   specific choice pending).
+- **Voice language strategy** — TeleAntiFraud is Chinese; S40 is
+  India-first (`docs/DATA_STRATEGY.md` §9.1).
 - Class-imbalance handling technique (pending actual data distribution).
-- Dataset license verification (PaySim, IEEE-CIS, TeleAntiFraud-28k).
+- IEEE-CIS licence acceptance, and whether its device features justify
+  downloading it at all.
+- `ProfileConfig` values (`min_history`, `window_days`) — PROPOSED
+  placeholders, not tuned.

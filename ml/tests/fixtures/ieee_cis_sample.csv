@@ -1,0 +1,9 @@
+TransactionID,TransactionDT,TransactionAmt,ProductCD,card1,addr1,DeviceType,DeviceInfo,isFraud
+2987000,86400,68.5,W,13926,315.0,desktop,Windows,0
+2987001,86401,29.0,W,2755,325.0,desktop,MacOS,0
+2987002,86469,59.0,W,4663,330.0,mobile,iOS Device,0
+2987003,86499,50.0,H,18132,476.0,mobile,SAMSUNG SM-G892A,1
+2987004,86506,50.0,H,4497,420.0,desktop,Windows,0
+2987005,86510,49.0,W,5937,272.0,,,0
+2987006,86522,159.0,C,12308,126.0,mobile,iOS Device,1
+2987007,86529,422.5,W,12695,325.0,desktop,Windows,0
