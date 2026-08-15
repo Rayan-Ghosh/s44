@@ -1,0 +1,13 @@
+# S40 backend — minimal development scaffold dependencies.
+#
+# Deliberately minimal (see docs/DEVELOPMENT_PLAN.md Phase 1/2). No ML,
+# voice, or auth libraries here — those belong to later phases per
+# CLAUDE.md. Versions below are the ones actually installed and verified
+# for this scaffold (see README.md "Verified" note).
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
+sqlalchemy==2.0.52
+pydantic-settings==2.15.0
+pytest==9.1.1
+httpx==0.28.1

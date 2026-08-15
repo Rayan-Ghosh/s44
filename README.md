@@ -17,11 +17,13 @@ social-engineering detectors through a configurable risk-fusion layer.
 
 ## Project status
 
-**Foundation / Pre-Implementation.**
+**Minimal development scaffold.**
 
-No application code has been written yet. The project currently consists
-of the authoritative specification and a set of operating/architecture
-documents that govern how implementation will proceed.
+A minimal, verified backend scaffold exists (`apps/api`) — a health-checked
+FastAPI application backed by a local SQLite development database
+(`Avaran.db`). This is infrastructure only: no fraud ML, anomaly detection,
+voice ML, Support AI, real frontend, or authentication has been
+implemented. See `docs/DEVELOPMENT_PLAN.md` for what comes next.
 
 ## Specification and documentation
 
@@ -95,6 +97,65 @@ Full detail: `CLAUDE.md`.
 
 ## Development commands
 
-None yet — no application code exists in this repository. This section
-will be filled in as each part of the stack (`apps/web`, `apps/api`,
-`ml/`) is actually scaffolded, per `docs/DEVELOPMENT_PLAN.md`.
+Only the commands below have been run and verified to work. This section
+grows as each part of the stack is actually scaffolded, per
+`docs/DEVELOPMENT_PLAN.md`. Nothing here is aspirational.
+
+The backend scaffold lives in `apps/api` (FastAPI). `Avaran.db` is a local
+SQLite development database, git-ignored and reproducible from
+`scripts/seed_database.py` — see `docs/SECURITY.md` and `.gitignore` for
+why it isn't committed.
+
+### Getting started (once, per machine)
+
+```bash
+py -m venv .venv
+.venv\Scripts\python.exe -m pip install -r apps/api/requirements.txt
+```
+
+(macOS/Linux: `python3 -m venv .venv && .venv/bin/python -m pip install -r apps/api/requirements.txt`)
+
+### Initialize the development database
+
+```bash
+.venv\Scripts\python.exe scripts/seed_database.py
+```
+
+Creates `Avaran.db` at the repository root with the current bootstrap
+schema (see `apps/api/app/models/dev_check.py` — a placeholder table used
+only to prove the database connection works, not part of the final S40
+schema).
+
+### Start the backend
+
+Either of these is equivalent — `server.js` is a thin development
+orchestration wrapper around the same `uvicorn` command, not a second
+backend (see the header comment in `server.js`):
+
+```bash
+node server.js
+# or: node server.js --seed   (seeds the database first)
+# or directly:
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload --app-dir apps/api
+```
+
+### Health check
+
+With the backend running:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health/db
+```
+
+Both were verified to return `200 OK` during scaffold setup.
+
+### Run tests
+
+```bash
+cd apps/api
+../../.venv/Scripts/python.exe -m pytest -v
+```
+
+Verified: 3 passed (backend startup, `/health` response, database
+write/read round trip) — see `apps/api/tests/test_health.py`.
