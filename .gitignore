@@ -84,6 +84,7 @@ Desktop.ini
 ml/data/raw/
 ml/data/processed/
 ml/data/synthetic/
+ml/data/Original/
 # Large columnar/archive formats that only ever appear as dataset dumps.
 *.parquet
 *.feather
