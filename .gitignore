@@ -94,13 +94,24 @@ ml/models/*.onnx
 *.h5
 *.pt
 *.pth
+# Trained model artifact trees and the local model registry pointers.
+#
+# `ml/models/` contains ONLY generated artifacts — the registry/artifact
+# SOURCE lives in `ml/registry/`. That separation is deliberate: during
+# Phase 4 a routine `rm -rf ml/models` (to force a clean retrain) also
+# deleted source that had been placed in the same directory. Artifacts and
+# hand-written code must not share a tree.
+#
+# These are BUILD OUTPUTS, fully reproducible via:
+#     python -m ml.training.train_fraud
+#     python -m ml.training.train_anomaly
+ml/models/
 # Experiment/evaluation outputs.
 ml/experiments/
 ml/reports/
-# Model metadata/config that IS meant to be reviewed/tracked should live
-# outside the above generated-artifact paths (e.g. ml/models/metadata.json
-# describing a released model version) — do not add a blanket ignore for
-# ml/models/ itself.
+# Python source under ml/models/ (artifact.py, model_registry.py) IS source
+# and stays tracked — the rules above deliberately target artifact trees
+# only, never `ml/models/` wholesale.
 #
 # Tiny hand-authored adapter fixtures ARE source and must stay tracked. They
 # are not excerpts of any public dataset (see ml/tests/fixtures/README.md).

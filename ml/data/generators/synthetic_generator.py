@@ -96,8 +96,21 @@ class SyntheticConfig:
 
     seed: int = 40
     users: int = 40
-    #: Prior transactions generated per user before their scenario row.
+    #: Mean prior transactions generated per user before their scenario row.
     history_per_user: int = 25
+    #: Fractional spread of history length across users (±this proportion).
+    #:
+    #: Must stay well above zero. With a FIXED history length, every user
+    #: has exactly `history_per_user` prior transactions when their
+    #: scenario row is generated, so the derived `user_transaction_count`
+    #: feature becomes a near-perfect proxy for "this is the scenario row"
+    #: — and scenario rows are the only rows that can carry a positive
+    #: label. Measured in Phase 4, that single feature reached PR-AUC 0.80
+    #: on its own purely as an artefact of generation.
+    #:
+    #: Varying history length breaks that proxy and is more realistic:
+    #: real users have differing tenure.
+    history_variation: float = 0.5
     #: Typical routine payment range in INR.
     routine_amount_range: tuple[float, float] = (150.0, 2500.0)
     #: Multiplier applied to a user's mean for "unusual amount".
@@ -110,6 +123,20 @@ class SyntheticConfig:
     start: datetime = field(
         default=datetime(2026, 1, 5, 9, 0, tzinfo=timezone.utc)
     )
+    #: Window over which user timelines are staggered.
+    #:
+    #: This must be substantially LARGER than the span of one user's
+    #: history, or every user's scenario row (the only row that can carry a
+    #: positive label) lands at roughly the same point in the global
+    #: timeline. That produces a dataset whose fraud rate climbs from 0% to
+    #: >20% across the period, which makes the chronological split Phase 3
+    #: mandates scientifically invalid: train ends up with almost no
+    #: positives and test with a completely different class distribution.
+    #:
+    #: With the defaults, one user's history spans roughly 24 days, so a
+    #: 150-day spread keeps the fraud rate broadly stationary over time —
+    #: which is also how real fraud behaves.
+    user_start_spread_days: int = 150
 
 
 class SyntheticGenerator:
@@ -171,7 +198,18 @@ class SyntheticGenerator:
             base_mean = float(
                 rng.uniform(cfg.routine_amount_range[0], cfg.routine_amount_range[1])
             )
-            clock = cfg.start + timedelta(days=int(rng.integers(0, 20)))
+            clock = cfg.start + timedelta(
+                days=int(rng.integers(0, max(cfg.user_start_spread_days, 1)))
+            )
+
+            # Per-user history length. See SyntheticConfig.history_variation:
+            # a fixed length turns user_transaction_count into a label proxy.
+            # Floored at 6 so the User Risk Profile still warms past its
+            # default min_history and deviation features stay meaningful.
+            spread = int(round(cfg.history_per_user * cfg.history_variation))
+            low = max(6, cfg.history_per_user - spread)
+            high = max(low + 1, cfg.history_per_user + spread + 1)
+            history_length = int(rng.integers(low, high))
 
             # Each user transacts within a narrow personal band of hours.
             # Without this every user looks active across the whole day, no
@@ -192,7 +230,7 @@ class SyntheticGenerator:
             occasional_large = scenario is Scenario.LEGITIMATE_HIGH_VALUE
 
             # --- baseline history ---------------------------------------
-            for history_index in range(cfg.history_per_user):
+            for history_index in range(history_length):
                 clock += timedelta(hours=float(rng.uniform(6, 40)))
                 clock = clock.replace(hour=int(rng.choice(active_hours)))
                 amount = float(np.clip(rng.normal(base_mean, base_mean * 0.25), 20, None))

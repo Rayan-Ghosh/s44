@@ -58,16 +58,24 @@ class ModelDataset:
 MODEL_DATASET_MAPPING: dict[ModelTarget, ModelDataset] = {
     ModelTarget.TRANSACTION_FRAUD: ModelDataset(
         target=ModelTarget.TRANSACTION_FRAUD,
-        training_datasets=("paysim", "s40_synthetic"),
-        evaluation_only=("ieee_cis",),
+        training_datasets=("s40_synthetic",),
+        evaluation_only=("paysim", "ieee_cis"),
         rationale=(
-            "PaySim is mobile-money peer-to-peer transfer fraud, the closest "
-            "public analogue to S40's UPI setting, and spec §36.1 names it as the "
-            "starting point. S40 synthetic adds the India/UPI framing and the "
-            "multi-signal scenarios no public set contains. IEEE-CIS is "
-            "evaluation-only: spec §36.2 explicitly says not to assume a "
-            "PaySim-trained model generalizes to it, and its chargeback-derived "
-            "e-commerce label means something different from S40's fraud."
+            "CORRECTED IN PHASE 4. PaySim was originally listed as a training "
+            "source (spec §36.1 names it as the starting point), but it is "
+            "structurally incompatible with S40's feature space and has been "
+            "demoted to evaluation-only. S40 scores a payment by how far it "
+            "deviates from THAT USER's own history; in PaySim only ~0.15% of "
+            "originating accounts appear in more than one transaction, so every "
+            "row is effectively a cold start. Measured on PaySim-shaped data, "
+            "amount_zscore and amount_vs_average come out 100% null and "
+            "profile_is_cold is 1 for every row — a degenerate feature matrix. "
+            "PaySim also lacks device, location and wall-clock time, so only 6 "
+            "of the 13 model features are computable at all. "
+            "S40 synthetic therefore remains the only source that can express "
+            "per-user behavioural deviation. IEEE-CIS stays evaluation-only for "
+            "the separate reasons in spec §36.2 (chargeback-derived e-commerce "
+            "label) and remains licence-blocked."
         ),
         excluded={
             "credit_card_ulb": (

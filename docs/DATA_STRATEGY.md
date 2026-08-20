@@ -263,6 +263,60 @@ avoids a 307-hour download whose benefit is unproven.
 | 7 | Whether IEEE-CIS device features justify its download at all | UNDECIDED |
 | 8 | `location_distance` / `impossible_travel` / `ip_novelty` (spec §6.2) | Not computable — no geocoding or IP in any registered dataset. Recorded in `UNAVAILABLE_SPEC_FEATURES`, not fabricated |
 
+## 10a. Phase 4 addendum — two generator defects found and fixed
+
+Training the first real model exposed two artifacts in the synthetic
+generator that would have invalidated any model built on it. Both are now
+fixed and regression-tested (`ml/tests/test_synthetic_generator.py`):
+
+1. **Fraud clustered at the end of the timeline.** Every user's scenario row
+   (the only row that can be positive) sat at the end of *their* history, and
+   start dates were staggered over a narrower window than one history spans.
+   Result: the chronological split Phase 3 mandates gave train ~10 positives
+   and test a 17× higher fraud rate. Fixed via
+   `SyntheticConfig.user_start_spread_days`.
+
+2. **`user_transaction_count` was a label proxy.** With a fixed history
+   length per user, that one feature identified scenario rows almost
+   perfectly — PR-AUC 0.799 on its own. Fixed via
+   `SyntheticConfig.history_variation`; it now reaches 0.258 alone.
+
+Lesson worth carrying into Phase 5: on synthetic data, a *high* score is a
+prompt to audit the generator, not to celebrate. Both defects were found by
+inspecting feature importance, not by any metric looking wrong.
+
+## 10b. Phase 4 addendum — PaySim demoted to evaluation-only
+
+Phase 4 attempted to move S40 off synthetic-only data and found a blocker
+that **licensing is irrelevant to**:
+
+> Only ~0.15% of PaySim originating accounts (`nameOrig`) appear in more
+> than one transaction, against 83% of recipient accounts.
+
+S40 scores how far a payment deviates from **that user's own** history.
+With essentially unique originators, every PaySim row is a cold start.
+Measured by running PaySim-shaped data through the real S40 pipeline:
+`amount_zscore` and `amount_vs_average` come out **100% null**,
+`recipient_seen_before` has a single value, and `profile_is_cold` is 1 for
+every row. PaySim additionally has no device, no location and no
+wall-clock time, so only 6 of 13 canonical features exist at all.
+
+**Action taken:** `MODEL_DATASET_MAPPING` listed PaySim as a *training*
+source for the transaction fraud model. That was wrong and is corrected —
+PaySim is now **evaluation-only** for both detectors, with the reason
+recorded in `ml/datasets/preparation.py`.
+
+**The broader finding, stated plainly:** *no public dataset currently
+available to this project can express S40's per-user behavioural feature
+space.* PaySim lacks repeat users, ULB publishes no cardholder identifier,
+and IEEE-CIS is both licence-blocked and only has a card-number proxy for
+identity. This is an architectural consequence of S40 being a per-user
+deviation system, and it is the honest answer to "what real data did you
+train on?" — currently none, for a documented and specific reason.
+
+Acquisition status is otherwise unchanged: no dataset has been downloaded,
+no Kaggle credentials exist or were created, and IEEE-CIS remains PENDING.
+
 ## 11. What Phase 3 deliberately did not do
 
 No model training (spec §35.1's detectors are Phase 4/5). No fusion

@@ -1,0 +1,499 @@
+/* ============================================================================
+   AVARAN — DESIGN TOKENS
+   ----------------------------------------------------------------------------
+   THE single source of truth for colour, type, space, depth, and motion.
+   Components must never hardcode a hex, px shadow, blur radius, duration, or
+   z-index. If a value is needed and missing here, add it here first.
+
+   Structure:
+     1. PALETTE      raw hues. Never referenced by components directly.
+     2. SEMANTIC     what a colour MEANS. This is what components use.
+     3. SURFACE      background/foreground/border per theme.
+     4. TYPOGRAPHY   scale, weights, leading, tracking.
+     5. SPACE        spacing scale.
+     6. RADII
+     7. DEPTH        shadow / blur / glow.
+     8. MOTION       durations + easing.
+     9. LAYERS       z-index.
+
+   Colour space is OKLCH throughout: perceptually uniform, so a light-mode and
+   dark-mode pair at the same lightness actually *look* equally weighted.
+
+   LIGHT IS THE PRIMARY THEME. It is designed, not derived by inverting dark.
+   Its move: a cool neutral ground with warm off-white surfaces sitting on top.
+   That temperature shift creates elevation with barely any shadow, which is
+   what keeps it feeling calm and premium rather than flat-material.
+   ========================================================================== */
+
+:root {
+  /* ==========================================================================
+     1. PALETTE — raw hues. Components must NOT use these.
+     Reference accents from the brief: #00F0FF #7000FF #00FF9D #FF6B00.
+     Each has a light-mode-legible and a dark-mode-luminous variant, because
+     neon at full chroma is unreadable on white and muddy on obsidian.
+     ========================================================================== */
+
+  /* cyan — information */
+  --palette-cyan-100: oklch(0.96 0.03 210);
+  --palette-cyan-300: oklch(0.86 0.09 205);
+  --palette-cyan-500: oklch(0.70 0.14 210);
+  --palette-cyan-600: oklch(0.58 0.13 218);
+  --palette-cyan-700: oklch(0.48 0.11 222);
+  --palette-cyan-neon: oklch(0.88 0.16 195); /* ≈ #00F0FF */
+
+  /* violet — AI / assistant */
+  --palette-violet-100: oklch(0.95 0.03 300);
+  --palette-violet-300: oklch(0.80 0.12 298);
+  --palette-violet-500: oklch(0.62 0.21 296);
+  --palette-violet-600: oklch(0.52 0.24 295);
+  --palette-violet-700: oklch(0.44 0.22 295);
+  --palette-violet-neon: oklch(0.55 0.28 295); /* ≈ #7000FF */
+
+  /* green — safe / normal */
+  --palette-green-100: oklch(0.96 0.04 165);
+  --palette-green-300: oklch(0.84 0.12 163);
+  --palette-green-500: oklch(0.68 0.15 162);
+  --palette-green-600: oklch(0.56 0.13 163);
+  --palette-green-700: oklch(0.46 0.11 164);
+  --palette-green-neon: oklch(0.89 0.19 160); /* ≈ #00FF9D */
+
+  /* amber — caution / medium band */
+  --palette-amber-100: oklch(0.96 0.04 80);
+  --palette-amber-300: oklch(0.87 0.11 75);
+  --palette-amber-500: oklch(0.75 0.16 65);
+  --palette-amber-600: oklch(0.66 0.16 58);
+  --palette-amber-700: oklch(0.55 0.14 52);
+  --palette-amber-neon: oklch(0.72 0.20 45); /* ≈ #FF6B00 */
+
+  /* red — threat / high band */
+  --palette-red-100: oklch(0.95 0.03 25);
+  --palette-red-300: oklch(0.82 0.11 25);
+  --palette-red-500: oklch(0.63 0.21 25);
+  --palette-red-600: oklch(0.54 0.21 26);
+  --palette-red-700: oklch(0.45 0.18 27);
+
+  /* neutrals — cool ground */
+  --palette-neutral-0: oklch(1 0 0);
+  --palette-neutral-25: oklch(0.988 0.002 240);
+  --palette-neutral-50: oklch(0.975 0.003 240);
+  --palette-neutral-100: oklch(0.955 0.004 240);
+  --palette-neutral-200: oklch(0.915 0.005 240);
+  --palette-neutral-300: oklch(0.855 0.006 240);
+  --palette-neutral-400: oklch(0.700 0.008 240);
+  --palette-neutral-500: oklch(0.565 0.010 240);
+  --palette-neutral-600: oklch(0.455 0.012 245);
+  --palette-neutral-700: oklch(0.355 0.014 248);
+  --palette-neutral-800: oklch(0.255 0.016 250);
+  --palette-neutral-900: oklch(0.175 0.018 252);
+
+  /* warm off-whites — light-mode SURFACES (the temperature contrast) */
+  --palette-warm-0: oklch(1 0.002 85);
+  --palette-warm-25: oklch(0.993 0.004 85);
+  --palette-warm-50: oklch(0.986 0.006 84);
+  --palette-warm-100: oklch(0.972 0.007 83);
+
+  /* obsidian — dark-mode grounds. #050711 and #0A0D1D from the brief. */
+  --palette-obsidian-950: oklch(0.135 0.021 268); /* ≈ #050711 */
+  --palette-obsidian-900: oklch(0.178 0.028 266); /* ≈ #0A0D1D */
+  --palette-obsidian-800: oklch(0.228 0.030 264);
+  --palette-obsidian-700: oklch(0.288 0.032 262);
+  --palette-obsidian-600: oklch(0.355 0.030 260);
+
+  /* India accent — restrained. Accent ONLY: a hairline, a small mark, a
+     single emphasis. Never a tricolour theme, never decorative nationalism.
+     (docs/PRODUCT_DIRECTIVES.md §A, docs/UX_PRINCIPLES.md anti-patterns.) */
+  --palette-india-saffron: oklch(0.72 0.14 62);
+  --palette-india-green: oklch(0.55 0.11 152);
+  --palette-india-blue: oklch(0.45 0.13 252);
+
+  /* ==========================================================================
+     4. TYPOGRAPHY — shared across themes.
+     Headlines get room to breathe: tighter tracking, generous leading, and a
+     display face distinct from body. Minimal uppercase by design.
+     ========================================================================== */
+  --font-display: var(--font-outfit), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Signature face — ONE narrow role.
+     A high-contrast editorial serif used for a SINGLE word inside a
+     headline, never for body copy and never for more than a few words on
+     screen at once. Its job is to make one word land as deliberate; against
+     Outfit's geometric sans the contrast reads as considered rather than
+     decorative. If it ever appears in a paragraph, that is a defect. */
+  --font-signature: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
+  /* Devanagari is in the stack from day one — Hindi/Hinglish is a stated
+     product requirement and retrofitting type later is expensive. */
+  --font-indic: var(--font-noto-devanagari), var(--font-inter), sans-serif;
+
+  --text-2xs: 0.6875rem;  /* 11px — dense metadata only */
+  --text-xs: 0.75rem;     /* 12px */
+  --text-sm: 0.875rem;    /* 14px */
+  --text-base: 1rem;      /* 16px — body floor; never smaller for prose */
+  --text-lg: 1.125rem;    /* 18px */
+  --text-xl: 1.375rem;    /* 22px */
+  --text-2xl: 1.75rem;    /* 28px */
+  --text-3xl: 2.25rem;    /* 36px */
+  --text-4xl: 3rem;       /* 48px */
+  --text-5xl: 3.75rem;    /* 60px */
+  /* Hero-only, and RE-TUNED for the headline it actually sets.
+     The first calibration (clamp(3rem, 9.2vw, 8.5rem) — 132px at 1440) was
+     sized for a three-word headline in a single-column hero. The hero is now
+     two columns with a seven-word headline beside a live device preview; at
+     132px that ran to five lines and pushed the pull-quote off the fold. This
+     range tops out at 68px, which still makes the h1 the largest object on
+     the page by a wide margin while leaving the column room to hold a
+     complete thought. Reserved for a single h1 per page. */
+  --text-hero: clamp(2.5rem, 4.7vw, 4.25rem);
+
+  --leading-tight: 1.1;
+  --leading-snug: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.7;
+
+  --tracking-tighter: -0.03em;
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0em;
+  --tracking-wide: 0.02em;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* ==========================================================================
+     5. SPACE — 4px base, named so intent survives refactors.
+     ========================================================================== */
+  --space-0: 0rem;
+  --space-px: 0.0625rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --space-24: 6rem;
+  --space-32: 8rem;
+
+  /* ==========================================================================
+     6. RADII
+     ========================================================================== */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+  --radius-full: 9999px;
+
+  /* ==========================================================================
+     8. MOTION — shared. Durations short enough to feel instant, curves that
+     decelerate rather than bounce (this is a security product, not a toy).
+     ========================================================================== */
+  --duration-instant: 80ms;
+  --duration-fast: 140ms;
+  --duration-normal: 220ms;
+  --duration-slow: 360ms;
+  --duration-slower: 560ms;
+  --duration-theme: 300ms; /* light↔dark cross-fade */
+
+  /* AMBIENT LOOPS — a different class of duration from the UI scale above.
+     The scale tops out at 560ms because UI motion must finish before the user
+     wonders whether it will; these are continuous background loops with no
+     trigger and no completion the user waits on, so the constraint inverts:
+     slow enough that noticing the motion requires looking for it. Named, not
+     inlined, so "ambient" stays one decision rather than four magic numbers. */
+  --duration-orbit-rail: 28s;  /* phone-rail pendulum, one full there-and-back */
+  --duration-orbit-ring: 60s;  /* hero signal ring, one full revolution */
+
+  --ease-standard: cubic-bezier(0.2, 0, 0.1, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  /* Sine in-out. For PENDULUM motion only — a value that swings between two
+     extremes and back. --ease-in-out above is the strong UI curve: over a long
+     ambient swing it holds near each extreme and then rushes the middle, which
+     reads as a lurch rather than a pendulum. This is the standard easeInOutSine
+     and is the closest cubic-bezier to true harmonic motion. */
+  --ease-sine-in-out: cubic-bezier(0.37, 0, 0.63, 1);
+
+  /* ==========================================================================
+     9. LAYERS — every z-index in the product comes from here.
+     ========================================================================== */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 100;
+  --z-header: 200;
+  --z-overlay: 300;
+  --z-drawer: 400;
+  --z-modal: 500;
+  --z-popover: 600;
+  --z-toast: 700;
+  --z-tooltip: 800;
+  --z-max: 999;
+
+  /* ==========================================================================
+     7. DEPTH — blur is theme-independent; shadow/glow are re-declared per theme.
+     ========================================================================== */
+  --blur-none: 0px;
+  --blur-xs: 4px;
+  --blur-sm: 8px;
+  --blur-md: 16px;
+  --blur-lg: 28px;
+  --blur-xl: 48px;
+  --blur-2xl: 80px;
+
+  /* ==========================================================================
+     LIGHT THEME (default)
+     ========================================================================== */
+
+  /* 3. SURFACE — cool ground, warm surfaces. */
+  --background: var(--palette-neutral-50);
+  --background-subtle: var(--palette-neutral-100);
+  --foreground: var(--palette-neutral-900);
+
+  --surface: var(--palette-warm-0);
+  --surface-raised: var(--palette-warm-25);
+  --surface-sunken: var(--palette-neutral-100);
+  --surface-foreground: var(--palette-neutral-900);
+
+  --muted: var(--palette-neutral-100);
+  /* Darkened from neutral-500: measured 4.23:1 on --background, below the
+     4.5:1 AA floor for body text. */
+  --muted-foreground: oklch(0.520 0.012 245);
+
+  --border: oklch(0.885 0.006 240 / 0.9);
+  --border-strong: var(--palette-neutral-300);
+  --border-subtle: oklch(0.915 0.005 240 / 0.6);
+
+  --ring: var(--palette-cyan-600);
+
+  /* glass — a HIERARCHY tool. If every surface is glass, nothing reads as
+     elevated. Reserve for overlays and one focal panel per view. */
+  --glass-bg: oklch(1 0.002 85 / 0.72);
+  --glass-border: oklch(1 0 0 / 0.7);
+  --glass-blur: var(--blur-lg);
+
+  /* 2. SEMANTIC — what colour MEANS. Components use only these.
+     ------------------------------------------------------------------------
+     TWO TIERS, because WCAG sets two different bars and one colour cannot
+     honestly clear both without going muddy:
+
+       --x        vivid hue for FILLS, BORDERS, ICONS, CHARTS.
+                  Target ≥3:1 on surface (WCAG 1.4.11, non-text UI).
+       --x-text   darkened for TEXT on a light surface.
+                  Target ≥4.5:1 (WCAG 1.4.3, body text).
+
+     Measured in-browser: amber at full vividness tops out near 3.3:1 on
+     white. Forcing it to 4.5:1 turns it brown and kills the caution signal,
+     so the vivid token stays for fills and text gets its own value. In dark
+     mode the two tiers converge — the base hues already clear 6.5:1 there. */
+  --safe: var(--palette-green-600);
+  --safe-foreground: var(--palette-neutral-0);
+  --safe-subtle: var(--palette-green-100);
+  --safe-emphasis: var(--palette-green-700);
+  --safe-text: oklch(0.470 0.120 164);
+
+  --caution: var(--palette-amber-600);
+  --caution-foreground: var(--palette-neutral-0);
+  --caution-subtle: var(--palette-amber-100);
+  --caution-emphasis: var(--palette-amber-700);
+  --caution-text: oklch(0.455 0.125 52);
+
+  --threat: var(--palette-red-600);
+  --threat-foreground: var(--palette-neutral-0);
+  --threat-subtle: var(--palette-red-100);
+  --threat-emphasis: var(--palette-red-700);
+  --threat-text: var(--palette-red-600);
+
+  --info: var(--palette-cyan-600);
+  --info-foreground: var(--palette-neutral-0);
+  --info-subtle: var(--palette-cyan-100);
+  --info-emphasis: var(--palette-cyan-700);
+  --info-text: oklch(0.490 0.120 222);
+
+  --ai: var(--palette-violet-600);
+  --ai-foreground: var(--palette-neutral-0);
+  --ai-subtle: var(--palette-violet-100);
+  --ai-emphasis: var(--palette-violet-700);
+  --ai-text: var(--palette-violet-600);
+
+  --accent-india-saffron: var(--palette-india-saffron);
+  --accent-india-green: var(--palette-india-green);
+  --accent-india-blue: var(--palette-india-blue);
+
+  /* RISK BANDS — mirrors shared/s40_contracts.py `Band`. The UI renders
+     exactly these three; giving them their own tokens stops a component
+     reaching for a raw hue and drifting out of sync with the contract. */
+  --band-low: var(--safe);
+  --band-low-subtle: var(--safe-subtle);
+  --band-medium: var(--caution);
+  --band-medium-subtle: var(--caution-subtle);
+  --band-high: var(--threat);
+  --band-high-subtle: var(--threat-subtle);
+
+  /* DETECTOR STATUS — mirrors `Status` (ok / degraded / unavailable).
+     `unavailable` is deliberately neutral, never red: a detector that did not
+     run is unknown, not dangerous. */
+  --status-ok: var(--safe);
+  --status-degraded: var(--caution);
+  /* Lifted from neutral-400: measured 2.67:1, which failed even the 3:1
+     non-text floor. Still the quietest of the three — "did not run" must
+     recede — but now legible. */
+  --status-unavailable: oklch(0.560 0.012 245);
+
+  /* FACTOR DIRECTION — mirrors `Direction` on RiskFactor. */
+  --direction-increases: var(--threat);
+  --direction-decreases: var(--safe);
+
+  /* DETECTOR IDENTITY — mirrors `Component`. One stable hue per detector so
+     a signal is recognisable across the risk ring, breakdown, and timeline. */
+  --detector-transaction: var(--palette-cyan-600);
+  --detector-behaviour: var(--palette-violet-600);
+  --detector-device: var(--palette-amber-600);
+  --detector-voice: var(--palette-green-600);
+
+  /* 7. DEPTH (light) — shadows tinted with the ground hue, never pure black.
+     Pure black shadow on a cool ground reads as dirt.
+
+     REVISED after review: the first pass topped out at 5–10% alpha, which is
+     measurable in devtools and invisible on screen. On a near-white ground a
+     surface separates only if the shadow actually darkens the pixels beneath
+     it, so every step is now a three-layer stack — a tight contact shadow, a
+     mid falloff, and a wide ambient pool — with alphas roughly doubled. The
+     ratios between steps are unchanged, so relative hierarchy still reads;
+     only the absolute presence went up. */
+  --shadow-xs: 0 1px 2px oklch(0.255 0.016 250 / 0.08);
+  --shadow-sm: 0 1px 2px oklch(0.255 0.016 250 / 0.09), 0 2px 6px oklch(0.255 0.016 250 / 0.07);
+  --shadow-md:
+    0 1px 2px oklch(0.255 0.016 250 / 0.10),
+    0 3px 8px oklch(0.255 0.016 250 / 0.10),
+    0 8px 20px oklch(0.255 0.016 250 / 0.09);
+  --shadow-lg:
+    0 2px 4px oklch(0.255 0.016 250 / 0.11),
+    0 8px 18px oklch(0.255 0.016 250 / 0.13),
+    0 20px 44px oklch(0.255 0.016 250 / 0.13);
+  --shadow-xl:
+    0 3px 6px oklch(0.255 0.016 250 / 0.12),
+    0 14px 30px oklch(0.255 0.016 250 / 0.15),
+    0 34px 72px oklch(0.255 0.016 250 / 0.18);
+  --shadow-inset: inset 0 1px 0 oklch(1 0 0 / 0.7);
+
+  --glow-none: 0 0 0 0 transparent;
+  --glow-sm: 0 0 0 3px oklch(0.58 0.13 218 / 0.12);
+  --glow-md: 0 0 20px oklch(0.58 0.13 218 / 0.18);
+  --glow-lg: 0 0 40px oklch(0.58 0.13 218 / 0.22);
+  --glow-safe: 0 0 24px oklch(0.56 0.13 163 / 0.22);
+  --glow-caution: 0 0 24px oklch(0.66 0.16 58 / 0.24);
+  --glow-threat: 0 0 24px oklch(0.54 0.21 26 / 0.26);
+  --glow-ai: 0 0 24px oklch(0.52 0.24 295 / 0.24);
+}
+
+/* ============================================================================
+   DARK THEME — an equal-quality second theme, not an inversion.
+   Deep obsidian and midnight blue, glass surfaces, SELECTIVE glow.
+   Never black + neon everywhere: glow marks one thing that matters.
+   ========================================================================== */
+.dark {
+  --background: var(--palette-obsidian-950);
+  --background-subtle: var(--palette-obsidian-900);
+  --foreground: oklch(0.965 0.004 250);
+
+  --surface: var(--palette-obsidian-900);
+  --surface-raised: var(--palette-obsidian-800);
+  --surface-sunken: oklch(0.115 0.020 268);
+  --surface-foreground: oklch(0.965 0.004 250);
+
+  --muted: var(--palette-obsidian-800);
+  --muted-foreground: oklch(0.680 0.018 258);
+
+  --border: oklch(1 0 0 / 0.09);
+  --border-strong: oklch(1 0 0 / 0.16);
+  --border-subtle: oklch(1 0 0 / 0.05);
+
+  --ring: var(--palette-cyan-300);
+
+  --glass-bg: oklch(0.228 0.030 264 / 0.55);
+  --glass-border: oklch(1 0 0 / 0.10);
+  --glass-blur: var(--blur-lg);
+
+  /* Semantic colours lift in lightness and drop slightly in chroma so they
+     read as luminous rather than radioactive against obsidian. */
+  /* On obsidian the base hues already measure ≥9.7:1, so the text tier
+     collapses onto the base tier rather than inventing a second value. */
+  --safe: var(--palette-green-300);
+  --safe-foreground: var(--palette-obsidian-950);
+  --safe-subtle: oklch(0.56 0.13 163 / 0.18);
+  --safe-emphasis: var(--palette-green-neon);
+  --safe-text: var(--palette-green-300);
+
+  --caution: var(--palette-amber-300);
+  --caution-foreground: var(--palette-obsidian-950);
+  --caution-subtle: oklch(0.66 0.16 58 / 0.20);
+  --caution-emphasis: var(--palette-amber-neon);
+  --caution-text: var(--palette-amber-300);
+
+  --threat: var(--palette-red-300);
+  --threat-foreground: var(--palette-obsidian-950);
+  --threat-subtle: oklch(0.63 0.21 25 / 0.22);
+  --threat-emphasis: var(--palette-red-500);
+  --threat-text: var(--palette-red-300);
+
+  --info: var(--palette-cyan-300);
+  --info-foreground: var(--palette-obsidian-950);
+  --info-subtle: oklch(0.58 0.13 218 / 0.20);
+  --info-emphasis: var(--palette-cyan-neon);
+  --info-text: var(--palette-cyan-300);
+
+  --ai: var(--palette-violet-300);
+  --ai-foreground: var(--palette-obsidian-950);
+  --ai-subtle: oklch(0.62 0.21 296 / 0.22);
+  --ai-emphasis: var(--palette-violet-neon);
+  --ai-text: var(--palette-violet-300);
+
+  --accent-india-saffron: oklch(0.80 0.13 62);
+  --accent-india-green: oklch(0.72 0.12 152);
+  --accent-india-blue: oklch(0.70 0.12 252);
+
+  --band-low: var(--safe);
+  --band-low-subtle: var(--safe-subtle);
+  --band-medium: var(--caution);
+  --band-medium-subtle: var(--caution-subtle);
+  --band-high: var(--threat);
+  --band-high-subtle: var(--threat-subtle);
+
+  --status-ok: var(--safe);
+  --status-degraded: var(--caution);
+  /* Lifted from 0.520: measured 3.45:1, short of the 4.5:1 text floor. */
+  --status-unavailable: oklch(0.640 0.020 258);
+
+  --direction-increases: var(--threat);
+  --direction-decreases: var(--safe);
+
+  --detector-transaction: var(--palette-cyan-300);
+  --detector-behaviour: var(--palette-violet-300);
+  --detector-device: var(--palette-amber-300);
+  --detector-voice: var(--palette-green-300);
+
+  /* Dark shadows are near-opaque black — on obsidian, depth comes from
+     darkness plus a top highlight, not from soft grey. */
+  --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.30);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.35), 0 2px 6px oklch(0 0 0 / 0.28);
+  --shadow-md: 0 2px 4px oklch(0 0 0 / 0.38), 0 6px 16px oklch(0 0 0 / 0.34);
+  --shadow-lg: 0 4px 8px oklch(0 0 0 / 0.42), 0 12px 32px oklch(0 0 0 / 0.40);
+  --shadow-xl: 0 8px 16px oklch(0 0 0 / 0.46), 0 24px 56px oklch(0 0 0 / 0.46);
+  --shadow-inset: inset 0 1px 0 oklch(1 0 0 / 0.06);
+
+  --glow-sm: 0 0 0 3px oklch(0.86 0.09 205 / 0.18);
+  --glow-md: 0 0 20px oklch(0.86 0.09 205 / 0.24);
+  --glow-lg: 0 0 44px oklch(0.86 0.09 205 / 0.30);
+  --glow-safe: 0 0 28px oklch(0.84 0.12 163 / 0.30);
+  --glow-caution: 0 0 28px oklch(0.87 0.11 75 / 0.30);
+  --glow-threat: 0 0 28px oklch(0.82 0.11 25 / 0.32);
+  --glow-ai: 0 0 28px oklch(0.80 0.12 298 / 0.30);
+}

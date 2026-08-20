@@ -1,0 +1,1245 @@
+/* ============================================================================
+   AVARAN — CINEMATIC LANDING
+   ----------------------------------------------------------------------------
+   Scoped entirely to the landing route. `html.cinematic-page` is added by the
+   page component on mount and removed on unmount, so nothing here leaks into
+   the product surfaces (/design-system, /embed) which stay light-first per
+   docs/PRODUCT_DIRECTIVES.md §B. This is one deliberate dark marketing route,
+   not a theme change.
+
+   THREE TYPEFACES, THREE JOBS
+     Italiana         — editorial display headlines. Nowhere else.
+     Instrument Serif — italic pull-quotes. The emotional register, used twice.
+     Outfit           — all UI, data, labels, and the wordmark.
+   ========================================================================== */
+
+html.cinematic-page,
+html.cinematic-page body {
+  background: #000;
+  color: #fff;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html.cinematic-page body {
+  /* The whole page is empty scroll distance; every pixel of UI is fixed. */
+  min-height: 1500vh;
+  overflow-x: hidden;
+}
+html.cinematic-page ::-webkit-scrollbar {
+  display: none;
+  width: 0;
+}
+
+/* The custom cursor claims the pointer only once it has verified a fine
+   pointer, hover capability and no reduced-motion preference. */
+html.cinematic-page.has-cinematic-cursor,
+html.cinematic-page.has-cinematic-cursor a,
+html.cinematic-page.has-cinematic-cursor button {
+  cursor: none;
+}
+
+.cinematic {
+  --ink: #ffffff;
+  --ink-dim: rgba(255, 255, 255, 0.66);
+  --ink-faint: rgba(255, 255, 255, 0.4);
+  --ink-ghost: rgba(255, 255, 255, 0.22);
+  /* Hairlines only — dividers inside components. The full-viewport guide
+     grid this once drove has been removed; the background is now nothing but
+     atmosphere. */
+  --line: rgba(255, 255, 255, 0.11);
+  --line-strong: rgba(255, 255, 255, 0.2);
+
+  /* One accent, used for "live" and nothing else. */
+  --mint: #4ade9a;
+
+  /* Signal hues. Cool and metallic — no neon, no crypto gold. */
+  --sig-transaction: #6fd0e8;
+  --sig-behaviour: #a99bf5;
+  --sig-device: #e0b57e;
+  --sig-voice: #63dfb0;
+  --band-medium: #e0a458;
+  --band-low: #63dfb0;
+  --band-high: #e8776a;
+
+  --ease: cubic-bezier(0.05, 0.9, 0.1, 1);
+  --ease-soft: cubic-bezier(0.25, 1, 0.5, 1);
+
+  font-family: var(--font-outfit), system-ui, sans-serif;
+  color: var(--ink);
+}
+
+/* ── the stage ───────────────────────────────────────────────────────────── */
+
+.cinematic #stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  display: block;
+  outline: none;
+  opacity: 0;
+  transition: opacity 1.6s var(--ease-soft);
+}
+.cinematic #stage[data-ready="true"] {
+  opacity: 1;
+}
+
+.cinematic .overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* ── progress rail ───────────────────────────────────────────────────────── */
+
+.cinematic .progress-rail {
+  position: fixed;
+  right: 40px;
+  top: 50%;
+  transform: translate(50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  z-index: 6;
+}
+.cinematic .progress-dash {
+  width: 2px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cinematic .progress-fill {
+  display: block;
+  width: 100%;
+  background: var(--ink);
+  border-radius: 2px;
+  transition: height 0.3s var(--ease-soft);
+}
+
+/* ── header ──────────────────────────────────────────────────────────────── */
+
+.cinematic .chrome-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 76px;
+  padding: 0 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  z-index: 20;
+  pointer-events: auto;
+}
+.cinematic .brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--ink);
+}
+.cinematic .brand-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+}
+.cinematic .brand-rule {
+  width: 1px;
+  height: 11px;
+  background: var(--line-strong);
+}
+.cinematic .brand-sub {
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.cinematic .chrome-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.cinematic .nav-link {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  text-decoration: none;
+  transition: color 0.3s var(--ease-soft);
+}
+.cinematic .nav-link:hover {
+  color: var(--ink);
+}
+.cinematic .nav-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--ink-ghost);
+}
+.cinematic .cta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 22px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #000;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: transform 0.35s var(--ease-soft), background 0.35s var(--ease-soft);
+}
+.cinematic .cta-pill:hover {
+  transform: translateY(-2px);
+  background: #f1f1f1;
+}
+
+/* The single "live" indicator on the page. */
+.cinematic .live-dot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mint);
+  flex: none;
+  animation: live-pulse 2.4s infinite ease-in-out;
+}
+.cinematic .live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  background: rgba(74, 222, 154, 0.4);
+  animation: live-wave 2.4s infinite ease-in-out;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.85); box-shadow: 0 0 4px rgba(74,222,154,0.3); }
+  50%      { opacity: 1;    transform: scale(1.08); box-shadow: 0 0 12px rgba(74,222,154,0.85); }
+}
+@keyframes live-wave {
+  0%   { transform: scale(0.6); opacity: 0.8; }
+  100% { transform: scale(2.3); opacity: 0; }
+}
+
+/* ── sections ────────────────────────────────────────────────────────────── */
+
+.cinematic .stage-copy {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.cinematic .slide {
+  position: absolute;
+  left: 60px;
+  /* Clear of the brand plinth at the foot of the screen. */
+  bottom: 25vh;
+  width: min(46vw, 640px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.9s var(--ease-soft), visibility 0s linear 0.9s;
+}
+.cinematic .slide--wide {
+  width: min(64vw, 900px);
+}
+.cinematic .slide--center {
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(80vw, 900px);
+  text-align: center;
+  bottom: 30vh;
+}
+/* The closing beat is centred, which puts it over the coin. Rather than move
+   the coin out of its own final frame, the type gets a pool of shadow to sit
+   in — the coin stays behind it as a silhouette, which is the right reading
+   for a line about money you can no longer reach. */
+.cinematic .slide--center::before {
+  content: "";
+  position: absolute;
+  inset: -16% -22%;
+  background: radial-gradient(
+    62% 58% at 50% 44%,
+    rgba(0, 0, 0, 0.9) 0%,
+    rgba(0, 0, 0, 0.74) 46%,
+    transparent 100%
+  );
+  z-index: -1;
+  pointer-events: none;
+}
+
+.cinematic .slide.is-active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.9s var(--ease-soft), visibility 0s linear 0s;
+}
+
+/* ── typography ──────────────────────────────────────────────────────────── */
+
+.cinematic .display {
+  font-family: var(--font-italiana), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.02;
+  color: #fff8f0;
+  font-size: clamp(2.4rem, 5.4vw, 5.2rem);
+  margin: 0 0 1.1rem;
+}
+.cinematic .display--hero {
+  font-size: clamp(2.8rem, 6.6vw, 6.4rem);
+  line-height: 0.98;
+}
+.cinematic .display--sm {
+  font-size: clamp(2rem, 4vw, 3.6rem);
+}
+.cinematic .display--final {
+  font-size: clamp(2.6rem, 6vw, 5.6rem);
+}
+
+.cinematic .pull-quote {
+  font-family: var(--font-instrument-serif), Georgia, serif;
+  font-style: italic;
+  font-size: clamp(1.15rem, 1.9vw, 1.75rem);
+  line-height: 1.34;
+  color: var(--ink-dim);
+  margin: 0 0 1.8rem;
+  max-width: 34ch;
+}
+.cinematic .pull-quote--center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.cinematic .body {
+  font-size: 15.5px;
+  line-height: 1.72;
+  font-weight: 300;
+  color: var(--ink-dim);
+  max-width: 48ch;
+  margin: 0 0 1.6rem;
+}
+.cinematic .body strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+.cinematic .micro {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+  margin-top: 0.9rem;
+}
+
+.cinematic .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 1.6rem;
+}
+
+.cinematic .kicker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 1.4rem;
+}
+.cinematic .kicker-index {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.cinematic .kicker-rule {
+  width: 28px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+/* ── reveals ─────────────────────────────────────────────────────────────── */
+
+.cinematic .word-mask,
+.cinematic .letter-mask {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+.cinematic .word-mask {
+  padding-bottom: 0.16em;
+  margin-bottom: -0.16em;
+}
+.cinematic .word-inner {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(105%);
+  filter: blur(20px);
+  animation: word-rise 1.3s var(--ease) forwards;
+}
+@keyframes word-rise {
+  0%   { opacity: 0; transform: translateY(105%); filter: blur(20px); }
+  30%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+.cinematic .letter-inner {
+  display: inline-block;
+  opacity: 0;
+  transform: translateX(-105%);
+  filter: blur(20px);
+  animation: letter-slide 1.2s var(--ease) forwards;
+}
+@keyframes letter-slide {
+  0%   { opacity: 0; transform: translateX(-105%); filter: blur(20px); }
+  25%  { opacity: 1; }
+  100% { opacity: 1; transform: translateX(0); filter: blur(0); }
+}
+
+/* Reversible per-character blur-up, class-driven so a slide can replay. */
+.cinematic .blur-word {
+  display: inline-block;
+  white-space: nowrap;
+}
+.cinematic .blur-space {
+  display: inline;
+  white-space: pre;
+}
+.cinematic .blur-char {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(40px);
+  filter: blur(12px);
+  transition:
+    opacity 0.85s var(--ease-soft),
+    transform 0.85s var(--ease-soft),
+    filter 0.85s var(--ease-soft);
+}
+.cinematic .is-active .blur-char {
+  opacity: 1;
+  transform: translateY(0);
+  filter: blur(0);
+}
+
+/* Everything else inside a slide rises once the slide is live. */
+.cinematic .slide .body,
+.cinematic .slide .kicker,
+.cinematic .slide .eyebrow,
+.cinematic .slide .viz,
+.cinematic .slide .cta-row,
+.cinematic .slide .score-chip,
+.cinematic .slide .steps,
+.cinematic .slide .limits-grid,
+.cinematic .slide .case-strip,
+.cinematic .slide .signal-row,
+.cinematic .slide .console,
+.cinematic .slide .held-grid {
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 0.9s var(--ease-soft) 0.3s,
+    transform 0.9s var(--ease-soft) 0.3s;
+}
+.cinematic .slide.is-active .body,
+.cinematic .slide.is-active .kicker,
+.cinematic .slide.is-active .eyebrow,
+.cinematic .slide.is-active .viz,
+.cinematic .slide.is-active .cta-row,
+.cinematic .slide.is-active .score-chip,
+.cinematic .slide.is-active .steps,
+.cinematic .slide.is-active .limits-grid,
+.cinematic .slide.is-active .case-strip,
+.cinematic .slide.is-active .signal-row,
+.cinematic .slide.is-active .console,
+.cinematic .slide.is-active .held-grid {
+  opacity: 1;
+  transform: translateY(0);
+}
+.cinematic .slide .kicker,
+.cinematic .slide .eyebrow {
+  transition-delay: 0.05s;
+}
+
+/* ── buttons ─────────────────────────────────────────────────────────────── */
+
+.cinematic .cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 1.9rem;
+}
+.cinematic .cta-row--center {
+  justify-content: center;
+}
+.cinematic .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 0 28px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: transform 0.35s var(--ease-soft), background 0.35s var(--ease-soft),
+    border-color 0.35s var(--ease-soft), color 0.35s var(--ease-soft);
+}
+.cinematic .btn--solid {
+  background: var(--ink);
+  color: #000;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+.cinematic .btn--solid:hover {
+  transform: translateY(-2px);
+  background: #f1f1f1;
+}
+.cinematic .btn--ghost {
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.03);
+}
+.cinematic .btn--ghost:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.07);
+}
+.cinematic .btn--static {
+  cursor: default;
+}
+
+/* ── signal tags & score chips ───────────────────────────────────────────── */
+
+.cinematic .signal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 1.9rem;
+}
+.cinematic .signal-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.7s var(--ease-soft), transform 0.7s var(--ease-soft);
+}
+.cinematic .signal-tag[data-on="1"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+.cinematic .signal-tag-bar {
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--sig);
+}
+
+.cinematic .score-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 1.4rem;
+  padding: 10px 18px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.cinematic .score-chip-bar {
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--sig);
+}
+.cinematic .score-chip-label {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.cinematic .score-chip-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* ── data visualisations ─────────────────────────────────────────────────── */
+
+.cinematic .viz {
+  margin: 1.6rem 0 0;
+}
+.cinematic .viz svg {
+  display: block;
+  width: 100%;
+  height: 92px;
+}
+.cinematic .viz-bar {
+  fill: color-mix(in srgb, var(--sig-transaction) 46%, transparent);
+  transform: scaleY(0);
+  transition: transform 0.8s var(--ease-soft);
+}
+.cinematic .viz-bar[data-on="1"] {
+  transform: scaleY(1);
+}
+.cinematic .viz-bar--flag {
+  fill: var(--band-medium);
+}
+.cinematic .viz-bar--behaviour {
+  fill: color-mix(in srgb, var(--sig-behaviour) 42%, transparent);
+}
+.cinematic .viz-bar--behaviour-hi {
+  fill: var(--sig-behaviour);
+}
+.cinematic .viz-baseline {
+  stroke: rgba(255, 255, 255, 0.26);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.cinematic .viz-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.cinematic .viz-caption em {
+  font-style: normal;
+  color: var(--ink);
+}
+.cinematic .viz-flag {
+  color: var(--band-medium);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cinematic .viz-note {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-ghost);
+}
+
+.cinematic .fact-list,
+.cinematic .phrase-list,
+.cinematic .fusion-list,
+.cinematic .steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cinematic .fact-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+  opacity: 0;
+  transform: translateX(-12px);
+  transition: opacity 0.7s var(--ease-soft), transform 0.7s var(--ease-soft);
+}
+.cinematic .fact-row[data-on="1"] {
+  opacity: 1;
+  transform: translateX(0);
+}
+.cinematic .fact-key { color: var(--ink-faint); }
+.cinematic .fact-val { font-weight: 500; }
+.cinematic .fact-val--warn { color: var(--band-medium); }
+.cinematic .fact-val--ok { color: var(--sig-voice); }
+
+.cinematic .phrase-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.cinematic .phrase {
+  padding: 8px 15px;
+  border: 1px solid color-mix(in srgb, var(--sig-voice) 30%, transparent);
+  background: color-mix(in srgb, var(--sig-voice) 7%, transparent);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+  opacity: 0;
+  transform: translateY(12px) scale(0.96);
+  transition: opacity 0.8s var(--ease-soft), transform 0.8s var(--ease-soft);
+}
+.cinematic .phrase[data-on="1"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.cinematic .unavailable-note {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.8s var(--ease-soft), transform 0.8s var(--ease-soft);
+}
+.cinematic .unavailable-note[data-on="1"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+.cinematic .unavailable-tag {
+  display: inline-block;
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 8px;
+}
+.cinematic .unavailable-note p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+.cinematic .unavailable-note strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.cinematic .fusion-row {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr 5rem;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 0;
+  opacity: 0;
+  transform: translateX(-12px);
+  transition: opacity 0.7s var(--ease-soft), transform 0.7s var(--ease-soft);
+}
+.cinematic .fusion-row[data-on="1"] {
+  opacity: 1;
+  transform: translateX(0);
+}
+.cinematic .fusion-key {
+  font-size: 12.5px;
+  color: var(--ink-dim);
+}
+.cinematic .fusion-track {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.cinematic .fusion-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  width: 0;
+  transition: width 1s var(--ease-soft);
+}
+.cinematic .fusion-val {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+}
+.cinematic .fusion-val.is-na {
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-ghost);
+}
+.cinematic .fusion-total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.8s var(--ease-soft), transform 0.8s var(--ease-soft);
+}
+.cinematic .fusion-total[data-on="1"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+.cinematic .fusion-score {
+  font-family: var(--font-italiana), serif;
+  font-size: 3.4rem;
+  line-height: 1;
+  color: #fff8f0;
+}
+.cinematic .fusion-outof {
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+.cinematic .band {
+  margin-left: auto;
+  padding: 6px 13px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.cinematic .band--medium {
+  background: color-mix(in srgb, var(--band-medium) 22%, transparent);
+  color: var(--band-medium);
+  border: 1px solid color-mix(in srgb, var(--band-medium) 40%, transparent);
+}
+
+/* ── steps, limits, case, console ────────────────────────────────────────── */
+
+.cinematic .steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 1.8rem;
+}
+.cinematic .step {
+  display: grid;
+  grid-template-columns: 3.2rem 1fr;
+  gap: 18px;
+  padding: 20px 0;
+  border-top: 1px solid var(--line);
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.8s var(--ease-soft), transform 0.8s var(--ease-soft);
+}
+.cinematic .step[data-on="1"] { opacity: 1; transform: translateY(0); }
+.cinematic .step-n {
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  padding-top: 3px;
+}
+.cinematic .step-body { display: flex; flex-direction: column; gap: 7px; }
+.cinematic .step-body strong {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.cinematic .step-body span {
+  font-size: 13.5px;
+  line-height: 1.65;
+  font-weight: 300;
+  color: var(--ink-dim);
+}
+
+.cinematic .limits-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  margin-top: 1.8rem;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.cinematic .limit {
+  background: #050505;
+  padding: 22px;
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.8s var(--ease-soft), transform 0.8s var(--ease-soft);
+}
+.cinematic .limit[data-on="1"] { opacity: 1; transform: translateY(0); }
+.cinematic .limit h3 {
+  margin: 0 0 8px;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.cinematic .limit p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  font-weight: 300;
+  color: var(--ink-dim);
+}
+
+.cinematic .case-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 1.6rem;
+  padding: 15px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.cinematic .case-tag {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.cinematic .case-pill {
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.cinematic .case-meta { font-size: 12px; color: var(--ink-faint); }
+
+.cinematic .console {
+  margin-top: 1.8rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(10px);
+}
+.cinematic .console-head,
+.cinematic .console-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.7fr 0.9fr 1fr;
+  gap: 14px;
+  padding: 13px 20px;
+  align-items: center;
+}
+.cinematic .console-head {
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-ghost);
+  border-bottom: 1px solid var(--line);
+}
+.cinematic .console-row {
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.7s var(--ease-soft), transform 0.7s var(--ease-soft);
+}
+.cinematic .console-row[data-on="1"] { opacity: 1; transform: translateY(0); }
+.cinematic .console-row:last-of-type { border-bottom: none; }
+.cinematic .mono {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.cinematic .dim { color: var(--ink-faint); }
+.cinematic .console-score {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cinematic .console-score.band--medium { color: var(--band-medium); background: none; border: none; padding: 0; }
+.cinematic .console-score.band--low { color: var(--band-low); }
+.cinematic .console-score.band--high { color: var(--band-high); }
+.cinematic .console-status { font-size: 12px; color: var(--ink-dim); }
+.cinematic .console .viz-note { padding: 12px 20px 14px; margin: 0; }
+
+/* ── held payment ────────────────────────────────────────────────────────── */
+
+.cinematic .held-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 48px;
+  align-items: center;
+}
+.cinematic .held-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 1.6rem;
+}
+.cinematic .phone {
+  --phone-w: 300px;
+  --phone-scale: 0.72;
+  width: calc(390px * var(--phone-scale) + 22px);
+  padding: 11px;
+  border-radius: 40px;
+  background: #16181c;
+  box-shadow: 0 50px 90px -50px rgba(0, 0, 0, 0.95),
+    0 0 0 1px rgba(255, 255, 255, 0.07);
+  opacity: 0;
+  transform: translateY(28px) rotateY(-8deg) rotateX(3deg);
+  transform-style: preserve-3d;
+  transition: opacity 1.1s var(--ease-soft) 0.25s,
+    transform 1.4s var(--ease-soft) 0.25s;
+}
+.cinematic .phone[data-on="1"] {
+  opacity: 1;
+  transform: translateY(0) rotateY(-8deg) rotateX(3deg);
+}
+.cinematic .phone-bezel { position: relative; }
+.cinematic .phone-notch {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 42px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  z-index: 1;
+}
+.cinematic .phone-screen {
+  overflow: hidden;
+  border-radius: 30px;
+  background: #fff;
+  width: calc(390px * var(--phone-scale));
+  height: calc(760px * var(--phone-scale));
+}
+.cinematic .phone-viewport {
+  width: 390px;
+  height: 760px;
+  border: 0;
+  transform: scale(var(--phone-scale));
+  transform-origin: top left;
+}
+
+/* ── footer chrome + wordmark ────────────────────────────────────────────── */
+
+.cinematic .chrome-footer {
+  position: fixed;
+  transition: opacity 0.6s var(--ease-soft);
+  left: 60px;
+  right: 60px;
+  bottom: calc(9vw + 26px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  z-index: 14;
+  pointer-events: none;
+}
+
+.cinematic .footer-lockup {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.cinematic .footer-indic {
+  font-family: var(--font-noto-devanagari), sans-serif;
+  font-size: 14px;
+  color: var(--ink-faint);
+}
+.cinematic .footer-copy { font-size: 11.5px; color: var(--ink-ghost); }
+
+.cinematic .wordmark-wrap {
+  position: fixed;
+  transition: opacity 0.6s var(--ease-soft);
+  left: 0;
+  right: 0;
+  bottom: 14px;
+  display: flex;
+  justify-content: center;
+  z-index: 13;
+  pointer-events: none;
+}
+.cinematic .wordmark {
+  display: block;
+  font-size: 17.4vw;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 0.78;
+  color: #fff;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
+.cinematic .sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── cursor ──────────────────────────────────────────────── */
+
+/* Two silent elements. The dot is the cursor and never lags; the ring trails
+   and opens over anything clickable. There is no caption and no card. */
+.cinematic .cursor-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99999;
+}
+.cinematic .cursor-dot,
+.cinematic .cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.cinematic .cursor-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+  z-index: 2;
+}
+.cinematic .cursor-ring {
+  width: 42px;
+  height: 42px;
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+  z-index: 1;
+  transition: border-color 0.4s var(--ease-soft), background 0.4s var(--ease-soft);
+}
+.cinematic .cursor-ring[data-state="open"] {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ── responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .cinematic .slide,
+  .cinematic .slide--wide { width: min(72vw, 640px); }
+  .cinematic .held-grid { grid-template-columns: 1fr; gap: 28px; }
+  .cinematic .phone { --phone-scale: 0.56; }
+}
+
+@media (max-width: 860px) {
+  .cinematic .chrome-header { padding: 0 20px; }
+  .cinematic .chrome-nav { display: none; }
+  /* "UPI fraud-risk shield" wrapped to four lines beside the mark. The
+     subtitle is chrome; the mark is not. */
+  .cinematic .brand-rule,
+  .cinematic .brand-sub { display: none; }
+  .cinematic .cta-pill { font-size: 9.5px; padding: 10px 16px; }
+
+  /* A scrim under the copy band. Belt and braces alongside aiming the camera
+     high: whatever the orbit is doing, the words always have ground beneath
+     them and never read against bare metal. */
+  .cinematic .stage-copy::before {
+    content: "";
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Taller and opaque sooner. At 74vh with a late falloff the eyebrow —
+       the highest and smallest line in the mobile copy band — was still
+       sitting on bare metal. */
+    height: 84vh;
+    background: linear-gradient(
+      to top,
+      #000 0%,
+      rgba(0, 0, 0, 0.97) 34%,
+      rgba(0, 0, 0, 0.86) 56%,
+      rgba(0, 0, 0, 0.5) 78%,
+      transparent 100%
+    );
+    pointer-events: none;
+  }
+  .cinematic .progress-rail { right: 18px; gap: 5px; }
+  .cinematic .progress-dash { height: 14px; }
+
+  /* Copy moves to a full-width band at the foot of the screen so it can never
+     sit on top of the coin, which stays centred behind it. */
+  .cinematic .slide,
+  .cinematic .slide--wide,
+  .cinematic .slide--center {
+    left: 24px;
+    right: 24px;
+    width: auto;
+    max-width: none;
+    transform: none;
+    bottom: calc(19vw + 96px);
+    text-align: left;
+  }
+  .cinematic .slide--center { text-align: center; }
+  .cinematic .display { font-size: clamp(1.9rem, 8vw, 2.9rem); }
+  .cinematic .display--hero { font-size: clamp(2.1rem, 9.4vw, 3.3rem); }
+  .cinematic .display--sm,
+  .cinematic .display--final { font-size: clamp(1.7rem, 7.4vw, 2.6rem); }
+  .cinematic .pull-quote { font-size: 1.05rem; }
+  .cinematic .body { font-size: 14px; }
+  .cinematic .limits-grid { grid-template-columns: 1fr; }
+  .cinematic .console-head { display: none; }
+  .cinematic .console-row { grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+  .cinematic .fusion-row { grid-template-columns: 6.5rem 1fr 4rem; gap: 10px; }
+  .cinematic .chrome-footer { display: none; }
+  .cinematic .wordmark { font-size: 19vw; }
+  .cinematic .phone { --phone-scale: 0.52; margin: 0 auto; }
+}
+
+/* ── reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .cinematic .word-inner,
+  .cinematic .letter-inner {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+  .cinematic .blur-word {
+  display: inline-block;
+  white-space: nowrap;
+}
+.cinematic .blur-space {
+  display: inline;
+  white-space: pre;
+}
+.cinematic .blur-char {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    transition: none;
+  }
+  .cinematic .live-dot,
+  .cinematic .live-dot::after { animation: none; }
+  .cinematic .live-dot::after { opacity: 0; }
+  .cinematic .slide .body,
+  .cinematic .slide .kicker,
+  .cinematic .slide .eyebrow,
+  .cinematic .slide .viz,
+  .cinematic .slide .cta-row,
+  .cinematic .slide .score-chip,
+  .cinematic .slide .steps,
+  .cinematic .slide .limits-grid,
+  .cinematic .slide .case-strip,
+  .cinematic .slide .signal-row,
+  .cinematic .slide .console,
+  .cinematic .slide .held-grid,
+  .cinematic .phone,
+  .cinematic .step,
+  .cinematic .limit,
+  .cinematic .fact-row,
+  .cinematic .phrase,
+  .cinematic .fusion-row,
+  .cinematic .fusion-total,
+  .cinematic .console-row,
+  .cinematic .signal-tag,
+  .cinematic .unavailable-note {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .cinematic .viz-bar { transform: scaleY(1); transition: none; }
+  .cinematic .fusion-fill { transition: none; }
+}

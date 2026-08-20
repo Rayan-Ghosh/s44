@@ -22,6 +22,12 @@ Risk Fusion layer:
 
 ## 2. Transaction fraud model
 
+> **IMPLEMENTED in Phase 4.** See [`docs/FRAUD_MODEL_CARD.md`](FRAUD_MODEL_CARD.md)
+> for measured metrics, limitations and failure modes. Trained and evaluated
+> on **S40 synthetic data only** — no public dataset was available under the
+> project's data-governance rules, so the reported numbers are NOT evidence
+> of real-world accuracy. Train with `python -m ml.training.train_fraud`.
+
 **CONFIRMED** (spec §9, §39):
 - Model: XGBoost (recommended first), LightGBM as alternative.
 - Input: transaction + device + behaviour features (amount,
@@ -40,6 +46,13 @@ Risk Fusion layer:
 — spec says "tune class weighting" (§51) without prescribing values.
 
 ## 3. Behaviour / anomaly model
+
+> **IMPLEMENTED in Phase 4.** See [`docs/ANOMALY_MODEL_CARD.md`](ANOMALY_MODEL_CARD.md).
+> Isolation Forest fitted on non-fraud rows, output normalized to [0,1],
+> and it **refuses to score cold-start users** rather than imputing a
+> baseline. Train with `python -m ml.training.train_anomaly`.
+> Measured test ROC-AUC 0.958 / PR-AUC 0.666 on synthetic data — a weaker
+> signal than the fraud model, as expected for an unsupervised detector.
 
 **CONFIRMED** (spec §10, §40):
 - Model: Isolation Forest initially; Autoencoder as an optional later

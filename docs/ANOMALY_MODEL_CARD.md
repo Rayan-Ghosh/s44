@@ -137,7 +137,9 @@ refusal occurs on the synthetic evaluation data.
 
 - No hyperparameter search was performed, so there is no alternative
   configuration to compare against (recorded as skipped, §5).
-- No per-scenario breakdown of anomaly scores is stored.
+- No per-scenario breakdown of anomaly scores is stored **in the
+  artifact**. One has since been measured and is recorded in §12 (spec
+  §38 Scenario F); those numbers live in this document only.
 - No inference latency benchmark is stored.
 - No claim of real-world separation performance — see §1.
 
@@ -159,3 +161,110 @@ PaySim has ~0.15% repeat originators (near-total cold start), ULB
 publishes no cardholder identifier, and IEEE-CIS remains licence-blocked.
 Reported separation measures behaviour the synthetic generator produced,
 not real-world anomaly-detection performance.
+
+## 12. Spec §38 Scenario F — CONFIRMED, measured 2026-08-16
+
+**Question:** does a *legitimate* high-value transaction get flagged as
+anomalous merely because it is large?
+
+**Status:** measured, not stored in the artifact. Scored the shipped
+`v20260815-121311` model over the synthetic data through the real
+inference path (`BehaviourAnomalyDetector.predict_batch`), honouring the
+cold-start refusal — unscorable rows are counted, never forced to a score.
+Generator config matches the artifact's `training_config.synthetic`
+(seed 40, users 800, history_per_user 25).
+
+Population: **scenario rows only** (`is_history == False`) — the rows where
+a scenario actually manifests. Primary figures are **held-out
+(validation + test)**; the train split is reported separately as in-sample.
+
+### 12.1 Group comparison — held-out (validation + test), 419 scenario rows
+
+| Group | n | scored | refused | mean | median | ≥0.3 | ≥0.5 | ≥0.7 | ≥0.9 | mean amount | mean `amount_zscore` |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **LEGITIMATE_HIGH_VALUE** | 31 | 31 | 0 | **0.494** | 0.469 | 1.00 | 0.39 | 0.03 | **0.00** | ₹10,431 | **2.06** |
+| Other legitimate¹ | 127 | 127 | 0 | 0.555 | 0.647 | 0.74 | 0.52 | 0.36 | 0.31 | ₹3,481 | 5.24 |
+| **Amount-heavy fraud²** | 55 | 55 | 0 | **0.950** | 1.000 | 1.00 | 1.00 | 1.00 | **0.71** | ₹16,180 | **42.48** |
+| Other fraud³ | 206 | 206 | 0 | 0.855 | 1.000 | 0.90 | 0.90 | 0.84 | 0.65 | ₹3,624 | 6.77 |
+
+¹ `LEGITIMATE_ROUTINE`, `NEW_RECIPIENT`, `UNUSUAL_TIME`, `FALSE_POSITIVE`
+² `UNUSUAL_AMOUNT`, `SOCIAL_ENGINEERING`
+³ `NEW_DEVICE`, `VELOCITY_SPIKE`, `WEAK_SIGNAL_COMBINATION`
+
+`LEGITIMATE_HIGH_VALUE` distribution detail: p25 **0.445**, p75 **0.530**,
+**max 0.747**. No row in this group reached 0.9.
+
+**Cold start:** 0 refusals in every group. Scenario rows always follow a
+full history by construction, so the refusal path (§8) is not exercised
+by this test — its behaviour is covered separately.
+
+### 12.2 Per-scenario — held-out
+
+| Scenario | Label | n | mean | median | mean amount | mean `amount_zscore` |
+|---|---|---|---|---|---|---|
+| `FALSE_POSITIVE` | legit | 39 | 1.000 | 1.000 | ₹8,280 | 16.81 |
+| `SOCIAL_ENGINEERING` | fraud | 28 | 1.000 | 1.000 | ₹13,540 | 38.29 |
+| `WEAK_SIGNAL_COMBINATION` | fraud | 35 | 1.000 | 1.000 | ₹8,172 | 20.56 |
+| `UNUSUAL_AMOUNT` | fraud | 27 | 0.898 | 0.881 | ₹18,917 | 46.81 |
+| `VELOCITY_SPIKE` | fraud | 138 | 0.848 | 1.000 | ₹1,970 | 1.73 |
+| `NEW_DEVICE` | fraud | 33 | 0.732 | 0.722 | ₹5,715 | 13.23 |
+| `NEW_RECIPIENT` | legit | 27 | 0.701 | 0.677 | ₹1,248 | 0.21 |
+| **`LEGITIMATE_HIGH_VALUE`** | **legit** | **31** | **0.494** | **0.469** | **₹10,431** | **2.06** |
+| `UNUSUAL_TIME` | legit | 27 | 0.350 | 0.347 | ₹1,175 | 0.02 |
+| `LEGITIMATE_ROUTINE` | legit | 34 | 0.092 | 0.040 | ₹1,580 | 0.10 |
+
+### 12.3 In-sample check (train split, 781 scenario rows)
+
+`LEGITIMATE_HIGH_VALUE` n=49: mean **0.494**, median 0.463, bands
+1.00 / 0.27 / 0.08 / **0.00**. Amount-heavy fraud n=105: mean **0.942**,
+≥0.9 in 0.65. Held-out and in-sample agree closely (LHV mean 0.494 in
+both), so the held-out result is not an artefact of the small held-out
+sample.
+
+### 12.4 Verdict — plainly stated
+
+**The model separates "large but normal for context" from "large and
+anomalous." It does not conflate them.**
+
+The decisive evidence is that absolute size is held roughly constant while
+the scores diverge sharply:
+
+| | `LEGITIMATE_HIGH_VALUE` | Amount-heavy fraud |
+|---|---|---|
+| Mean amount | ₹10,431 | ₹16,180 (same order of magnitude) |
+| Mean `amount_zscore` | **2.06** | **42.48** (≈20×) |
+| Mean anomaly score | **0.494** | **0.950** |
+| Fraction ≥ 0.9 | **0.00** | **0.71** |
+
+Both groups are large in rupee terms, yet none of the 31 legitimate
+high-value rows reached the top band while 71% of amount-heavy fraud did.
+The model is keying on **deviation from the user's own history**
+(`amount_zscore`), not on absolute size — which is exactly what spec §38
+Scenario F requires, and it works because the generator gives these users
+a history that already contains comparable large payments.
+
+**Two honest qualifications:**
+
+1. **It is not treated as fully routine.** At mean 0.494 it sits well
+   above `LEGITIMATE_ROUTINE` (0.092) — roughly 5× elevated, and every
+   row exceeds 0.3. Some elevation is defensible (a ₹10k payment genuinely
+   is less typical than a ₹1.6k one, and `amount_zscore` ≈ 2 confirms a
+   mild real deviation), but the score is **not** near-zero and a
+   downstream consumer must not read "legitimate" from a low value alone.
+
+2. **The "other legitimate" group mean (0.555) exceeds
+   `LEGITIMATE_HIGH_VALUE` (0.494)**, so the headline group comparison
+   understates the result. That is driven by `FALSE_POSITIVE` (1.000) and
+   `NEW_RECIPIENT` (0.701) — `FALSE_POSITIVE` is *designed* to look
+   suspicious while being legitimate, so its top score is intended
+   behaviour, not a defect. The per-scenario table (§12.2) is the more
+   informative view.
+
+**No pass/fail threshold is asserted.** The bands above are illustrative
+cut-points for reading the distribution only; per §6 this detector defines
+no operating threshold (`selected_threshold = -1.0`), and choosing one is
+the Phase 6 fusion layer's responsibility.
+
+**Sample-size caveat:** 31 held-out `LEGITIMATE_HIGH_VALUE` rows (49
+in-sample). Directional, not precise. **Synthetic-data caveat:** per §1
+and §11, this characterises the S40 generator, not real-world behaviour.

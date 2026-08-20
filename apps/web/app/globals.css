@@ -1,0 +1,1009 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "./styles/tokens.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================================
+   TAILWIND THEME MAPPING
+   ----------------------------------------------------------------------------
+   Exposes the tokens in styles/tokens.css as Tailwind utilities. This file
+   maps; it does NOT define values. Every value lives in tokens.css.
+   ========================================================================== */
+@theme inline {
+  /* --- type ------------------------------------------------------------- */
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --font-indic: var(--font-indic);
+  --font-heading: var(--font-display);
+  --font-signature: var(--font-signature);
+
+  --text-2xs: var(--text-2xs);
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-2xl: var(--text-2xl);
+  --text-3xl: var(--text-3xl);
+  --text-4xl: var(--text-4xl);
+  --text-5xl: var(--text-5xl);
+  --text-hero: var(--text-hero);
+
+  --leading-tight: var(--leading-tight);
+  --leading-snug: var(--leading-snug);
+  --leading-normal: var(--leading-normal);
+  --leading-relaxed: var(--leading-relaxed);
+
+  --tracking-tighter: var(--tracking-tighter);
+  --tracking-tight: var(--tracking-tight);
+  --tracking-normal: var(--tracking-normal);
+  --tracking-wide: var(--tracking-wide);
+
+  /* --- surfaces --------------------------------------------------------- */
+  --color-background: var(--background);
+  --color-background-subtle: var(--background-subtle);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
+  --color-ring: var(--ring);
+  --color-glass: var(--glass-bg);
+  --color-glass-border: var(--glass-border);
+
+  /* --- semantic ---------------------------------------------------------
+     Two tiers: `-text` for type (AA 4.5:1), base for fills/icons (3:1).
+     Use `text-safe-text`, not `text-safe`, whenever it is actual copy. */
+  --color-safe: var(--safe);
+  --color-safe-foreground: var(--safe-foreground);
+  --color-safe-subtle: var(--safe-subtle);
+  --color-safe-emphasis: var(--safe-emphasis);
+  --color-safe-text: var(--safe-text);
+
+  --color-caution: var(--caution);
+  --color-caution-foreground: var(--caution-foreground);
+  --color-caution-subtle: var(--caution-subtle);
+  --color-caution-emphasis: var(--caution-emphasis);
+  --color-caution-text: var(--caution-text);
+
+  --color-threat: var(--threat);
+  --color-threat-foreground: var(--threat-foreground);
+  --color-threat-subtle: var(--threat-subtle);
+  --color-threat-emphasis: var(--threat-emphasis);
+  --color-threat-text: var(--threat-text);
+
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-emphasis: var(--info-emphasis);
+  --color-info-text: var(--info-text);
+
+  --color-ai: var(--ai);
+  --color-ai-foreground: var(--ai-foreground);
+  --color-ai-subtle: var(--ai-subtle);
+  --color-ai-emphasis: var(--ai-emphasis);
+  --color-ai-text: var(--ai-text);
+
+  --color-india-saffron: var(--accent-india-saffron);
+  --color-india-green: var(--accent-india-green);
+  --color-india-blue: var(--accent-india-blue);
+
+  /* --- contract-aligned (shared/s40_contracts.py) ------------------------ */
+  --color-band-low: var(--band-low);
+  --color-band-low-subtle: var(--band-low-subtle);
+  --color-band-medium: var(--band-medium);
+  --color-band-medium-subtle: var(--band-medium-subtle);
+  --color-band-high: var(--band-high);
+  --color-band-high-subtle: var(--band-high-subtle);
+
+  --color-status-ok: var(--status-ok);
+  --color-status-degraded: var(--status-degraded);
+  --color-status-unavailable: var(--status-unavailable);
+
+  --color-direction-increases: var(--direction-increases);
+  --color-direction-decreases: var(--direction-decreases);
+
+  --color-detector-transaction: var(--detector-transaction);
+  --color-detector-behaviour: var(--detector-behaviour);
+  --color-detector-device: var(--detector-device);
+  --color-detector-voice: var(--detector-voice);
+
+  /* --- shadcn compatibility -------------------------------------------- */
+  /* shadcn primitives ship referencing these names. Pointing them at Avaran
+     tokens means installed components inherit the design system for free
+     instead of carrying a second, competing palette. */
+  --color-card: var(--surface);
+  --color-card-foreground: var(--surface-foreground);
+  --color-popover: var(--surface-raised);
+  --color-popover-foreground: var(--surface-foreground);
+  --color-primary: var(--info);
+  --color-primary-foreground: var(--info-foreground);
+  --color-secondary: var(--muted);
+  --color-secondary-foreground: var(--foreground);
+  --color-accent: var(--muted);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--threat);
+  --color-input: var(--border);
+
+  /* --- radii ------------------------------------------------------------ */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-3xl: var(--radius-3xl);
+  --radius-full: var(--radius-full);
+
+  /* --- depth ------------------------------------------------------------ */
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+
+  --blur-xs: var(--blur-xs);
+  --blur-sm: var(--blur-sm);
+  --blur-md: var(--blur-md);
+  --blur-lg: var(--blur-lg);
+  --blur-xl: var(--blur-xl);
+  --blur-2xl: var(--blur-2xl);
+
+  /* --- motion ----------------------------------------------------------- */
+  --ease-standard: var(--ease-standard);
+  --ease-out: var(--ease-out);
+  --ease-in: var(--ease-in);
+  --ease-in-out: var(--ease-in-out);
+  --ease-spring: var(--ease-spring);
+  --ease-sine-in-out: var(--ease-sine-in-out);
+
+  /* --- breakpoints ------------------------------------------------------ */
+  --breakpoint-xs: 24rem;
+  --breakpoint-sm: 40rem;
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
+  --breakpoint-xl: 80rem;
+  --breakpoint-2xl: 96rem;
+}
+
+/* ============================================================================
+   UTILITIES built from tokens (no magic numbers)
+   ========================================================================== */
+
+/* Glass — a hierarchy tool, used sparingly. */
+@utility glass {
+  background-color: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lg), var(--shadow-inset);
+}
+
+/* Glow — selective emphasis. */
+@utility glow-sm { box-shadow: var(--glow-sm); }
+@utility glow-md { box-shadow: var(--glow-md); }
+@utility glow-lg { box-shadow: var(--glow-lg); }
+@utility glow-safe { box-shadow: var(--glow-safe); }
+@utility glow-caution { box-shadow: var(--glow-caution); }
+@utility glow-threat { box-shadow: var(--glow-threat); }
+@utility glow-ai { box-shadow: var(--glow-ai); }
+
+/* Z-index — every layer comes from a token. */
+@utility z-base { z-index: var(--z-base); }
+@utility z-raised { z-index: var(--z-raised); }
+@utility z-sticky { z-index: var(--z-sticky); }
+@utility z-header { z-index: var(--z-header); }
+@utility z-overlay { z-index: var(--z-overlay); }
+@utility z-drawer { z-index: var(--z-drawer); }
+@utility z-modal { z-index: var(--z-modal); }
+@utility z-popover { z-index: var(--z-popover); }
+@utility z-toast { z-index: var(--z-toast); }
+@utility z-tooltip { z-index: var(--z-tooltip); }
+
+/* Durations — token-driven, so timing stays consistent across components. */
+@utility duration-instant { transition-duration: var(--duration-instant); }
+@utility duration-fast { transition-duration: var(--duration-fast); }
+@utility duration-normal { transition-duration: var(--duration-normal); }
+@utility duration-slow { transition-duration: var(--duration-slow); }
+@utility duration-slower { transition-duration: var(--duration-slower); }
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+    /* In-page anchor jumps glide. This is on the DOCUMENT only — the detector
+       strip deliberately does not inherit it (see detector-strip.tsx). The
+       reduced-motion block below overrides it back to `auto`. */
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Headlines get room to breathe. */
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-tight);
+  }
+
+  /* Devanagari opts in explicitly rather than being force-applied, so Latin
+     copy keeps Inter's metrics. */
+  :lang(hi), [lang="hi"], .font-indic {
+    font-family: var(--font-indic);
+  }
+
+  /* ==========================================================================
+     THEME TRANSITION
+     next-themes runs with disableTransitionOnChange={false} so light↔dark is a
+     cross-fade rather than a hard swap. Only colour properties transition —
+     transitioning `all` would drag layout and animate things that should snap.
+     ========================================================================== */
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition:
+      background-color var(--duration-theme) var(--ease-standard),
+      border-color var(--duration-theme) var(--ease-standard),
+      color var(--duration-theme) var(--ease-standard),
+      fill var(--duration-theme) var(--ease-standard),
+      stroke var(--duration-theme) var(--ease-standard),
+      box-shadow var(--duration-theme) var(--ease-standard) !important;
+    transition-delay: 0ms !important;
+  }
+
+  /* Reduced motion is honoured from the start, including the theme swap. */
+  @media (prefers-reduced-motion: reduce) {
+    html.theme-transition,
+    html.theme-transition *,
+    html.theme-transition *::before,
+    html.theme-transition *::after {
+      transition: none !important;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  ::selection {
+    background-color: var(--info-subtle);
+    color: var(--foreground);
+  }
+}
+
+/* ============================================================================
+   HERO AMBIENT FIELD MASK
+   ----------------------------------------------------------------------------
+   The ambient field is allowed to run behind the headline — at hero size the
+   type is near-black and enormous, and a constellation behind it reads as
+   depth. It is NOT allowed near the subhead and buttons, where 18–20px text at
+   --muted-foreground has to compete with 1px strokes crossing letterforms.
+
+   The mask is therefore a soft ellipse over the lower copy block, not a
+   full-hero fade: keep the character, remove the interference.
+   ========================================================================== */
+/* MOBILE uses a LINEAR band, not an ellipse. An ellipse's clear zone is
+   defined by two radii and a centre, so its edges curve back toward the field
+   exactly where the copy column is widest — which is why network lines kept
+   reappearing across the subhead and the second button at 390px however the
+   radii were nudged. A vertical linear gradient has no horizontal falloff at
+   all: the field is either on or off at a given y, across the full width.
+
+   The band is wider than it was, because the hero is no longer a single
+   column of copy with space beneath it — it is copy AND a phone rail, and the
+   rail stacks below the copy on mobile. Verified by verify-contrast.mjs
+   against the rendered page, not by inspection. */
+.hero-field-mask {
+  --hero-mask: linear-gradient(
+    to bottom,
+    black 0%,
+    color-mix(in srgb, black 30%, transparent) 6%,
+    transparent 11%,
+    transparent 92%,
+    color-mix(in srgb, black 30%, transparent) 97%,
+    black 100%
+  );
+  mask-image: var(--hero-mask);
+  -webkit-mask-image: var(--hero-mask);
+}
+
+@media (min-width: 48rem) {
+  .hero-field-mask {
+    /* TWO AXES, COMPOSITED — not an ellipse.
+       The hero is now a two-column layout: copy on the left, the live phone
+       rail on the right. Both are content the field must not sit on top of,
+       which leaves the field a narrow horizontal band at the top and bottom
+       of the section rather than a right-hand region.
+
+       One mask hides a vertical band, one hides a horizontal band, combined
+       with `add` (union): the field shows wherever it is EITHER outside the
+       content's rows OR outside its columns. With the columns now spanning
+       almost the full width, the rows mask does most of the work — which is
+       correct, and is why the numbers below differ from the single-column
+       version they replaced. */
+    /* Stops derived from the rendered layout, not chosen by eye. Measured
+       against the hero box: eyebrow 8.4-10.6%, headline 13.1-34.9%,
+       pull-quote 37.9-47.4%, body 50.3-63.2%, buttons 67.5-73.4%, closing
+       note 80.7-88.2% — and the copy column ends at x 50%.
+
+       So the rows band must be clear by 6.5% (the previous 13% left the
+       eyebrow sitting on live field, measured at 2.55:1 against a 4.5
+       requirement) and stay clear to 91%. The cols band clears only the copy
+       column, which is what gives the field its presence back: unioned, the
+       field runs at full strength across the entire right half of the hero,
+       around and behind the phone rail, and is removed only where words are. */
+    --hero-mask-rows: linear-gradient(
+      to bottom,
+      black 0%,
+      black 2%,
+      transparent 6.5%,
+      transparent 91%,
+      black 96.5%,
+      black 100%
+    );
+    --hero-mask-cols: linear-gradient(
+      to right,
+      transparent 0%,
+      transparent 52%,
+      color-mix(in srgb, black 45%, transparent) 58%,
+      black 65%,
+      black 100%
+    );
+    --hero-mask: var(--hero-mask-rows);
+    mask-image: var(--hero-mask-rows), var(--hero-mask-cols);
+    -webkit-mask-image: var(--hero-mask-rows), var(--hero-mask-cols);
+    mask-composite: add;
+    -webkit-mask-composite: source-over;
+  }
+}
+
+.detector-scroller::-webkit-scrollbar {
+  height: 6px;
+}
+
+.detector-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.detector-scroller::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: var(--radius-full);
+}
+
+/* The detector visual slot. Sized to read as card imagery rather than as an
+   icon badge — this is the element that has to carry the card at a glance when
+   the body copy is one line. All three colour steps derive from --accent, so a
+   detector's identity is one token, not four hand-picked values. */
+.detector-slot {
+  display: grid;
+  place-items: center;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: var(--radius-2xl);
+  background:
+    radial-gradient(
+      120% 120% at 50% 0%,
+      color-mix(in srgb, currentColor 22%, transparent) 0%,
+      color-mix(in srgb, currentColor 8%, transparent) 70%
+    );
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  box-shadow: var(--shadow-inset);
+}
+
+/* Tilt. The rotation values are written by JS as --tilt-x / --tilt-y; this
+   rule owns the transform so the effect stays declarative and compositor-only.
+   `perspective` lives here rather than on the parent so each card tilts about
+   its own centre regardless of where it sits in the scroller. */
+.detector-card {
+  --tilt-x: 0deg;
+  --tilt-y: 0deg;
+  transform: perspective(1100px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+  transform-style: preserve-3d;
+  transition:
+    transform var(--duration-slow) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detector-card {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ============================================================================
+   CURSOR SPOTLIGHT
+   ----------------------------------------------------------------------------
+   Styling for the spotlight heading in components/landing/detector-strip.tsx.
+
+   Two stacked copies of the same text: a base at --muted-foreground, and a
+   full-contrast --foreground copy masked to a radial window that follows the
+   pointer. The base copy is a real token used for body prose, so the "dim"
+   state is still comfortably readable type — the spotlight adds emphasis, it
+   does not gate legibility.
+
+   The markup only renders this pair when a fine pointer is present AND motion
+   is allowed; otherwise a single full-contrast copy is rendered and none of
+   this applies. There is therefore no touch or reduced-motion state to style
+   here, and no pointermove listener runs in those cases.
+   ========================================================================== */
+.spotlight {
+  --mx: 50%;
+  --my: 50%;
+  position: relative;
+  display: inline-block;
+}
+
+/* NOT --muted-foreground. That was the first attempt and it inverted the
+   hierarchy: the paragraph directly beneath this heading is already set in
+   --muted-foreground, so with the pointer anywhere else on the page the h2 and
+   its own body copy rendered in exactly the same colour and the heading
+   stopped reading as a heading.
+
+   The resting state is instead derived from --foreground, pulled part-way
+   toward the page ground. It stays unambiguously darker and heavier than body
+   copy — a heading at rest — while leaving real headroom for the spotlight to
+   push it to full contrast. No new colour is introduced; both endpoints are
+   existing tokens. */
+.spotlight-base {
+  color: color-mix(in srgb, var(--foreground) 66%, var(--background));
+}
+
+.spotlight-lit {
+  position: absolute;
+  inset: 0;
+  color: var(--foreground);
+  pointer-events: none;
+  --spotlight-mask: radial-gradient(
+    140px circle at var(--mx) var(--my),
+    black 0%,
+    color-mix(in srgb, black 55%, transparent) 55%,
+    transparent 100%
+  );
+  mask-image: var(--spotlight-mask);
+  -webkit-mask-image: var(--spotlight-mask);
+}
+
+/* ============================================================================
+   AMBIENT RUPEE MARK
+   ----------------------------------------------------------------------------
+   Styling for components/landing/rupee-mark.tsx.
+
+   Placement is the contrast strategy. The mark sits in the hero's right-hand
+   negative space, outside the copy column at every breakpoint, so the question
+   "does it reduce text contrast" has the answer "it is not behind any text".
+   The low opacity is the second line of defence, not the first — a watermark
+   that overlapped the headline would still be wrong at 4%.
+
+   The tilt is STATIC. A fixed rotateX/rotateY gives it a plane to sit on and
+   makes it read as ground rather than as a sticker; a rotating currency symbol
+   would be a spectacle, and this is the furthest element back on the page.
+   ========================================================================== */
+.rupee-mark {
+  position: absolute;
+  /* Behind the ambient field, which is -z-10. */
+  z-index: -20;
+  /* The hero used to have an empty lower-right quadrant; it now has a phone
+     rail there and a pull-quote where the space used to be. The mark moves to
+     the LEFT edge and bleeds off it, sitting behind the copy column's lower
+     half — the only region of the new layout with room for a large soft
+     shape. Its contrast contribution is measured, not assumed: every hero text
+     element is re-checked against the rendered pixels behind it. */
+  left: -9%;
+  bottom: -6%;
+  width: 26rem;
+  max-width: 40vw;
+  color: var(--muted-foreground);
+  opacity: 0.05;
+  pointer-events: none;
+  transform: perspective(1400px) rotateX(12deg) rotateY(16deg) rotate(5deg);
+  transform-origin: 40% 60%;
+}
+
+.rupee-mark svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (max-width: 47.99rem) {
+  /* Smaller and lower on mobile, still bleeding off the left edge. */
+  .rupee-mark {
+    width: 15rem;
+    max-width: 54vw;
+    left: -12%;
+    bottom: -3%;
+    opacity: 0.045;
+  }
+}
+
+/* ============================================================================
+   HERO SIGNAL RING
+   ----------------------------------------------------------------------------
+   Styling for components/landing/signal-ring.tsx.
+
+   Structure: an outer ring box rotates; each spoke is absolutely centred and
+   pushed outward by its own rotate+translate, so the four marks sit on a
+   circle without any per-mark position maths. The mark itself counter-rotates
+   nothing — it is a dot, so orientation is irrelevant, which is exactly why a
+   dot was chosen over a glyph.
+
+   Motion is `linear` on a true 360° loop: any eased curve leaves a visible
+   stutter at the seam where the loop restarts.
+   ========================================================================== */
+/* Placement + scale. The hero's right column is now the phone rail, so the
+   ring can no longer live upper-right — it would sit behind a live product
+   screen, which is both cluttered and pointless. It moves to the top band the
+   mask leaves open, centred over the gap between the two columns, where it
+   reads as atmosphere above the composition rather than behind an element. */
+.hero-signal-ring {
+  position: absolute;
+  --ring-size: 13rem;
+  --ring-mark-size: 0.45rem;
+  --ring-glow: 0.7rem;
+  --ring-mark-opacity: 0.8;
+  /* Upper-right, inside the column band the mask leaves fully visible, and
+     above where the phone rail's top edge sits. */
+  top: 2%;
+  left: 66%;
+}
+
+@media (max-width: 47.99rem) {
+  /* On mobile the copy fills the column, so the ring moves to the foot of the
+     hero — the one band the linear mask leaves for the field. */
+  .hero-signal-ring {
+    --ring-size: 9rem;
+    --ring-mark-size: 0.38rem;
+    top: auto;
+    bottom: 2%;
+    left: auto;
+    right: 50%;
+    transform: translateX(50%);
+  }
+}
+
+.signal-ring {
+  position: relative;
+  width: var(--ring-size);
+  height: var(--ring-size);
+  animation: signal-ring-orbit var(--duration-orbit-ring) linear infinite;
+  /* Paused, not removed, so it resumes from where it stopped. The attribute
+     is set by useAmbientMotion (offscreen + reduced motion). */
+  animation-play-state: paused;
+}
+
+[data-motion="running"] .signal-ring {
+  animation-play-state: running;
+  /* See the note on .phone-rail-orbit: the hint is scoped to the running
+     state rather than declared for the page's lifetime. */
+  will-change: transform;
+}
+
+.signal-ring-spoke {
+  position: absolute;
+  inset: 0;
+  /* Rotate the spoke to its angle, then push the mark out along that spoke.
+     Half the ring size is the radius. */
+  transform: rotate(var(--angle));
+}
+
+.signal-ring-mark {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: var(--ring-mark-size);
+  height: var(--ring-mark-size);
+  margin-left: calc(var(--ring-mark-size) / -2);
+  margin-top: calc(var(--ring-mark-size) / -2);
+  border-radius: var(--radius-full);
+  background-color: var(--mark);
+  /* The "glow". A soft halo in the mark's own colour rather than a filter,
+     which would force an offscreen paint on every frame of the orbit. */
+  box-shadow: 0 0 var(--ring-glow) var(--mark);
+  opacity: var(--ring-mark-opacity);
+}
+
+/* The faint circle the marks travel on. Present so the four read as ONE ring
+   rather than four unrelated dots — that relationship is the whole point. */
+.signal-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  opacity: 0.55;
+}
+
+@keyframes signal-ring-orbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The ring stays — it is composition, and the four colours still say
+     "four signals, one decision". Only the rotation goes. */
+  .signal-ring {
+    animation: none;
+  }
+}
+
+/* ============================================================================
+   PHONE SHOWCASE
+   ----------------------------------------------------------------------------
+   Styling for components/landing/product-showcase.tsx. CSS-only handset frame:
+   no image asset, no 3D library. The 3D is `perspective` on the rail plus a
+   per-frame rotation, so it composites on the GPU like the detector tilt does.
+
+   ON THE THREE LITERAL DIMENSIONS BELOW
+   --phone-css-width / --phone-css-height are a real device viewport (the CSS
+   pixel size of a common Android/iPhone class), and --phone-scale is how much
+   that viewport is reduced to sit on the page. They are deliberately NOT in
+   tokens.css: that file is the design system's colour, type, space, depth and
+   motion vocabulary, and a physical device dimension is none of those. Putting
+   them there would imply 390px is a design decision someone may retune, when
+   in fact changing it makes the frame stop being a phone.
+
+   The embedded card is given the FULL 390px viewport to lay itself out in and
+   is then scaled as a whole. It is not squeezed into a narrow box: what shows
+   here is the real component's real phone layout, reduced — including the fact
+   that it runs past one screen height and clips at the frame edge, exactly as
+   it does on a handset.
+   ========================================================================== */
+/* HERO VARIANT — the same three frames, overlapped into a tighter fan so the
+   rail fits a hero column (~560px) instead of a full-width section. Negative
+   gap rather than a smaller --phone-scale, because shrinking the scale would
+   shrink the real screen's type below the size it actually renders at on a
+   handset, and the point of embedding the real component is that it is not a
+   scaled picture of one. */
+.phone-rail--hero .phone-rail-orbit {
+  gap: 0;
+}
+
+/* SYMMETRIC negative margin on every frame, not `:not(:first-of-type)`.
+   The frames are reordered with flex `order` (the un-rotated decision frame is
+   first in the DOM so it survives the mobile fallback, but sits centre on
+   desktop). `:first-of-type` is DOM-order, so the "skip the first one" rule
+   applied the pull to the wrong frames and the fan spread wider than its
+   column instead of tightening — overflowing the viewport on one side and
+   covering the pull-quote on the other. Margins that apply to all three are
+   order-independent by construction. */
+/* SYMMETRIC negative margin on every frame, not `:not(:first-of-type)`.
+   The frames are reordered with flex `order`, so a "skip the first one" rule
+   is DOM-order and lands on the wrong frames. Margins applied to all three are
+   order-independent by construction.
+
+   -1.4rem, not -4.75rem: at the deeper value the outer frames covered more
+   than half of the centre screen, and the centre screen is the one carrying
+   the decision. The fan should read as three phones behind each other, not as
+   a stack of cards. */
+.phone-rail--hero .phone-frame {
+  margin-inline: -1.4rem;
+  --phone-scale: 0.6;
+}
+
+/* --depth is set per frame from the component's own data (see phone-rail.tsx),
+   not matched here by a style-attribute substring, which would break the first
+   time React changed how it serialises inline styles. */
+
+.phone-rail--hero {
+  perspective: 1900px;
+  /* The fan is wider than its column even overlapped; let it sit centred and
+     be clipped by the section rather than widening the grid track. */
+  max-width: 100%;
+}
+
+@media (max-width: 63.99rem) {
+  .phone-rail--hero .phone-frame:not(:first-of-type) {
+    margin-left: 0;
+  }
+}
+
+/* Two elements, two jobs. `.phone-rail` owns the 3D camera; `.phone-rail-orbit`
+   owns BOTH the flex layout and the animated transform.
+
+   The flex layout must live on the orbit element, not here. When it was on the
+   rail, adding the orbit wrapper left the rail with a single flex child and the
+   three frames — plain block divs inside it — stacked into a vertical column. */
+.phone-rail {
+  margin-top: var(--space-20);
+  /* One shared perspective origin means the three frames read as objects in a
+     single space rather than three independently-skewed rectangles. */
+  perspective: 2400px;
+  perspective-origin: 50% 42%;
+}
+
+/* ----------------------------------------------------------------------------
+   RAIL ORBIT
+
+   A PENDULUM, not a spin. A full rotateY loop would turn the screens away from
+   the viewer, and the whole claim of this section is that you are looking at
+   the real screen — a phone showing its own back is a spectacle that destroys
+   the point. So the group swings a few degrees either side of centre and comes
+   back, with `alternate` making it seamless.
+
+   --ease-sine-in-out, because a pendulum decelerates into each turn and
+   accelerates out of it. `linear` would hit the extremes and reverse with a
+   visible tick. The strong --ease-in-out token is wrong in the other
+   direction: over 28s it holds near each extreme and rushes the middle. The
+   sine curve is the one that actually describes this motion — and it is a
+   token, not a bare `ease-in-out` keyword, so it stays inside the system.
+
+   The rotation lives on this wrapper, NOT on .phone-frame, so it composes with
+   the per-frame pointer tilt instead of fighting it for the same property.
+   -------------------------------------------------------------------------- */
+.phone-rail-orbit {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--space-6);
+  transform-style: preserve-3d;
+  animation: phone-rail-swing var(--duration-orbit-rail)
+    var(--ease-sine-in-out) infinite alternate;
+  animation-play-state: paused;
+}
+
+[data-motion="running"] .phone-rail-orbit {
+  animation-play-state: running;
+  /* will-change ONLY while running. Declaring it permanently pins this subtree
+     — which contains three iframes — to its own compositor layer for the life
+     of the page, for no benefit whatsoever while the animation is paused. The
+     browser already promotes an animating transform on its own; the hint is
+     worth its memory cost only during the animation. */
+  will-change: transform;
+}
+
+@keyframes phone-rail-swing {
+  from {
+    transform: rotateY(-3.5deg) rotateX(0.6deg);
+  }
+  to {
+    transform: rotateY(3.5deg) rotateX(-0.6deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Falls back to exactly the static fan that shipped before this animation. */
+  .phone-rail-orbit {
+    animation: none;
+    transform: none;
+  }
+}
+
+.phone-frame {
+  --tilt-x: 0deg;
+  --tilt-y: 0deg;
+  --phone-css-width: 390px;
+  --phone-css-height: 844px;
+  --phone-scale: 0.68;
+  /* Real Z, not z-index. Inside a `transform-style: preserve-3d` parent the
+     browser paints by 3D position and ignores z-index entirely — which is why
+     the outer frames painted OVER the centre one once they overlapped. Pushing
+     the hero frame toward the camera is the only thing that actually orders
+     them. Zero by default; the hero variant sets it per frame. */
+  --depth: 0px;
+  position: relative;
+  flex: 0 0 auto;
+  transform: translateY(var(--lift)) translateZ(var(--depth))
+    rotateX(calc(var(--rest-x) + var(--tilt-x)))
+    rotateY(calc(var(--rest-y) + var(--tilt-y)));
+  transform-style: preserve-3d;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.phone-bezel {
+  position: relative;
+  padding: var(--space-3);
+  border-radius: var(--radius-3xl);
+  background-color: var(--foreground);
+  box-shadow: var(--shadow-xl);
+}
+
+.phone-notch {
+  position: absolute;
+  top: calc(var(--space-3) / 2);
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--space-10);
+  height: var(--space-1);
+  border-radius: var(--radius-full);
+  background-color: var(--muted-foreground);
+  opacity: 0.5;
+  z-index: 1;
+}
+
+.phone-screen {
+  overflow: hidden;
+  border-radius: var(--radius-2xl);
+  background-color: var(--background);
+  width: calc(var(--phone-css-width) * var(--phone-scale));
+  height: calc(var(--phone-css-height) * var(--phone-scale));
+}
+
+/* The scaled stage. Laid out at true device width, then reduced as one piece,
+   so every internal proportion inside the real component is preserved. */
+.phone-viewport {
+  width: var(--phone-css-width);
+  height: var(--phone-css-height);
+  border: 0;
+  display: block;
+  overflow: hidden;
+  transform: scale(var(--phone-scale));
+  transform-origin: top left;
+}
+
+/* Below the rail's natural width the fan becomes a single upright frame:
+   three rotated phones at 390px would be unreadable slivers. */
+@media (max-width: 63.99rem) {
+  .phone-rail {
+    perspective: none;
+    margin-top: var(--space-12);
+  }
+  .phone-frame {
+    transform: none;
+    transition: none;
+    /* Slightly larger on mobile, where it is the only frame on screen. */
+    --phone-scale: 0.74;
+  }
+  .phone-frame:not(:first-child) {
+    display: none;
+  }
+}
+
+@media (max-width: 24rem) {
+  .phone-frame {
+    --phone-scale: 0.66;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Resting rotations are kept — they are composition, not motion — but the
+     pointer-driven deflection and its easing are removed entirely. */
+  .phone-frame {
+    transition: none;
+    --tilt-x: 0deg;
+    --tilt-y: 0deg;
+  }
+}
+
+/* ============================================================================
+   CURSOR COMPANION
+   ----------------------------------------------------------------------------
+   Styling for components/cursor-companion.tsx. `.has-cursor-companion` is
+   added to <html> by that component ONLY after it has verified a fine pointer,
+   hover capability and no reduced-motion preference — so on touch, on reduced
+   motion, or if the script never runs, none of this applies and the native
+   cursor is exactly as the OS drew it.
+
+   Form controls are exempt: a text caret communicates "you can type here" in a
+   way a decorative ring cannot.
+   ========================================================================== */
+html.has-cursor-companion,
+html.has-cursor-companion body,
+html.has-cursor-companion a,
+html.has-cursor-companion button,
+html.has-cursor-companion [role="button"] {
+  cursor: none;
+}
+
+html.has-cursor-companion input,
+html.has-cursor-companion textarea,
+html.has-cursor-companion select,
+html.has-cursor-companion [contenteditable="true"] {
+  cursor: auto;
+}
+
+.cursor-companion-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-tooltip);
+  pointer-events: none;
+}
+
+.cursor-companion-ring,
+.cursor-companion-dot {
+  position: fixed;
+  top: 0;
+  left: 0;
+  border-radius: var(--radius-full);
+  opacity: 0;
+  will-change: transform;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.cursor-companion-ring[data-visible="true"],
+.cursor-companion-dot[data-visible="true"] {
+  opacity: 1;
+}
+
+.cursor-companion-ring {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid var(--detector-transaction);
+  background-color: transparent;
+  /* Size/colour animate; transform does not — transform is written every frame
+     by rAF, and a transition on it would fight the easing already in JS. */
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    width var(--duration-normal) var(--ease-spring),
+    height var(--duration-normal) var(--ease-spring),
+    background-color var(--duration-normal) var(--ease-out),
+    border-color var(--duration-normal) var(--ease-out);
+}
+
+.cursor-companion-ring[data-state="active"] {
+  width: 58px;
+  height: 58px;
+  border-color: transparent;
+  background-color: var(--detector-transaction);
+}
+
+.cursor-companion-dot {
+  width: 5px;
+  height: 5px;
+  background-color: var(--detector-transaction);
+}
+
+/* The dot would sit on top of the filled ring and read as a blemish. */
+.cursor-companion-ring[data-state="active"] ~ .cursor-companion-dot {
+  opacity: 0;
+}
+
+.cursor-companion-label {
+  font-family: var(--font-body);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  line-height: 1;
+  text-align: center;
+  color: var(--background);
+  opacity: 0;
+  transform: scale(0.8);
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-normal) var(--ease-spring);
+}
+
+.cursor-companion-ring[data-state="active"] .cursor-companion-label {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Belt and braces: if the class is ever applied while reduced motion is on
+   (e.g. the setting flips before React re-renders), the companion vanishes
+   and the native cursor comes straight back. */
+@media (prefers-reduced-motion: reduce) {
+  html.has-cursor-companion,
+  html.has-cursor-companion body,
+  html.has-cursor-companion a,
+  html.has-cursor-companion button,
+  html.has-cursor-companion [role="button"] {
+    cursor: auto;
+  }
+
+  .cursor-companion-root {
+    display: none;
+  }
+}

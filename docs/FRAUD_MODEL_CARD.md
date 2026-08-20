@@ -174,28 +174,205 @@ the 0.005 threshold.
 `location_deviation` (+2.806), `transactions_last_10m` (+1.799),
 `user_transaction_count` (+1.609), `device_account_count` (+1.168).
 
-## 11. What is NOT recorded in this artifact
+## 11. Leakage / Shortcut Analysis — CONFIRMED, measured 2026-08-16
+
+**Status:** re-run and recorded. This analysis is **not** stored in the
+artifact; it was recomputed against the same generator configuration the
+artifact records (`seed=40, users=800, history_per_user=25,
+user_start_spread_days=150` — verified identical to
+`metadata.training_config.synthetic`). Reproduction code is in §11.6.
+
+### 11.1 The question
+
+The S40 synthetic generator assigns each row a `scenario` (10 recipes) and
+derives `is_fraud` from it. Confirmed empirically on this data: the
+scenario → label map is **perfectly deterministic** (every scenario's mean
+`is_fraud` is exactly 0.0 or 1.0). If `scenario` is itself recoverable
+from the 13 model features, then a classifier can reach the fraud label by
+identifying *which generator recipe produced the row* rather than by
+learning anything fraud-general.
+
+### 11.2 Method
+
+Multinomial logistic regression (median-impute + missing-indicator +
+standardise, fitted on **train only**, `max_iter=5000`, seed 40),
+predicting `scenario` from exactly the 13 features in
+`feature_manifest.json`. Fitted on the train split, scored on the
+**held-out test split**. Repeated with amount features only
+(`amount_vs_average`, `amount_zscore`).
+
+Two populations are reported because they answer different questions:
+- **Scenario rows** (`is_history == False`) — the decision-relevant
+  population, and the only rows where `is_fraud` varies.
+- **All rows** — what the fraud model actually trains on. Note that on a
+  *history* row `scenario` denotes the user's *assigned* recipe, not a
+  recipe the row exhibits, so recoverability there is expected to be low.
+
+Chance is the **majority-class rate**, not 1/10: the generator emits 6
+rows per `VELOCITY_SPIKE` user and 1 for the others, so the classes are
+imbalanced.
+
+### 11.3 Results — scenario rows (n_train=781, n_test=249, 10 classes)
+
+| Feature set | Accuracy | Macro F1 | Weighted F1 | Majority baseline | Uniform chance |
+|---|---|---|---|---|---|
+| **All 13 features** | **0.9639** | **0.9719** | 0.9621 | 0.3133 | 0.1000 |
+| **Amount only (2)** | **0.7028** | 0.5979 | 0.6102 | 0.3133 | 0.1000 |
+
+**Scenario is almost perfectly recoverable** from the model's own feature
+set — 0.964 accuracy against a 0.313 majority baseline (3.1×) and a 0.100
+uniform chance (9.6×).
+
+### 11.4 Amount-only recovery — the specific question asked
+
+**Yes — amount-based features alone recover scenario far above chance:
+0.7028 accuracy vs a 0.3133 majority baseline (2.24×) and 0.100 uniform
+chance (7.0×).**
+
+The per-class F1 pattern is diagnostic, and splits cleanly along whether a
+scenario is *defined by* amount manipulation:
+
+| Scenario | Amount-only F1 | Defined by amount? |
+|---|---|---|
+| `LEGITIMATE_HIGH_VALUE` | **1.0000** | yes |
+| `SOCIAL_ENGINEERING` | 0.9730 | yes (10× amount) |
+| `UNUSUAL_AMOUNT` | 0.9677 | yes (12× amount) |
+| `WEAK_SIGNAL_COMBINATION` | 0.8500 | partly (6× amount) |
+| `NEW_DEVICE` | 0.8372 | partly (4× amount) |
+| `VELOCITY_SPIKE` | 0.7222 | partly (1.5× amount) |
+| `FALSE_POSITIVE` | 0.6286 | partly (5× amount) |
+| `LEGITIMATE_ROUTINE` | **0.0000** | no |
+| `NEW_RECIPIENT` | **0.0000** | no |
+| `UNUSUAL_TIME` | **0.0000** | no |
+
+Two amount features perfectly identify `LEGITIMATE_HIGH_VALUE` and
+near-perfectly identify the two large-amount fraud recipes, while scoring
+exactly zero on the three recipes carrying no amount signature. This is
+the generator's construction being read back out of the features.
+
+For reference, `amount_vs_average` and `amount_zscore` are also the fraud
+model's two largest gain contributors (0.4807 and 0.1356, §9) — together
+**61.6%** of total gain.
+
+### 11.5 From scenario to label — the actual consequence
+
+Predicting `scenario`, then mapping each prediction to that scenario's
+(deterministic) label, yields on the same held-out scenario rows:
+
+| Route to the fraud label | Accuracy | Fraud F1 |
+|---|---|---|
+| Via all-13-feature scenario prediction | 0.9639 | **0.9699** |
+| Via amount-only scenario prediction | 0.7068 | 0.8011 |
+| *Trivial baseline: always predict fraud* | 0.5904 | *0.7424* |
+| *Trivial baseline: never predict fraud* | 0.4096 | *0.0000* |
+
+Identifying the generator recipe and reading off its label reaches
+**F1 0.9699** — far above the 0.7424 always-fraud baseline. Recipe
+identity alone is therefore close to sufficient for the fraud label on
+this data.
+
+### 11.6 Contrast — all rows (n_train=14,872, n_test=3,188)
+
+| Feature set | Accuracy | Macro F1 | Majority baseline |
+|---|---|---|---|
+| All 13 features | 0.1572 | 0.1453 | 0.1016 |
+| Amount only (2) | 0.1286 | 0.0715 | 0.1016 |
+
+Scenario is **not** meaningfully recoverable across all rows (0.157 vs
+0.102), and the label bridge there degenerates to the trivial
+never-predict-fraud predictor (accuracy 0.95389 — exactly 1 − 0.04611, the
+test fraud rate — with fraud F1 0.0). The only class with non-trivial
+recovery on history rows is `LEGITIMATE_HIGH_VALUE` (F1 0.3058), which is
+expected: those users are deliberately given occasional large payments in
+their *history* (see §7 of the generator design and the synthetic-data
+tests).
+
+**Interpretation:** the shortcut is concentrated precisely in the rows
+where the label varies, and is absent from the ~96% of rows that are
+uniformly negative.
+
+### 11.7 What this does and does not establish
+
+**Establishes:**
+- The fraud label is recoverable at F1 0.9699 on decision-relevant rows by
+  scenario identification alone.
+- Amount features alone recover scenario at 2.24× the majority baseline,
+  and perfectly identify the amount-defined recipes.
+- A shortcut fully sufficient to explain most of the model's apparent
+  skill on this data is demonstrably **available** in the feature set.
+
+**Does NOT establish:**
+- That the reported test **PR-AUC 0.9619** (§7.4) is *entirely* attributable
+  to this shortcut. That figure is computed over all 3,188 test rows with a
+  different metric; the numbers here are accuracy/F1 over 249 scenario
+  rows. They are **not** directly comparable and no such decomposition was
+  performed.
+- That the model has learned nothing generalisable. Availability of a
+  shortcut is not proof of exclusive reliance on it.
+- Anything about real-world data. This analysis characterises the S40
+  synthetic generator only.
+
+**Sample-size caveat:** the held-out scenario-row test set is 249 rows
+across 10 classes (~25/class, and imbalanced). Per-class F1 values are
+directional, not precise.
+
+**Consequence for reporting:** §7.4's metrics must continue to be
+presented as *synthetic-data* results. This section is the quantitative
+backing for the artifact's own caveat that they "measure the model's
+ability to recover patterns a generator deliberately put there".
+
+### 11.8 Reproduction
+
+Read-only; requires no artifact beyond `feature_manifest.json`:
+
+```python
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from ml.training.config import TrainingConfig
+from ml.training.dataset import build_training_data
+
+FEATURES = [...]  # the 13 names from feature_manifest.json
+data = build_training_data(TrainingConfig())          # seed 40, users 800
+tr = data.train.frame[~data.train.frame["is_history"].astype(bool)]
+te = data.test.frame[~data.test.frame["is_history"].astype(bool)]
+
+pipe = Pipeline([
+    ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+    ("scale", StandardScaler()),
+    ("clf", LogisticRegression(max_iter=5000, random_state=40)),
+]).fit(tr[FEATURES], tr["scenario"])
+
+pred = pipe.predict(te[FEATURES])
+print(accuracy_score(te["scenario"], pred),
+      f1_score(te["scenario"], pred, average="macro"))
+# repeat with FEATURES = ["amount_vs_average", "amount_zscore"]
+```
+
+## 12. What is NOT recorded in this artifact
 
 The following would plausibly have appeared in a fuller narrative model
 card but are **not present in `metadata.json`/`feature_manifest.json`**
 and are therefore stated honestly as **not recorded** rather than
 reconstructed from memory:
 
-- Any quantitative leakage/scenario-recoverability analysis (e.g. how
-  well a simple model can recover the synthetic generator's scenario
-  label from the features) — this kind of analysis was performed
-  interactively in a prior session but its numeric result was never
-  written into the artifact, so it cannot be reproduced here without
-  re-running it, which is out of scope for a metadata-only regeneration.
-- Per-scenario or per-subgroup breakdowns.
+- Per-scenario or per-subgroup breakdowns of the *fraud model's own*
+  predictions (§11 analyses a separately-fitted scenario classifier, not
+  the shipped model's per-scenario error profile).
 - Inference latency benchmarks.
 - SHAP global-importance figures (SHAP importance is a separate,
   re-runnable computation, not stored in this artifact).
 
+The leakage/scenario-recoverability analysis previously listed here as
+"not recorded" has now been re-run and is recorded in §11. Its numbers
+still live only in this document, not in the artifact.
+
 Anyone needing these should re-run the relevant analysis against the
 live artifact at `ml/models/fraud/v20260815-121308/`.
 
-## 12. Reproducibility — PROPOSED (command, not itself a stored metric)
+## 13. Reproducibility — PROPOSED (command, not itself a stored metric)
 
 ```bash
 python -m ml.training.train_fraud
@@ -206,10 +383,16 @@ timestamped version; it is not guaranteed to reproduce
 `v20260815-121308` byte-for-byte unless the same synthetic generator
 config, library versions, and code revision are used.
 
-## 13. Limitations — CONFIRMED (from `dataset_notes`/`caveats`)
+## 14. Limitations — CONFIRMED (from `dataset_notes`/`caveats`)
 
 Trained and evaluated **only** on S40 synthetic data. Not evidence of
 real-world fraud-detection accuracy. No public dataset was incorporated
 because IEEE-CIS licensing remains PENDING and other public sources were
 not downloaded under the project's data-governance rules. Real-world
 performance is unmeasured.
+
+Additionally, per §11: the synthetic generator's `scenario` recipe is
+near-perfectly recoverable from the model's own features on
+decision-relevant rows, and recipe identity alone reproduces the fraud
+label at F1 0.9699. The headline metrics in §7.4 must therefore be read as
+measuring pattern-recovery on generated data, not fraud-detection skill.
