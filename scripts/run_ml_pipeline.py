@@ -37,7 +37,9 @@ def run_pipeline():
 
     # Step 1: Synthetic Data Generation
     print("\n--- STEP 1: Synthetic Data Generation ---")
-    df_txns, df_voice = generate_synthetic_dataset(num_samples=2000, seed=42)
+    df_txns, df_voice = generate_synthetic_dataset(num_samples=50000, seed=42)
+
+
 
     # Step 2: Model Training
     print("\n--- STEP 2: Training Independent Sub-Models ---")

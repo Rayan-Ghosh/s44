@@ -32,9 +32,10 @@ def train_voice_nlp_model(df_voice: pd.DataFrame) -> Pipeline:
     print(f"[TRAIN VOICE NLP] Training local NLP model on {len(df_voice)} voice scripts...")
 
     nlp_pipeline = Pipeline([
-        ("tfidf", TfidfVectorizer(ngram_range=(1, 2), max_features=1000)),
-        ("clf", LogisticRegression(C=1.0, class_weight="balanced", random_state=42))
+        ("tfidf", TfidfVectorizer(ngram_range=(1, 3), max_features=5000, sublinear_tf=True)),
+        ("clf", LogisticRegression(C=1.5, class_weight="balanced", max_iter=500, random_state=42))
     ])
+
 
     nlp_pipeline.fit(X_text, y)
 

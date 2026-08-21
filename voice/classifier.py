@@ -10,6 +10,13 @@ from ml.features.voice_features import VoiceFeatureExtractor
 from voice.preprocessing import AudioPreprocessor
 
 
+import os
+import joblib
+
+MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ml", "models"))
+DEFAULT_NLP_PATH = os.path.join(MODEL_DIR, "voice_nlp.joblib")
+
+
 class VoiceClassifier:
     """
     Classifies social engineering call transcripts and calculates
@@ -20,6 +27,11 @@ class VoiceClassifier:
         self.preprocessor = AudioPreprocessor()
         self.feature_extractor = VoiceFeatureExtractor()
         self.nlp_model = nlp_model_artifact
+        if self.nlp_model is None and os.path.exists(DEFAULT_NLP_PATH):
+            try:
+                self.nlp_model = joblib.load(DEFAULT_NLP_PATH)
+            except Exception:
+                self.nlp_model = None
 
     def classify_transcript(self, raw_transcript: str) -> Dict[str, Any]:
         """
@@ -40,7 +52,6 @@ class VoiceClassifier:
         threat = features.get("threat_score", 0.0)
         authority = features.get("authority_impersonation_score", 0.0)
         financial = features.get("financial_request_score", 0.0)
-        coercion = features.get("coercion_score", 0.0)
         phishing = features.get("phishing_score", 0.0)
 
         # Combined heuristic NLP score (0.0 to 1.0)
@@ -56,17 +67,29 @@ class VoiceClassifier:
         if self.nlp_model is not None:
             try:
                 model_pred = float(self.nlp_model.predict_proba([clean_text])[0][1])
-                overall_voice_risk = min(1.0, 0.5 * combined_score + 0.5 * model_pred)
+                overall_voice_risk = min(1.0, 0.4 * combined_score + 0.6 * model_pred)
             except Exception:
                 overall_voice_risk = min(1.0, combined_score)
         else:
             overall_voice_risk = min(1.0, combined_score)
 
-        # Categorical Flags
+        # Categorical Flags & Active Threat Dimensions
         urgency_detected = urgency >= 0.35 or "immediately" in clean_text or "now" in clean_text
-        threat_detected = threat >= 0.35 or "police" in clean_text or "block" in clean_text
-        authority_impersonation = authority >= 0.35 or "rbi" in clean_text or "manager" in clean_text
+        threat_detected = threat >= 0.35 or "police" in clean_text or "block" in clean_text or "arrest" in clean_text
+        authority_impersonation = authority >= 0.35 or "rbi" in clean_text or "cbi" in clean_text or "manager" in clean_text
         credential_harvesting = phishing >= 0.35 or "otp" in clean_text or "pin" in clean_text
+
+        active_dimensions = []
+        if urgency_detected: active_dimensions.append("URGENCY")
+        if threat_detected: active_dimensions.append("LEGAL_THREAT")
+        if authority_impersonation: active_dimensions.append("AUTHORITY_IMPERSONATION")
+        if financial >= 0.35: active_dimensions.append("FINANCIAL_EXTRACTION")
+        if credential_harvesting: active_dimensions.append("CREDENTIAL_HARVESTING")
+
+        matched_phrases = []
+        for kw in ["cbi", "police", "arrest", "digital arrest", "immediately", "block", "freeze", "now", "otp", "pin", "fine", "narcotics", "court", "anydesk", "warrant", "charges"]:
+            if kw in clean_text:
+                matched_phrases.append(kw)
 
         return {
             "overall_voice_risk": float(overall_voice_risk),
@@ -76,6 +99,9 @@ class VoiceClassifier:
                 "authority_impersonation": bool(authority_impersonation),
                 "credential_harvesting": bool(credential_harvesting),
             },
+            "active_threat_dimensions": active_dimensions,
+            "matched_phrases": matched_phrases,
             "features": features,
             "transcript_snippet": clean_text[:100],
         }
+

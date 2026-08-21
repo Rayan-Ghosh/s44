@@ -1,8 +1,8 @@
 from decimal import Decimal
 from typing import Optional
-
 from sqlalchemy.orm import Session
 
+from app.models.enums import TransactionStatus
 from app.models.transaction import Transaction
 
 
@@ -32,3 +32,27 @@ def create_transaction(
 
 def get_transaction(db: Session, transaction_id: int) -> Optional[Transaction]:
     return db.get(Transaction, transaction_id)
+
+
+def update_transaction_status(
+    db: Session, transaction_id: int, status: TransactionStatus
+) -> Optional[Transaction]:
+    txn = db.get(Transaction, transaction_id)
+    if txn is None:
+        return None
+    txn.status = status
+    db.commit()
+    db.refresh(txn)
+    return txn
+
+
+def list_transactions(
+    db: Session,
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[TransactionStatus] = None,
+) -> list[Transaction]:
+    query = db.query(Transaction)
+    if status is not None:
+        query = query.filter(Transaction.status == status)
+    return query.order_by(Transaction.timestamp.desc()).offset(offset).limit(limit).all()

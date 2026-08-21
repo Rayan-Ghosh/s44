@@ -54,7 +54,11 @@ class Transaction(Base):
     recipient: Mapped["Recipient"] = relationship(back_populates="transactions")
     device: Mapped["Device"] = relationship(back_populates="transactions")
     risk_scores: Mapped[list["RiskScore"]] = relationship(back_populates="transaction")
+    guardian_requests: Mapped[list["GuardianRequest"]] = relationship(
+        "GuardianRequest", back_populates="transaction", cascade="all, delete-orphan"
+    )
     voice_analyses: Mapped[list["VoiceAnalysis"]] = relationship(back_populates="transaction")
+
     alerts: Mapped[list["Alert"]] = relationship(back_populates="transaction")
     feedback_entries: Mapped[list["UserFeedback"]] = relationship(back_populates="transaction")
     fraud_cases: Mapped[list["FraudCase"]] = relationship(back_populates="transaction")

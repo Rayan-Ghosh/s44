@@ -76,6 +76,10 @@ class Calibrator:
         # Platt scaling: logistic regression on the raw probability.
         return np.clip(self._model.predict_proba(p)[:, 1], 0.0, 1.0)
 
+    def predict(self, probabilities: np.ndarray) -> np.ndarray:
+        return self.transform(probabilities)
+
+
 
 def fit_calibrator(y_true, y_prob, method: str = "isotonic") -> Calibrator:
     y_true = np.asarray(y_true).astype(int)

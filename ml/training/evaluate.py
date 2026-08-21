@@ -13,9 +13,10 @@ import os
 import sys
 import json
 import joblib
+from dataclasses import dataclass
+from typing import Dict, Any, List, Tuple, Optional
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List, Tuple
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if PROJECT_ROOT not in sys.path:
@@ -28,15 +29,214 @@ from sklearn.metrics import (
     f1_score,
     roc_auc_score,
     precision_recall_curve,
+    average_precision_score,
     auc,
     confusion_matrix,
 )
 from ml.inference.fusion import RiskFusionEngine
 
-
-from ml.training.train_fraud import FEATURE_COLUMNS
-
 MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
+
+FEATURE_COLUMNS = [
+    "amount",
+    "amount_zscore",
+    "amount_vs_avg_ratio",
+    "amount_vs_max_ratio",
+    "velocity_10m",
+    "velocity_1h",
+    "velocity_24h",
+    "velocity_ratio_10m_24h",
+    "rapid_successive_transfer",
+    "time_sin",
+    "time_cos",
+    "recipient_novelty",
+    "recipient_frequency",
+    "new_device",
+    "device_age_days",
+    "ip_novelty",
+    "location_distance_km",
+    "impossible_travel_speed_kmh",
+    "os_change",
+    "browser_change",
+    "device_account_count",
+    "voice_risk_score",
+]
+
+
+
+@dataclass(frozen=True)
+class ThresholdMetrics:
+    threshold: float
+    precision: float
+    recall: float
+    f1: float
+    specificity: float
+    false_positive_rate: float
+    true_positives: int
+    false_positives: int
+    false_negatives: int
+    true_negatives: int
+
+    def to_dict(self) -> dict:
+        return {
+            "threshold": self.threshold,
+            "precision": self.precision,
+            "recall": self.recall,
+            "f1": self.f1,
+            "specificity": self.specificity,
+            "false_positive_rate": self.false_positive_rate,
+            "true_positives": self.true_positives,
+            "false_positives": self.false_positives,
+            "false_negatives": self.false_negatives,
+            "true_negatives": self.true_negatives,
+        }
+
+
+@dataclass(frozen=True)
+class EvaluationResult:
+    split: str
+    pr_auc: float
+    roc_auc: Optional[float]
+    threshold: float
+    at_threshold: dict
+    sweep: list[dict]
+    calibration: dict
+
+    def to_dict(self) -> dict:
+        return {
+            "split": self.split,
+            "pr_auc": self.pr_auc,
+            "roc_auc": self.roc_auc,
+            "threshold": self.threshold,
+            "at_threshold": self.at_threshold,
+            "sweep": self.sweep,
+            "calibration": self.calibration,
+        }
+
+
+def threshold_metrics(y_true: Any, y_prob: Any, threshold: float) -> ThresholdMetrics:
+    """Compute precision, recall, f1, confusion counts at a fixed probability threshold."""
+    yt = np.asarray(y_true, dtype=int)
+    yp = np.asarray(y_prob, dtype=float)
+    preds = (yp >= threshold).astype(int)
+
+    tp = int(np.sum((preds == 1) & (yt == 1)))
+    fp = int(np.sum((preds == 1) & (yt == 0)))
+    fn = int(np.sum((preds == 0) & (yt == 1)))
+    tn = int(np.sum((preds == 0) & (yt == 0)))
+
+    prec = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+    rec = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+    f1 = float(2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0
+    spec = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+    fpr = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+
+    return ThresholdMetrics(
+        threshold=threshold,
+        precision=prec,
+        recall=rec,
+        f1=f1,
+        specificity=spec,
+        false_positive_rate=fpr,
+        true_positives=tp,
+        false_positives=fp,
+        false_negatives=fn,
+        true_negatives=tn,
+    )
+
+
+def threshold_sweep(
+    y_true: Any, y_prob: Any, thresholds: Optional[List[float]] = None
+) -> List[ThresholdMetrics]:
+    """Sweep a grid of thresholds over predicted probabilities."""
+    if thresholds is None:
+        thresholds = [round(t, 2) for t in np.linspace(0.05, 0.95, 19)]
+    return [threshold_metrics(y_true, y_prob, t) for t in thresholds]
+
+
+def best_threshold_by_f1(sweep: List[ThresholdMetrics]) -> ThresholdMetrics:
+    """Select the threshold with highest F1 score."""
+    if not sweep:
+        raise ValueError("Empty sweep provided")
+    return max(sweep, key=lambda m: m.f1)
+
+
+def calibration_bins(y_true: Any, y_prob: Any, n_bins: int = 10) -> List[Dict[str, Any]]:
+    """Compute observed vs predicted probability in equal-width probability bins."""
+    yt = np.asarray(y_true, dtype=float)
+    yp = np.asarray(y_prob, dtype=float)
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    results = []
+
+    for i in range(n_bins):
+        low, high = bin_edges[i], bin_edges[i + 1]
+        if i == n_bins - 1:
+            mask = (yp >= low) & (yp <= high)
+        else:
+            mask = (yp >= low) & (yp < high)
+
+        count = int(np.sum(mask))
+        mean_pred = float(np.mean(yp[mask])) if count > 0 else float((low + high) / 2.0)
+        obs_rate = float(np.mean(yt[mask])) if count > 0 else 0.0
+
+        results.append({
+            "bin": i,
+            "low": low,
+            "high": high,
+            "count": count,
+            "mean_predicted": mean_pred,
+            "observed_rate": obs_rate,
+        })
+    return results
+
+
+def expected_calibration_error(y_true: Any, y_prob: Any, n_bins: int = 10) -> float:
+    """Compute weighted expected calibration error (ECE)."""
+    bins = calibration_bins(y_true, y_prob, n_bins=n_bins)
+    total_samples = sum(b["count"] for b in bins)
+    if total_samples == 0:
+        return 0.0
+
+    ece = sum(
+        (b["count"] / total_samples) * abs(b["observed_rate"] - b["mean_predicted"])
+        for b in bins
+        if b["count"] > 0
+    )
+    return float(ece)
+
+
+def evaluate(
+    y_true: Any,
+    y_prob: Any,
+    split: str = "validation",
+    threshold: float = 0.40,
+) -> EvaluationResult:
+    """Comprehensive evaluation of classification performance and calibration."""
+    yt = np.asarray(y_true, dtype=int)
+    yp = np.asarray(y_prob, dtype=float)
+
+    pr_auc = float(average_precision_score(yt, yp)) if len(yt) > 0 else 0.0
+    roc_auc = (
+        float(roc_auc_score(yt, yp))
+        if len(np.unique(yt)) > 1
+        else None
+    )
+
+    sweep_metrics = threshold_sweep(yt, yp)
+    at_th = threshold_metrics(yt, yp, threshold).to_dict()
+    ece = expected_calibration_error(yt, yp)
+    bins = calibration_bins(yt, yp)
+
+    return EvaluationResult(
+        split=split,
+        pr_auc=pr_auc,
+        roc_auc=roc_auc,
+        threshold=threshold,
+        at_threshold=at_th,
+        sweep=[m.to_dict() for m in sweep_metrics],
+        calibration={"ece": ece, "bins": bins},
+    )
+
 
 BEHAVIOUR_COLUMNS = [
 

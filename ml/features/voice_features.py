@@ -14,33 +14,46 @@ import re
 from typing import Dict, Any, List
 
 
-# Linguistic Keyword Lexicons tailored to Indian banking scam patterns
+# Comprehensive linguistic lexicons tailored to modern Indian cyber-crime & coercion patterns
 URGENCY_KEYWORDS = [
     r"\bimmediately\b", r"\bnow\b", r"\bwithin \d+ minute", r"\bhurry\b",
-    r"\bquick\b", r"\burgent\b", r"\bexpir", r"\bblock in \d+", r"\btoday itself\b"
+    r"\bquick\b", r"\burgent\b", r"\bexpir", r"\bblock in \d+", r"\btoday itself\b",
+    r"\bright now\b", r"\blast warning\b", r"\bfinal notice\b", r"\bdo not delay\b",
+    r"\bdeadline\b", r"\bwithout delay\b", r"\bstraightaway\b", r"\binstant\b"
 ]
 
 THREAT_KEYWORDS = [
     r"\bpolice\b", r"\barrest\b", r"\blegal action\b", r"\bcourt\b",
     r"\bfreeze\b", r"\bblock\b", r"\bpenalty\b", r"\bfine\b", r"\bcomplaint\b",
-    r"\bcriminal\b", r"\bsuspension\b", r"\bwarrant\b"
+    r"\bcriminal\b", r"\bsuspension\b", r"\bwarrant\b", r"\bdigital arrest\b",
+    r"\bnarcotics\b", r"\bmoney laundering\b", r"\bfir\b", r"\bjail\b",
+    r"\baction taken\b", r"\bwill disconnect\b", r"\bcut connection\b",
+    r"\billegal parcel\b", r"\bcontraband\b", r"\bsuspended\b", r"\bcustody\b"
 ]
 
 AUTHORITY_KEYWORDS = [
     r"\brbi\b", r"\bbank manager\b", r"\bcyber cell\b", r"\bincome tax\b",
     r"\bofficer\b", r"\bpolice officer\b", r"\bhead office\b", r"\bcustomer care\b",
-    r"\bpolice station\b", r"\bgovernment\b"
+    r"\bpolice station\b", r"\bgovernment\b", r"\bcbi\b", r"\bed\b",
+    r"\benforcement directorate\b", r"\bncb\b", r"\bnarcotics control\b",
+    r"\bcustoms\b", r"\bcustoms department\b", r"\btrai\b", r"\btelecom department\b",
+    r"\belectricity board\b", r"\belectricity department\b", r"\bheadquarters\b",
+    r"\bhead of security\b", r"\bbranch manager\b", r"\binspector\b"
 ]
 
 FINANCIAL_KEYWORDS = [
     r"\btransfer\b", r"\bsend money\b", r"\bpay\b", r"\bupi\b", r"\baccount number\b",
-    r"\bdeposit\b", r"\brefund\b", r"\bfee\b", r"\bcharges\b", r"\bverification amount\b"
+    r"\bdeposit\b", r"\brefund\b", r"\bfee\b", r"\bcharges\b", r"\bverification amount\b",
+    r"\bsecurity deposit\b", r"\bclearance fund\b", r"\bpenalty fine\b", r"\brelease fee\b",
+    r"\bprocessing charge\b", r"\bsettlement\b", r"\brefundable amount\b"
 ]
 
 CREDENTIAL_KEYWORDS = [
     r"\botp\b", r"\bpin\b", r"\bcvv\b", r"\bpassword\b", r"\bcard number\b",
-    r"\bsecret code\b", r"\bnet banking password\b"
+    r"\bsecret code\b", r"\bnet banking password\b", r"\banydesk\b", r"\bteamviewer\b",
+    r"\bscreen share\b", r"\bdownload application\b", r"\bshare code\b"
 ]
+
 
 
 class VoiceFeatureExtractor:

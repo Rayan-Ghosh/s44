@@ -9,19 +9,33 @@ controlled phases per CLAUDE.md. Schema is owned by Alembic
 """
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.routers import alerts, risk, transactions, users
+from app.api.routers import alerts, guardian, institution, risk, simulator, transactions, users, voice_stream
 from app.core.config import settings
 from app.core.database import get_db
 
 app = FastAPI(title=settings.app_name)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(users.router)
 app.include_router(transactions.router)
 app.include_router(risk.router)
 app.include_router(alerts.router)
+app.include_router(guardian.router)
+app.include_router(institution.router)
+app.include_router(simulator.router)
+app.include_router(voice_stream.router)
+
 
 
 @app.get("/health")
