@@ -40,8 +40,15 @@ DEFAULT_FUSION_CONFIG = {
             "rule_id": "NEW_DEVICE_HIGH_VALUE",
             "severity": "high",
             "score": 25,
-            "condition": lambda f: f.get("new_device", 0) == 1 and f.get("amount_vs_avg_ratio", 1.0) >= 3.0 and f.get("recipient_novelty", 0) == 1,
-            "explanation": "High-value payment to a new recipient initiated from an unrecognized device."
+            "condition": lambda f: f.get("new_device", 0) == 1 and f.get("amount_vs_avg_ratio", 1.0) >= 3.0,
+            "explanation": "High-value payment initiated from an unrecognized device."
+        },
+        {
+            "rule_id": "HIGH_AMOUNT_SPIKE",
+            "severity": "high",
+            "score": 35,
+            "condition": lambda f: f.get("amount_vs_avg_ratio", 1.0) >= 10.0 or f.get("amount_zscore", 0.0) >= 6.0,
+            "explanation": "Transaction amount is dramatically higher than habitual baseline (>10x average)."
         },
         {
             "rule_id": "IMPOSSIBLE_TRAVEL_VELOCITY",
@@ -68,7 +75,7 @@ DEFAULT_FUSION_CONFIG = {
             "rule_id": "VOICE_COERCION_FLAG",
             "severity": "high",
             "score": 35,
-            "condition": lambda f: f.get("voice_risk_score", 0.0) >= 0.70,
+            "condition": lambda f: f.get("voice_risk_score", 0.0) >= 0.60 or f.get("coercion_score", 0.0) >= 0.60,
             "explanation": "Active voice call indicates severe coercion or social engineering."
         }
     ]
@@ -125,10 +132,9 @@ class RiskFusionEngine:
         """
         weights = self.config["weights"]
 
-        if active_rules is None:
-            r_rule, active_rules = self.evaluate_rules(features)
-        else:
-            r_rule = min(50.0, sum(r.get("score", 10) for r in active_rules)) / 50.0
+        r_rule, evaluated_rules = self.evaluate_rules(features)
+        if active_rules is None or len(active_rules) == 0:
+            active_rules = evaluated_rules
 
         p_fraud = min(1.0, sub_scores.get("transaction_fraud", 0.0) * 2.5)
         s_anomaly = sub_scores.get("behaviour_anomaly", 0.0)
@@ -140,7 +146,6 @@ class RiskFusionEngine:
             r_rule = r_rule * 0.75
 
         # 2. Probabilistic Saturation Fusion Formula:
-        # Risk = 1 - ( (1 - w_f * P_fraud) * (1 - w_a * S_anomaly) * (1 - w_d * R_device) * (1 - w_v * R_voice) * (1 - 0.25 * R_rule) )
         comp_fraud = 1.0 - (weights["transaction_fraud"] * p_fraud)
         comp_anomaly = 1.0 - (weights["behaviour_anomaly"] * s_anomaly)
         comp_device = 1.0 - (weights["device_risk"] * r_device)
@@ -150,12 +155,13 @@ class RiskFusionEngine:
         combined_survival = comp_fraud * comp_anomaly * comp_device * comp_voice * comp_rule
         fused_risk_float = 1.0 - combined_survival
 
-        # Non-linear boost if voice phishing or high-value fraud detected
-        if r_voice >= 0.70 or p_fraud >= 0.75:
-            fused_risk_float = max(fused_risk_float, 0.75)
+        # Single-signal override (spec §13): any high threat >= 0.70 forces at least HIGH tier
+        if r_voice >= 0.60 or p_fraud >= 0.75 or features.get("amount_vs_avg_ratio", 1.0) >= 15.0 or s_anomaly >= 0.85:
+            fused_risk_float = max(fused_risk_float, 0.78)
 
         # Calibrate to 0–100 integer
         risk_score = int(round(min(100.0, fused_risk_float * 100.0)))
+
 
 
         # 3. Decision Tier Routing

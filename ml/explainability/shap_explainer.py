@@ -7,8 +7,125 @@ Generates pre-decision explainability packages containing:
 3. Specific risk factor tags.
 """
 
-from typing import Dict, Any, List, Tuple
+from dataclasses import dataclass
+from typing import Dict, Any, List, Optional
 import numpy as np
+import pandas as pd
+
+from ml.explainability.explanations import (
+    EXPLANATION_MAP,
+    RiskDirection,
+    explain_feature,
+    validate_explanation_map,
+)
+
+
+def direction_of(feature: str) -> str:
+    """Return the risk direction string for a given feature."""
+    expl = explain_feature(feature)
+    if expl is None:
+        return "unknown"
+    return (
+        "higher_is_riskier"
+        if expl.direction == RiskDirection.HIGHER_IS_RISKIER
+        else "higher_is_safer"
+    )
+
+
+@dataclass(frozen=True)
+class ShapFactor:
+    feature: str
+    label: str
+    user_explanation: str
+    analyst_explanation: str
+    shap_value: float
+    direction: str  # "risk_increasing" or "risk_decreasing"
+    value: Any = None
+
+
+class ShapExplainer:
+    """
+    SHAP-based explainer extracting feature-level attributions and human-readable factors.
+    """
+
+    def __init__(self, booster: Any, feature_names: tuple[str, ...] | list[str]):
+        self.feature_names = tuple(feature_names)
+        self.booster = booster
+        self._explainer = None
+        try:
+            import shap
+            self._explainer = shap.TreeExplainer(booster)
+        except Exception:
+            self._explainer = None
+
+    def global_importance(self, frame: pd.DataFrame) -> list[dict]:
+        """Compute global feature importance across a frame."""
+        X = frame[list(self.feature_names)].to_numpy(dtype=float)
+        if self._explainer is not None:
+            shap_values = self._explainer.shap_values(X)
+            mean_abs = np.abs(shap_values).mean(axis=0)
+        else:
+            mean_abs = np.ones(len(self.feature_names)) / len(self.feature_names)
+
+        total = float(mean_abs.sum()) or 1.0
+        rows = [
+            {"feature": name, "gain": float(mean_abs[i]), "share": float(mean_abs[i] / total)}
+            for i, name in enumerate(self.feature_names)
+        ]
+        return sorted(rows, key=lambda r: r["gain"], reverse=True)
+
+    def explain_row(
+        self,
+        frame: pd.DataFrame,
+        row_index: int = 0,
+        top_k: int = 4,
+        risk_increasing_only: bool = True,
+        explainable_only: bool = True,
+    ) -> list[ShapFactor]:
+        """Generate top SHAP risk factors for a specific row in the frame."""
+        X = frame[list(self.feature_names)].iloc[[row_index]].to_numpy(dtype=float)
+        if self._explainer is not None:
+            shap_values = self._explainer.shap_values(X)[0]
+        else:
+            shap_values = np.zeros(len(self.feature_names))
+
+        row_vals = frame.iloc[row_index]
+        factors = []
+        for i, name in enumerate(self.feature_names):
+            val = float(shap_values[i])
+            feature_val = row_vals[name] if name in row_vals else None
+            expl = explain_feature(name)
+            if explainable_only and expl is None:
+                continue
+            direction = "risk_increasing" if val > 0 else "risk_decreasing"
+            if risk_increasing_only and val <= 0:
+                continue
+
+            label = expl.label if expl else name
+            user_expl = (
+                expl.user_template.format(value=expl.format_value(feature_val))
+                if expl
+                else f"{name} value is unusual"
+            )
+            analyst_expl = (
+                expl.analyst_template.format(value=expl.format_value(feature_val))
+                if expl
+                else f"{name} contributed {val:+.2f}"
+            )
+            factors.append(
+                ShapFactor(
+                    feature=name,
+                    label=label,
+                    user_explanation=user_expl,
+                    analyst_explanation=analyst_expl,
+                    shap_value=val,
+                    direction=direction,
+                    value=feature_val,
+                )
+            )
+
+        factors.sort(key=lambda f: abs(f.shap_value), reverse=True)
+        return factors[:top_k]
 
 
 class ExplainabilityEngine:
@@ -31,7 +148,7 @@ class ExplainabilityEngine:
         self,
         features: Dict[str, float],
         sub_scores: Dict[str, float],
-        active_rules: List[Dict[str, Any]]
+        active_rules: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """
         Generates a human-readable explanation package.
@@ -47,17 +164,27 @@ class ExplainabilityEngine:
         bullet_points: List[str] = []
         risk_factors: List[str] = []
 
-        amount = features.get("amount", 0.0)
-        zscore = features.get("amount_zscore", 0.0)
-        avg_ratio = features.get("amount_vs_avg_ratio", 1.0)
-        new_device = features.get("new_device", 0.0)
-        recipient_novelty = features.get("recipient_novelty", 0.0)
-        impossible_travel = features.get("impossible_travel_speed_kmh", 0.0)
-        voice_risk = sub_scores.get("voice_risk", 0.0)
-        anomaly_score = sub_scores.get("behaviour_anomaly", 0.0)
+        def _safe_f(v, d=0.0):
+            if v is None:
+                return d
+            try:
+                f = float(v)
+                return d if np.isnan(f) else f
+            except (ValueError, TypeError):
+                return d
+
+        amount = _safe_f(features.get("amount", 0.0))
+        zscore = _safe_f(features.get("amount_zscore", 0.0))
+        avg_ratio = _safe_f(features.get("amount_vs_avg_ratio", features.get("amount_vs_average", 1.0)), 1.0)
+        new_device = _safe_f(features.get("new_device", 0.0))
+        recipient_novelty = _safe_f(features.get("recipient_novelty", 0.0 if _safe_f(features.get("recipient_seen_before", 1.0)) == 1.0 else 1.0))
+        impossible_travel = _safe_f(features.get("impossible_travel_speed_kmh", 0.0))
+        voice_risk = _safe_f(sub_scores.get("voice_risk", 0.0))
+        anomaly_score = _safe_f(sub_scores.get("behaviour_anomaly", 0.0))
 
         # 1. Plain-Language Rule & Feature Maps
         if avg_ratio >= 3.0 or zscore >= 2.5:
+
             bullet_points.append(f"Transaction amount (₹{amount:,.0f}) is {avg_ratio:.1f}× higher than your usual average.")
             risk_factors.append("amount_deviation")
 
@@ -114,3 +241,4 @@ class ExplainabilityEngine:
             "risk_factors": list(set(risk_factors)),
             "risk_contributions_pct": risk_contributions_pct,
         }
+

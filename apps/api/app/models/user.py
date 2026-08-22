@@ -38,3 +38,8 @@ class User(Base):
     devices: Mapped[list["Device"]] = relationship(back_populates="user")
     recipients: Mapped[list["Recipient"]] = relationship(back_populates="user")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
+    trusted_contacts: Mapped[list["TrustedContact"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+

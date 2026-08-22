@@ -41,3 +41,14 @@ def hash_identifier(value: str) -> str:
         raise ValueError("Cannot hash an empty identifier.")
     payload = f"{settings.hash_pepper}{value}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def mask_phone(phone: str) -> str:
+    """Mask a phone number for user interface display (e.g. +91-98765-XXXXX)."""
+    if not phone:
+        return "XXXX"
+    cleaned = str(phone).strip()
+    if len(cleaned) <= 5:
+        return "XXXXX"
+    return cleaned[:-5] + "XXXXX"
+

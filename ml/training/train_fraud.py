@@ -15,7 +15,8 @@ import math
 import joblib
 import pandas as pd
 import numpy as np
-from typing import Tuple, Any
+from pathlib import Path
+from typing import Tuple, Any, Optional
 from xgboost import XGBClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
@@ -24,8 +25,27 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from ml.registry.artifact import (
+    ARTIFACT_ROOT,
+    ModelArtifact,
+    build_metadata,
+    new_version,
+    save_artifact,
+)
+from ml.registry.model_registry import ModelRegistry
+from ml.training.baseline import train_baseline
+from ml.training.calibration import assess_calibration
+from ml.training.config import TrainingConfig, XGBParams
+from ml.training.dataset import build_training_data
+from ml.training.evaluate import evaluate
+from ml.training.feature_manifest import MODEL_FEATURE_NAMES, manifest
+from ml.training.search import params_from_trial, run_search
+from ml.training.xgb_model import train_xgb
+
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
+
+FRAUD_ROOT = ARTIFACT_ROOT
 
 FEATURE_COLUMNS = [
     "amount",
@@ -51,6 +71,119 @@ FEATURE_COLUMNS = [
     "device_account_count",
     "voice_risk_score",
 ]
+
+
+def train(
+    config: Optional[TrainingConfig] = None,
+    *,
+    run_hyperparameter_search: bool = True,
+    output_root: Optional[Path] = None,
+    promote: bool = True,
+) -> ModelArtifact:
+    """Train canonical XGBoost transaction fraud model, calibrate, and save artifact."""
+    config = config or TrainingConfig()
+    root = Path(output_root) if output_root else FRAUD_ROOT
+    data = build_training_data(config)
+
+    if run_hyperparameter_search:
+        search_result = run_search(
+            data.train.X,
+            data.train.y,
+            data.validation.X,
+            data.validation.y,
+            config=config,
+        )
+        xgb_params = params_from_trial(search_result.best)
+        search_summary = search_result.to_dict()
+    else:
+        xgb_params = config.xgb
+        search_summary = {}
+
+    trained = train_xgb(
+        data.train.X,
+        data.train.y,
+        data.validation.X,
+        data.validation.y,
+        config=TrainingConfig(
+            dataset=config.dataset,
+            synthetic=config.synthetic,
+            xgb=xgb_params,
+            seed=config.seed,
+        ),
+    )
+
+    raw_val_probs = trained.predict_proba(data.validation.X)
+    calibrator, cal_report = assess_calibration(data.validation.y, raw_val_probs)
+
+    baseline = train_baseline(data.train.X, data.train.y)
+    baseline_eval = evaluate(
+        data.validation.y,
+        baseline.predict_proba(data.validation.X),
+        split="validation",
+    ).to_dict()
+
+    val_probs = calibrator.predict(raw_val_probs) if calibrator else raw_val_probs
+    val_eval = evaluate(
+        data.validation.y,
+        val_probs,
+        split="validation",
+    ).to_dict()
+
+    test_raw = trained.predict_proba(data.test.X)
+    test_probs = calibrator.predict(test_raw) if calibrator else test_raw
+    test_eval = evaluate(
+        data.test.y,
+        test_probs,
+        split="test",
+    ).to_dict()
+
+    version = new_version()
+    metadata = build_metadata(
+        model_name="s40_transaction_fraud",
+        model_version=version,
+        seed=config.seed,
+        datasets=[config.dataset],
+        dataset_notes="Synthetic scenario dataset for S40 fraud shield",
+        split_report=data.split_report,
+        training_config=config.to_dict(),
+        hyperparameters=xgb_params.to_dict(),
+        scale_pos_weight=trained.scale_pos_weight,
+        best_iteration=trained.best_iteration,
+        feature_manifest_version=manifest()["manifest_version"],
+        feature_names=list(MODEL_FEATURE_NAMES),
+        metrics={
+            "validation": val_eval,
+            "test": test_eval,
+            "baseline": baseline_eval,
+        },
+        hyperparameter_search=search_summary,
+        calibration=cal_report.to_dict(),
+        selected_threshold=0.40,
+        caveats="Prototype model trained on synthetic data only. Not a production classifier; true performance may differ.",
+    )
+
+
+
+    artifact_path = save_artifact(
+        trained.booster,
+        calibrator,
+        metadata,
+        manifest(),
+        root=root,
+    )
+    if promote:
+        registry = ModelRegistry(root=root)
+        registry.promote(version)
+
+
+    return ModelArtifact(
+        booster=trained.booster,
+        calibrator=calibrator,
+        metadata=metadata,
+        path=artifact_path,
+    )
+
+
 
 
 def train_fraud_model(df: pd.DataFrame) -> Tuple[Any, StandardScaler]:

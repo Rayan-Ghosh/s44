@@ -20,9 +20,31 @@ class TransactionStatus(str, enum.Enum):
     PENDING = "PENDING"
     ALLOWED = "ALLOWED"
     AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION"
+    PENDING_GUARDIAN_APPROVAL = "PENDING_GUARDIAN_APPROVAL"
+    GUARDIAN_APPROVED = "GUARDIAN_APPROVED"
+    GUARDIAN_REJECTED = "GUARDIAN_REJECTED"
+    GUARDIAN_TIMEOUT_USER_OVERRODE = "GUARDIAN_TIMEOUT_USER_OVERRODE"
     CONFIRMED = "CONFIRMED"
     CANCELLED = "CANCELLED"
     REPORTED = "REPORTED"
+
+
+class ConsentStatus(str, enum.Enum):
+    """Two-way consent status for trusted guardian contacts (spec §6)."""
+
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REVOKED = "REVOKED"
+
+
+class GuardianOutcome(str, enum.Enum):
+    """Outcome of a guardian hold approval request (spec §6)."""
+
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    TIMEOUT = "TIMEOUT"
+
 
 
 class RiskLevel(str, enum.Enum):

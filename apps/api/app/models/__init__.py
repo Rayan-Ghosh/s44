@@ -8,11 +8,13 @@ from app.models.alert import Alert
 from app.models.audit_log import AuditLog
 from app.models.device import Device
 from app.models.fraud_case import FraudCase
+from app.models.guardian_request import GuardianRequest
 from app.models.model_prediction import ModelPrediction
 from app.models.recipient import Recipient
 from app.models.risk_factor import RiskFactor
 from app.models.risk_score import RiskScore
 from app.models.transaction import Transaction
+from app.models.trusted_contact import TrustedContact
 from app.models.user import User
 from app.models.user_feedback import UserFeedback
 from app.models.voice_analysis import VoiceAnalysis
@@ -22,12 +24,15 @@ __all__ = [
     "AuditLog",
     "Device",
     "FraudCase",
+    "GuardianRequest",
     "ModelPrediction",
     "Recipient",
     "RiskFactor",
     "RiskScore",
     "Transaction",
+    "TrustedContact",
     "User",
     "UserFeedback",
     "VoiceAnalysis",
 ]
+

@@ -63,8 +63,12 @@ def test_risk_score_after_manual_insertion_is_readable(client, db_session):
     assert body["risk_factors"][0]["factor_name"] == "amount_deviation"
 
 
-def test_evaluate_endpoint_returns_501_not_fake_score(client):
+def test_evaluate_endpoint_scores_live_transaction(client):
     transaction = _create_transaction(client)
     response = client.post("/api/v1/risk/evaluate", json={"transaction_id": transaction["id"]})
-    assert response.status_code == 501
-    assert "not implemented" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    body = response.json()
+    assert "risk_score" in body
+    assert body["risk_level"] in ["LOW", "MEDIUM", "HIGH"]
+    assert body["decision"] in ["ALLOW", "WARN_CHOICE", "CONFIRM_OR_CANCEL"]
+
