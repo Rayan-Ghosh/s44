@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Avaran Fraud Protection",
+    "slug": "avaran-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F3F2EF",
+    "icon": "./assets/icon.png",
+
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.avaran.security"
+    },
+    "android": {
+      "package": "com.avaran.security",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F3F2EF"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F3F2EF"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "08a48009-eb7d-429b-994d-14abf398faa9"
+      }
+    }
+  }
+}
