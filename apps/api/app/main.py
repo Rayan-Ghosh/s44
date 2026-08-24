@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.routers import alerts, guardian, institution, risk, simulator, transactions, users, voice_stream
+from app.api.routers import alerts, auth, guardian, institution, risk, simulator, transactions, users, voice_stream
 from app.core.config import settings
 from app.core.database import get_db
 
@@ -27,6 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(transactions.router)
 app.include_router(risk.router)
