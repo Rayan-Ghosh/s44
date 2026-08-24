@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Avaran Asset Generator</title>
+</head>
+<body style="background: #111; color: #eee; font-family: sans-serif; padding: 20px;">
+  <h1>Generating Avaran Mobile Assets...</h1>
+  <div id="status">Working...</div>
+
+  <canvas id="iconCanvas" width="1024" height="1024" style="display:none;"></canvas>
+  <canvas id="adaptiveCanvas" width="1024" height="1024" style="display:none;"></canvas>
+  <canvas id="splashCanvas" width="1284" height="2778" style="display:none;"></canvas>
+
+  <script>
+    async function render() {
+      const status = document.getElementById("status");
+
+      // 1. Render icon.png (1024x1024)
+      const iconCanvas = document.getElementById("iconCanvas");
+      const ctx1 = iconCanvas.getContext("2d");
+
+      // Background: Rich Avaran Institutional Accent #3F7C78
+      const grad1 = ctx1.createLinearGradient(0, 0, 0, 1024);
+      grad1.addColorStop(0, "#468984");
+      grad1.addColorStop(1, "#366B67");
+      ctx1.fillStyle = grad1;
+      ctx1.fillRect(0, 0, 1024, 1024);
+
+      // Subtle radial highlight
+      const rad1 = ctx1.createRadialGradient(512, 380, 50, 512, 512, 600);
+      rad1.addColorStop(0, "rgba(255, 255, 255, 0.12)");
+      rad1.addColorStop(1, "rgba(0, 0, 0, 0.08)");
+      ctx1.fillStyle = rad1;
+      ctx1.fillRect(0, 0, 1024, 1024);
+
+      // Draw Shield Mark in Center
+      // Shield size: 540x540 centered at (512, 512)
+      ctx1.save();
+      ctx1.translate(512 - 270, 512 - 270);
+      ctx1.scale(540 / 24, 540 / 24);
+
+      // Outer Shield Path
+      const shieldOuter = new Path2D("M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm0 2.18l6 2.25v4.66c0 4.14-2.73 8.01-6 9.08-3.27-1.07-6-4.94-6-9.08V6.43l6-2.25z");
+      const shieldCheck = new Path2D("M10.5 13.5l-2-2-1.41 1.41L10.5 16.33l6.5-6.5-1.41-1.41z");
+
+      // Soft shadow
+      ctx1.shadowColor = "rgba(20, 50, 48, 0.35)";
+      ctx1.shadowBlur = 1.5;
+      ctx1.shadowOffsetY = 0.8;
+
+      ctx1.fillStyle = "#FFFFFF";
+      ctx1.fill(shieldOuter);
+      ctx1.fill(shieldCheck);
+      ctx1.restore();
+
+      const iconData = iconCanvas.toDataURL("image/png");
+
+      // 2. Render adaptive-icon.png (1024x1024)
+      const adaptiveCanvas = document.getElementById("adaptiveCanvas");
+      const ctx2 = adaptiveCanvas.getContext("2d");
+      ctx2.clearRect(0, 0, 1024, 1024);
+
+      // Central circular/squircle badge with 480px diameter in center (well within 66% safe zone of 680px)
+      const cx = 512, cy = 512, r = 240;
+      
+      // Draw smooth rounded squircle emblem for adaptive icon
+      ctx2.save();
+      const emW = 500, emH = 500, emR = 120;
+      const emX = cx - emW / 2, emY = cy - emH / 2;
+      
+      ctx2.beginPath();
+      ctx2.moveTo(emX + emR, emY);
+      ctx2.lineTo(emX + emW - emR, emY);
+      ctx2.quadraticCurveTo(emX + emW, emY, emX + emW, emY + emR);
+      ctx2.lineTo(emX + emW, emY + emH - emR);
+      ctx2.quadraticCurveTo(emX + emW, emY + emH, emX + emW - emR, emY + emH);
+      ctx2.lineTo(emX + emR, emY + emH);
+      ctx2.quadraticCurveTo(emX, emY + emH, emX, emY + emH - emR);
+      ctx2.lineTo(emX, emY + emR);
+      ctx2.quadraticCurveTo(emX, emY, emX + emR, emY);
+      ctx2.closePath();
+
+      const grad2 = ctx2.createLinearGradient(0, emY, 0, emY + emH);
+      grad2.addColorStop(0, "#468984");
+      grad2.addColorStop(1, "#366B67");
+      ctx2.fillStyle = grad2;
+      ctx2.shadowColor = "rgba(0, 0, 0, 0.12)";
+      ctx2.shadowBlur = 24;
+      ctx2.shadowOffsetY = 10;
+      ctx2.fill();
+      ctx2.restore();
+
+      // Shield mark inside adaptive emblem
+      ctx2.save();
+      const sW = 280, sH = 280;
+      ctx2.translate(512 - sW / 2, 512 - sH / 2);
+      ctx2.scale(sW / 24, sH / 24);
+      ctx2.fillStyle = "#FFFFFF";
+      ctx2.fill(shieldOuter);
+      ctx2.fill(shieldCheck);
+      ctx2.restore();
+
+      const adaptiveData = adaptiveCanvas.toDataURL("image/png");
+
+      // 3. Render splash.png (1284x2778)
+      const splashCanvas = document.getElementById("splashCanvas");
+      const ctx3 = splashCanvas.getContext("2d");
+
+      // Background: #F8F9FA
+      ctx3.fillStyle = "#F8F9FA";
+      ctx3.fillRect(0, 0, 1284, 2778);
+
+      // Centered emblem
+      const spX = 1284 / 2, spY = 2778 / 2 - 80;
+      const spSize = 220;
+      const spRadius = 55;
+
+      ctx3.save();
+      ctx3.beginPath();
+      const bX = spX - spSize / 2, bY = spY - spSize / 2;
+      ctx3.moveTo(bX + spRadius, bY);
+      ctx3.lineTo(bX + spSize - spRadius, bY);
+      ctx3.quadraticCurveTo(bX + spSize, bY, bX + spSize, bY + spRadius);
+      ctx3.lineTo(bX + spSize, bY + spSize - spRadius);
+      ctx3.quadraticCurveTo(bX + spSize, bY + spSize, bX + spSize - spRadius, bY + spSize);
+      ctx3.lineTo(bX + spRadius, bY + spSize);
+      ctx3.quadraticCurveTo(bX, bY + spSize, bX, bY + spSize - spRadius);
+      ctx3.lineTo(bX, bY + spRadius);
+      ctx3.quadraticCurveTo(bX, bY, bX + spRadius, bY);
+      ctx3.closePath();
+
+      const grad3 = ctx3.createLinearGradient(0, bY, 0, bY + spSize);
+      grad3.addColorStop(0, "#468984");
+      grad3.addColorStop(1, "#366B67");
+      ctx3.fillStyle = grad3;
+      ctx3.shadowColor = "rgba(63, 124, 120, 0.2)";
+      ctx3.shadowBlur = 20;
+      ctx3.shadowOffsetY = 8;
+      ctx3.fill();
+      ctx3.restore();
+
+      // Shield mark inside splash emblem
+      ctx3.save();
+      const spShield = 130;
+      ctx3.translate(spX - spShield / 2, spY - spShield / 2);
+      ctx3.scale(spShield / 24, spShield / 24);
+      ctx3.fillStyle = "#FFFFFF";
+      ctx3.fill(shieldOuter);
+      ctx3.fill(shieldCheck);
+      ctx3.restore();
+
+      // Typography
+      ctx3.textAlign = "center";
+      ctx3.fillStyle = "#252525";
+      ctx3.font = "bold 56px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx3.letterSpacing = "6px";
+      ctx3.fillText("AVARAN", spX, spY + spSize / 2 + 90);
+
+      ctx3.fillStyle = "#6F706F";
+      ctx3.font = "500 26px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx3.letterSpacing = "1.5px";
+      ctx3.fillText("Customer Fraud Protection", spX, spY + spSize / 2 + 138);
+
+      const splashData = splashCanvas.toDataURL("image/png");
+
+      // Save via POST to local helper or inject into window
+      window.__AVARAN_ASSETS = {
+        icon: iconData,
+        adaptive: adaptiveData,
+        splash: splashData
+      };
+
+      status.innerText = "READY";
+      console.log("Assets rendered successfully.");
+    }
+
+    window.onload = render;
+  </script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+# ==========================================================================
+# S40 — .gitignore
+# See CLAUDE.md / docs/SECURITY.md for the rationale behind secret handling.
+# ==========================================================================
+
+# --------------------------------------------------------------------------
+# Node / Next.js (apps/web)
+# --------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+build/
+dist/
+.expo/
+.turbo/
+.vercel/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/install-state.gz
+
+# --------------------------------------------------------------------------
+# Python (apps/api, ml/, voice/, scripts/)
+# --------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# --------------------------------------------------------------------------
+# Environment / secrets
+# --------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+*.pem
+*.key
+*.crt
+*.p12
+*credentials*.json
+*secret*
+!*.example
+!.env.example
+
+# --------------------------------------------------------------------------
+# IDE / OS
+# --------------------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
+
+# --------------------------------------------------------------------------
+# ML — generated artifacts, not source
+# --------------------------------------------------------------------------
+# Downloaded external datasets. NEVER commit these — several carry licences
+# that restrict redistribution, and the repository must not become a
+# distribution channel for them (see docs/DATA_STRATEGY.md).
+ml/data/raw/
+ml/data/processed/
+ml/data/synthetic/
+ml/data/Original/
+# Large columnar/archive formats that only ever appear as dataset dumps.
+*.parquet
+*.feather
+*.zip.part
+ml/models/*.pkl
+ml/models/*.joblib
+ml/models/*.onnx
+*.h5
+*.pt
+*.pth
+# Trained model artifact trees and the local model registry pointers.
+#
+# `ml/models/` contains ONLY generated artifacts — the registry/artifact
+# SOURCE lives in `ml/registry/`. That separation is deliberate: during
+# Phase 4 a routine `rm -rf ml/models` (to force a clean retrain) also
+# deleted source that had been placed in the same directory. Artifacts and
+# hand-written code must not share a tree.
+#
+# These are BUILD OUTPUTS, fully reproducible via:
+#     python -m ml.training.train_fraud
+#     python -m ml.training.train_anomaly
+ml/models/
+# Experiment/evaluation outputs.
+ml/experiments/
+ml/reports/
+# Python source under ml/models/ (artifact.py, model_registry.py) IS source
+# and stays tracked — the rules above deliberately target artifact trees
+# only, never `ml/models/` wholesale.
+#
+# Tiny hand-authored adapter fixtures ARE source and must stay tracked. They
+# are not excerpts of any public dataset (see ml/tests/fixtures/README.md).
+!ml/tests/fixtures/
+!ml/tests/fixtures/**
+
+# --------------------------------------------------------------------------
+# Logs / generated reports
+# --------------------------------------------------------------------------
+*.log
+logs/
+*.report.json
+coverage/
+
+# --------------------------------------------------------------------------
+# Database
+# --------------------------------------------------------------------------
+# Decision (documented in the version-control foundation report): no
+# Avaran.db file exists in this repository yet. When the SQLite dev/test
+# scaffold is introduced, the default is to treat it as generated/local-only
+# data and NOT track it — reproducibility should come from a seed script
+# (scripts/seed_database.py, per docs/DEVELOPMENT_PLAN.md Phase 3), not from
+# committing a binary database file. Reassess if a specific small, hand
+# curated Avaran.db is later designated as a tracked fixture.
+Avaran.db
+*.sqlite3
+*.sqlite3-journal
+*.db-journal
+
+# --------------------------------------------------------------------------
+# Docker / infra local overrides
+# --------------------------------------------------------------------------
+docker-compose.override.yml
