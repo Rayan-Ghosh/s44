@@ -3,14 +3,12 @@
 # See CLAUDE.md / docs/SECURITY.md for the rationale behind secret handling.
 # ==========================================================================
 
-# --------------------------------------------------------------------------
-# Node / Next.js (apps/web)
-# --------------------------------------------------------------------------
 node_modules/
 .next/
 out/
 build/
 dist/
+.expo/
 .turbo/
 .vercel/
 *.tsbuildinfo
@@ -22,6 +20,25 @@ pnpm-debug.log*
 .yarn/cache/
 .yarn/unplugged/
 .yarn/install-state.gz
+
+# --------------------------------------------------------------------------
+# Android / Gradle build caches & Generated Native Projects
+# --------------------------------------------------------------------------
+.gradle/
+apps/mobile/android/
+**/android/.gradle/
+**/android/app/build/
+**/android/build/
+**/android/.cxx/
+**/android/*.iml
+**/android/local.properties
+**/android/app/debug.keystore
+
+# --------------------------------------------------------------------------
+# Releases (standalone APK distribution)
+# --------------------------------------------------------------------------
+!releases/
+!releases/*.apk
 
 # --------------------------------------------------------------------------
 # Python (apps/api, ml/, voice/, scripts/)
