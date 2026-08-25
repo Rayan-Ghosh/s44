@@ -19,6 +19,7 @@ import { StatusBadge } from "../components/common/StatusBadge";
 import { Button } from "../components/common/Button";
 import { useAuth } from "../context/AuthContext";
 import { useBiometrics } from "../context/BiometricContext";
+import { getApiBaseUrl } from "../services/api-client";
 
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -54,6 +55,15 @@ export const ProfileScreen: React.FC = () => {
 
   const handleInfo = (title: string, message: string) => {
     Alert.alert(title, message);
+  };
+
+  const handleServerConfig = () => {
+    const current = getApiBaseUrl();
+    Alert.alert(
+      "API Server Configuration",
+      `Active Base URL:\n${current}\n\nEvaluator options:\n1. Android Emulator: http://10.0.2.2:8000\n2. Physical Phone (Wi-Fi): http://<PC_IP>:8000\n3. Public Cloud: https://your-api.com\n\nSet EXPO_PUBLIC_API_URL during build or launch.`,
+      [{ text: "OK", style: "default" }]
+    );
   };
 
   const connectedApps = [
@@ -213,6 +223,18 @@ export const ProfileScreen: React.FC = () => {
               activeOpacity={0.7}
             >
               <Text style={styles.navLabel}>Privacy Policy</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.navRow}
+              onPress={handleServerConfig}
+              activeOpacity={0.7}
+            >
+              <View>
+                <Text style={styles.navLabel}>Server Endpoint</Text>
+                <Text style={styles.navSub}>{getApiBaseUrl()}</Text>
+              </View>
               <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
             </TouchableOpacity>
 

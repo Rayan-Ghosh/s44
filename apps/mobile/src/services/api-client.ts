@@ -1,15 +1,63 @@
-/**
- * Centralized API Client for Avaran Mobile Application.
- * Communicates with the FastAPI backend at EXPO_PUBLIC_API_URL.
- */
+import { Platform } from "react-native";
+import Constants from "expo-constants";
 
 declare const process: any;
 
-export const API_BASE_URL =
-  (typeof process !== "undefined" && process?.env?.EXPO_PUBLIC_API_URL) ||
-  (typeof window !== "undefined" && window?.location?.hostname === "localhost"
-    ? "http://localhost:8000"
-    : "http://10.0.2.2:8000");
+/**
+ * Default fallback URLs based on environment:
+ * - Web / Desktop: http://localhost:8000
+ * - Android Emulator: http://10.0.2.2:8000
+ * - Physical Phone / Production: Configured via EXPO_PUBLIC_API_URL or runtime setApiBaseUrl()
+ */
+const getDefaultFallbackUrl = (): string => {
+  if (Platform.OS === "web" || (typeof window !== "undefined" && window?.location?.hostname === "localhost")) {
+    return "http://localhost:8000";
+  }
+  if (Platform.OS === "android") {
+    return "http://10.0.2.2:8000";
+  }
+  return "http://localhost:8000";
+};
+
+let _customApiBaseUrl: string | null = null;
+
+export const sanitizeApiUrl = (url: string): string => {
+  let clean = url.trim();
+  if (!clean) return getDefaultFallbackUrl();
+  if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+    clean = `http://${clean}`;
+  }
+  return clean.replace(/\/+$/, "");
+};
+
+export const getApiBaseUrl = (): string => {
+  if (_customApiBaseUrl) {
+    return _customApiBaseUrl;
+  }
+  const envUrl = typeof process !== "undefined" ? process?.env?.EXPO_PUBLIC_API_URL : null;
+  if (envUrl && typeof envUrl === "string" && envUrl.trim()) {
+    return sanitizeApiUrl(envUrl);
+  }
+  const extraUrl = Constants?.expoConfig?.extra?.apiUrl;
+  if (extraUrl && typeof extraUrl === "string" && extraUrl.trim()) {
+    return sanitizeApiUrl(extraUrl);
+  }
+  return getDefaultFallbackUrl();
+};
+
+export const setApiBaseUrl = (url: string | null): void => {
+  if (!url || !url.trim()) {
+    _customApiBaseUrl = null;
+  } else {
+    _customApiBaseUrl = sanitizeApiUrl(url);
+  }
+};
+
+export const resetApiBaseUrl = (): void => {
+  _customApiBaseUrl = null;
+};
+
+export const API_BASE_URL = getApiBaseUrl();
 
 export const IS_DEMO_MODE =
   typeof process !== "undefined" && process?.env?.EXPO_PUBLIC_DEMO_MODE === "true";
@@ -36,7 +84,9 @@ export class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
-    const url = `${API_BASE_URL}${endpoint}`;
+    const baseUrl = getApiBaseUrl();
+    const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    const url = `${baseUrl}${cleanEndpoint}`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
