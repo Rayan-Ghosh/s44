@@ -1,0 +1,55 @@
+apps/api/app/api/routers/risk.py:2: leftover conflict marker
+apps/api/app/api/routers/risk.py:14: leftover conflict marker
+apps/api/app/api/routers/risk.py:16: leftover conflict marker
+apps/api/app/api/routers/risk.py:28: leftover conflict marker
+apps/api/app/api/routers/risk.py:30: leftover conflict marker
+apps/api/app/api/routers/risk.py:32: leftover conflict marker
+apps/api/app/api/routers/risk.py:51: leftover conflict marker
+apps/api/app/api/routers/risk.py:60: leftover conflict marker
+apps/api/app/api/routers/risk.py:137: leftover conflict marker
+apps/api/app/api/routers/transactions.py:40: leftover conflict marker
+apps/api/app/api/routers/transactions.py:76: leftover conflict marker
+apps/api/app/api/routers/transactions.py:111: trailing whitespace.
+[32m+[m[41m    [m
+apps/api/app/api/routers/transactions.py:123: leftover conflict marker
+apps/api/app/core/security.py:54: new blank line at EOF.
+apps/api/app/main.py:22: leftover conflict marker
+apps/api/app/main.py:29: leftover conflict marker
+apps/api/app/main.py:33: leftover conflict marker
+apps/api/app/models/__init__.py:38: new blank line at EOF.
+apps/api/app/models/guardian_request.py:42: new blank line at EOF.
+apps/api/app/models/trusted_contact.py:41: new blank line at EOF.
+apps/api/app/models/user.py:44: new blank line at EOF.
+apps/api/app/repositories/risk_repository.py:18: leftover conflict marker
+apps/api/app/repositories/risk_repository.py:31: leftover conflict marker
+apps/api/app/repositories/risk_repository.py:41: leftover conflict marker
+apps/api/app/repositories/risk_repository.py:46: leftover conflict marker
+apps/api/app/repositories/risk_repository.py:51: leftover conflict marker
+apps/api/app/repositories/risk_repository.py:52: leftover conflict marker
+apps/api/app/repositories/risk_repository.py:60: leftover conflict marker
+apps/api/app/repositories/risk_repository.py:84: leftover conflict marker
+apps/api/app/repositories/risk_repository.py:99: leftover conflict marker
+apps/api/app/repositories/transaction_repository.py:3: leftover conflict marker
+apps/api/app/repositories/transaction_repository.py:6: leftover conflict marker
+apps/api/app/repositories/transaction_repository.py:7: leftover conflict marker
+apps/api/app/repositories/transaction_repository.py:42: leftover conflict marker
+apps/api/app/repositories/transaction_repository.py:75: leftover conflict marker
+apps/api/app/repositories/transaction_repository.py:98: leftover conflict marker
+apps/api/tests/test_risk_api.py:66: leftover conflict marker
+apps/api/tests/test_risk_api.py:76: leftover conflict marker
+apps/api/tests/test_risk_api.py:78: leftover conflict marker
+apps/api/tests/test_risk_api.py:84: leftover conflict marker
+apps/api/tests/test_risk_api.py:93: leftover conflict marker
+apps/api/tests/test_risk_api.py:98: leftover conflict marker
+apps/mobile/android/settings.gradle:9: trailing whitespace.
+[32m+[m[41m  [m
+ml/explainability/__init__.py:31: new blank line at EOF.
+ml/explainability/shap_explainer.py:251: new blank line at EOF.
+ml/features/__init__.py:38: new blank line at EOF.
+ml/inference/__init__.py:39: new blank line at EOF.
+ml/inference/predict.py:494: leftover conflict marker
+ml/inference/predict.py:507: leftover conflict marker
+ml/inference/predict.py:509: leftover conflict marker
+ml/training/train_anomaly.py:133: new blank line at EOF.
+scripts/generate_synthetic_data.py:264: new blank line at EOF.
+voice/classifier.py:107: new blank line at EOF.
