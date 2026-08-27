@@ -20,6 +20,7 @@ import { RiskContributionBar } from "../components/common/RiskContributionBar";
 import { RiskTimeline } from "../components/common/RiskTimeline";
 import { Button } from "../components/common/Button";
 import { useAuth } from "../context/AuthContext";
+import { useGuardian } from "../context/GuardianContext";
 import {
   PaymentService,
   UserTransaction,
@@ -29,10 +30,21 @@ import {
 
 export const PaymentsScreen: React.FC = () => {
   const { session } = useAuth();
+  const {
+    trustedContacts,
+    isTrustedFeatureEnabled,
+    initiateGuardianRequest,
+    activeRequest,
+    countdown,
+    paymentOutcome,
+    clearPaymentOutcome,
+  } = useGuardian();
+
   const [overview, setOverview] = useState<UserPaymentOverview>(SEED_PAYMENT_OVERVIEW);
   const [transactions, setTransactions] = useState<UserTransaction[]>([]);
   const [filter, setFilter] = useState<"all" | "review" | "safe">("all");
   const [selectedTx, setSelectedTx] = useState<UserTransaction | null>(null);
+  const [awaitingGuardian, setAwaitingGuardian] = useState(false);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -67,12 +79,57 @@ export const PaymentsScreen: React.FC = () => {
     loadPayments();
   }, [loadPayments]);
 
+  // Watch for guardian decision and update UI accordingly
+  useEffect(() => {
+    if (!awaitingGuardian || !paymentOutcome) return;
+
+    if (paymentOutcome === "APPROVED") {
+      setAwaitingGuardian(false);
+      Alert.alert(
+        "Payment Approved",
+        "Your trusted contact approved this payment."
+      );
+      setSelectedTx(null);
+      loadPayments();
+      clearPaymentOutcome();
+    } else if (paymentOutcome === "REJECTED") {
+      setAwaitingGuardian(false);
+      Alert.alert(
+        "Payment Rejected",
+        "Your trusted contact rejected this payment."
+      );
+      loadPayments();
+      clearPaymentOutcome();
+    } else if (paymentOutcome === "EXPIRED") {
+      setAwaitingGuardian(false);
+      // Keep paymentOutcome as "EXPIRED" so the inline message stays visible.
+      // User dismisses by tapping another transaction or refreshing.
+      loadPayments();
+    }
+  }, [paymentOutcome, awaitingGuardian, loadPayments, clearPaymentOutcome]);
+
   const onRefresh = () => {
     setIsRefreshing(true);
     loadPayments();
   };
 
   const handleConfirm = async (txId: string) => {
+    // HIGH-RISK payments require guardian approval ONLY IF trusted feature is enabled
+    if (selectedTx && selectedTx.riskLevel === "HIGH" && isTrustedFeatureEnabled) {
+      if (trustedContacts.length === 0) {
+        Alert.alert(
+          "No Trusted Contact",
+          "Add a trusted contact first in the Trusted tab to enable guardian approvals for high-risk payments."
+        );
+        return;
+      }
+      // Intercept: dispatch guardian approval request instead of confirming directly
+      initiateGuardianRequest(selectedTx);
+      setAwaitingGuardian(true);
+      return;
+    }
+
+    // Low/Medium risk or when Trusted Feature is OFF — confirm directly
     setIsActing(true);
     const res = await PaymentService.confirmTransaction(txId);
     setIsActing(false);
@@ -272,31 +329,65 @@ export const PaymentsScreen: React.FC = () => {
                 {/* USER CONFIRMATION ACTIONS */}
                 {selectedTx.status === "Risk detected" || selectedTx.status === "Held" ? (
                   <View style={styles.decisionBlock}>
-                    <View style={styles.actionRow}>
-                      <Button
-                        label="I RECOGNIZE THIS PAYMENT"
-                        onPress={() => handleConfirm(selectedTx.id)}
-                        loading={isActing}
-                        variant="primary"
-                        size="md"
-                        style={{ flex: 1 }}
-                      />
-                      <Button
-                        label="REPORT AS FRAUD"
-                        onPress={() => handleReport(selectedTx.id)}
-                        loading={isActing}
-                        variant="destructive"
-                        size="md"
-                        style={{ flex: 1 }}
-                      />
-                    </View>
+                    {/* Guardian awaiting state */}
+                    {awaitingGuardian && activeRequest ? (
+                      <View style={styles.guardianWaitBlock}>
+                        <View style={styles.guardianWaitHeader}>
+                          <Ionicons name="hourglass-outline" size={16} color={colors.caution} />
+                          <Text style={styles.guardianWaitTitle}>Awaiting Guardian Approval</Text>
+                        </View>
+                        <Text style={styles.guardianWaitSub}>
+                          Sent to your trusted contact. Waiting for their response.
+                        </Text>
+                        <View style={styles.countdownRow}>
+                          <Text
+                            style={[
+                              styles.countdownNum,
+                              { color: countdown <= 15 ? colors.threat : colors.caution },
+                            ]}
+                          >
+                            {countdown}
+                          </Text>
+                          <Text style={styles.countdownLabel}>seconds remaining</Text>
+                        </View>
+                      </View>
+                    ) : paymentOutcome === "EXPIRED" ? (
+                      <View style={styles.expiredBlock}>
+                        <Ionicons name="time-outline" size={15} color={colors.textMuted} />
+                        <Text style={styles.expiredText}>
+                          No response. Payment rejected. Try again later.
+                        </Text>
+                      </View>
+                    ) : (
+                      /* Default action buttons */
+                      <View style={styles.actionRow}>
+                        <Button
+                          label="I RECOGNIZE THIS PAYMENT"
+                          onPress={() => handleConfirm(selectedTx.id)}
+                          loading={isActing}
+                          variant="primary"
+                          size="md"
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          label="REPORT AS FRAUD"
+                          onPress={() => handleReport(selectedTx.id)}
+                          loading={isActing}
+                          variant="destructive"
+                          size="md"
+                          style={{ flex: 1 }}
+                        />
+                      </View>
+                    )}
 
-                    <TouchableOpacity
-                      style={styles.cancelActionBtn}
-                      onPress={() => handleCancel(selectedTx.id)}
-                    >
-                      <Text style={styles.cancelActionText}>Cancel payment</Text>
-                    </TouchableOpacity>
+                    {!awaitingGuardian && paymentOutcome !== "EXPIRED" && (
+                      <TouchableOpacity
+                        style={styles.cancelActionBtn}
+                        onPress={() => handleCancel(selectedTx.id)}
+                      >
+                        <Text style={styles.cancelActionText}>Cancel payment</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ) : (
                   <View style={styles.settledBadge}>
@@ -329,7 +420,10 @@ export const PaymentsScreen: React.FC = () => {
                       isSelected && styles.txnCardSelected,
                       idx === transactions.length - 1 && styles.txnCardLast,
                     ]}
-                    onPress={() => setSelectedTx(item)}
+                    onPress={() => {
+                      setSelectedTx(item);
+                      if (paymentOutcome) clearPaymentOutcome();
+                    }}
                     activeOpacity={0.8}
                   >
                     <View style={styles.txnLeft}>
@@ -684,5 +778,65 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     paddingVertical: spacing.lg,
     textAlign: "center",
+  },
+  guardianWaitBlock: {
+    backgroundColor: colors.cautionSurface,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.cautionBorder,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  guardianWaitHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  guardianWaitTitle: {
+    ...typography.smallSemibold,
+    color: colors.cautionText,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  guardianWaitSub: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  countdownRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 6,
+    marginTop: 2,
+  },
+  countdownNum: {
+    fontSize: 28,
+    fontWeight: "800",
+    lineHeight: 32,
+    letterSpacing: -0.5,
+  },
+  countdownLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  expiredBlock: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  expiredText: {
+    ...typography.smallSemibold,
+    color: colors.textMuted,
+    fontSize: 12,
+    flex: 1,
   },
 });

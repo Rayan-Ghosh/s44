@@ -24,10 +24,12 @@ import {
   SEED_PAYMENT_OVERVIEW,
 } from "../services/payment-service";
 import { AlertService, SecurityAlert } from "../services/alert-service";
+import { useAlertBadge } from "../context/AlertBadgeContext";
 
 export const ProtectionScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { session } = useAuth();
+  const { clearProtectionBadge } = useAlertBadge();
 
   const [overview, setOverview] = useState<UserPaymentOverview>(SEED_PAYMENT_OVERVIEW);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
@@ -67,6 +69,7 @@ export const ProtectionScreen: React.FC = () => {
       "The suspicious caller has been flagged and reported to security intelligence."
     );
     setCallAlertDismissed(true);
+    clearProtectionBadge();
   };
 
   const handleMarkCallSafe = () => {
@@ -75,6 +78,7 @@ export const ProtectionScreen: React.FC = () => {
       "You marked this caller as safe. Feedback recorded."
     );
     setCallAlertDismissed(true);
+    clearProtectionBadge();
   };
 
   return (
