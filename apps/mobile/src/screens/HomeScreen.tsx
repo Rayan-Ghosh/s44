@@ -150,21 +150,21 @@ export const HomeScreen: React.FC = () => {
             <View style={styles.overviewCard}>
               <Text style={styles.overviewLabel}>Total this month</Text>
               <Text style={styles.totalAmount}>
-                ₹{overview.totalAmountThisMonth.toLocaleString("en-IN")}
+                ₹{(overview?.totalAmountThisMonth ?? 0).toLocaleString("en-IN")}
               </Text>
               <View style={styles.statsRow}>
                 <View style={styles.statItem}>
-                  <Text style={styles.statNumber}>{overview.transactionCount}</Text>
+                  <Text style={styles.statNumber}>{overview?.transactionCount ?? 0}</Text>
                   <Text style={styles.statLabel}>Total</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statNumber, { color: colors.safe }]}>{overview.safeCount}</Text>
+                  <Text style={[styles.statNumber, { color: colors.safe }]}>{overview?.safeCount ?? 0}</Text>
                   <Text style={styles.statLabel}>Safe</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statNumber, { color: colors.threat }]}>{overview.needsReviewCount}</Text>
+                  <Text style={[styles.statNumber, { color: colors.threat }]}>{overview?.needsReviewCount ?? 0}</Text>
                   <Text style={styles.statLabel}>Needs attention</Text>
                 </View>
               </View>
@@ -176,8 +176,8 @@ export const HomeScreen: React.FC = () => {
             <Text style={styles.sectionHeading}>CURRENT RISK STATUS</Text>
             <View style={styles.riskCard}>
               <RiskGauge
-                score={Math.round(overview.currentRiskScore)}
-                riskLevel={overview.currentRiskLevel}
+                score={Math.round(overview?.currentRiskScore ?? 0)}
+                riskLevel={overview?.currentRiskLevel || "LOW"}
                 size="md"
               />
             </View>
@@ -200,7 +200,7 @@ export const HomeScreen: React.FC = () => {
                   <View style={styles.attentionTextCol}>
                     <Text style={styles.attentionMerchant}>{suspiciousTx.merchant}</Text>
                     <Text style={styles.attentionAmount}>
-                      ₹{suspiciousTx.amount.toLocaleString("en-IN")}
+                      ₹{(suspiciousTx?.amount ?? 0).toLocaleString("en-IN")}
                     </Text>
                   </View>
                   <StatusBadge label="HIGH RISK" status="high" dot={false} />
@@ -254,7 +254,7 @@ export const HomeScreen: React.FC = () => {
                             isRisk && { color: colors.threatText },
                           ]}
                         >
-                          ₹{item.amount.toLocaleString("en-IN")}
+                          ₹{(item?.amount ?? 0).toLocaleString("en-IN")}
                         </Text>
                         <StatusBadge
                           label={

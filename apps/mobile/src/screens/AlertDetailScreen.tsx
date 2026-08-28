@@ -67,7 +67,7 @@ export const AlertDetailScreen: React.FC = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>WHY AVARAN FLAGGED IT</Text>
           <View style={styles.card}>
-            {alert.whyFlagged.map((item, idx) => (
+            {(alert.whyFlagged || []).map((item, idx) => (
               <View key={idx} style={styles.bulletRow}>
                 <Ionicons name="alert-circle" size={16} color={colors.threat} style={styles.bulletIcon} />
                 <Text style={styles.bulletText}>{item}</Text>
@@ -80,7 +80,7 @@ export const AlertDetailScreen: React.FC = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>WHAT YOU SHOULD DO</Text>
           <View style={styles.card}>
-            {alert.whatYouShouldDo.map((item, idx) => (
+            {(alert.whatYouShouldDo || []).map((item, idx) => (
               <View key={idx} style={styles.bulletRow}>
                 <Ionicons name="checkmark-circle" size={16} color={colors.brand} style={styles.bulletIcon} />
                 <Text style={styles.bulletText}>{item}</Text>

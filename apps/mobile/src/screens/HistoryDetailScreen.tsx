@@ -55,12 +55,12 @@ export const HistoryDetailScreen: React.FC = () => {
 
           <Text style={styles.primaryValue}>
             {isPayment
-              ? `₹${payment?.amount.toLocaleString("en-IN")}`
-              : call?.callerName}
+              ? `₹${(payment?.amount ?? 0).toLocaleString("en-IN")}`
+              : call?.callerName || "Unknown Caller"}
           </Text>
 
           <Text style={styles.secondaryValue}>
-            {isPayment ? payment?.recipientHandle : call?.callerNumber}
+            {isPayment ? payment?.recipientHandle || "N/A" : call?.callerNumber || "N/A"}
           </Text>
         </View>
 
@@ -70,24 +70,24 @@ export const HistoryDetailScreen: React.FC = () => {
           <View style={styles.detailGrid}>
             <View style={styles.row}>
               <Text style={styles.label}>Event Type</Text>
-              <Text style={styles.value}>{item.type.toUpperCase()}</Text>
+              <Text style={styles.value}>{(item.type || "").toUpperCase()}</Text>
             </View>
 
             <View style={styles.row}>
               <Text style={styles.label}>Recorded Timestamp</Text>
-              <Text style={styles.value}>{item.timestamp}</Text>
+              <Text style={styles.value}>{item.timestamp || "N/A"}</Text>
             </View>
 
             <View style={styles.row}>
               <Text style={styles.label}>Risk Engine Decision</Text>
               <Text style={styles.value}>
-                {item.riskScore >= 75 ? "Confirm / Cancel Flag" : "Standard Allow"}
+                {(item.riskScore ?? 0) >= 75 ? "Confirm / Cancel Flag" : "Standard Allow"}
               </Text>
             </View>
 
             <View style={styles.row}>
               <Text style={styles.label}>User Action</Text>
-              <Text style={styles.value}>{item.actionTaken.toUpperCase()}</Text>
+              <Text style={styles.value}>{(item.actionTaken || "").toUpperCase()}</Text>
             </View>
 
             {!isPayment && call && (

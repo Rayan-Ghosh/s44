@@ -125,7 +125,7 @@ export const PaymentsScreen: React.FC = () => {
       <View style={styles.titleSection}>
         <Text style={styles.screenHeading}>Payments</Text>
         <Text style={styles.screenSubtitle}>
-          {overview.transactionCount} transactions · ₹{overview.totalAmountThisMonth.toLocaleString("en-IN")} this month
+          {overview?.transactionCount ?? 0} transactions · ₹{(overview?.totalAmountThisMonth ?? 0).toLocaleString("en-IN")} this month
         </Text>
       </View>
 
@@ -136,7 +136,7 @@ export const PaymentsScreen: React.FC = () => {
             { key: "all", label: "All" },
             {
               key: "review",
-              label: `Needs Review (${overview.needsReviewCount})`,
+              label: `Needs Review (${overview?.needsReviewCount ?? 0})`,
             },
             { key: "safe", label: "Safe" },
           ] as const
@@ -181,7 +181,7 @@ export const PaymentsScreen: React.FC = () => {
                   <Text style={styles.detailHeading}>PAYMENT DETAILS</Text>
                   <Text style={styles.detailMerchant}>{selectedTx.merchant}</Text>
                   <Text style={styles.detailAmount}>
-                    ₹{selectedTx.amount.toLocaleString("en-IN")}
+                    ₹{(selectedTx?.amount ?? 0).toLocaleString("en-IN")}
                   </Text>
                   <Text style={styles.detailMeta}>
                     Method: {selectedTx.paymentMethod} · {selectedTx.date}
@@ -360,7 +360,7 @@ export const PaymentsScreen: React.FC = () => {
                           isRisk && { color: colors.threatText },
                         ]}
                       >
-                        ₹{item.amount.toLocaleString("en-IN")}
+                        ₹{(item?.amount ?? 0).toLocaleString("en-IN")}
                       </Text>
                       <StatusBadge
                         label={
