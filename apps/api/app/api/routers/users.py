@@ -127,3 +127,61 @@ def get_user_transactions(
         })
 
     return {"items": items, "total": total}
+
+
+@router.get("/{user_id}/trusted-contacts")
+def get_user_trusted_contacts_by_path(user_id: int, db: Session = Depends(get_db)) -> list:
+    from app.repositories import guardian_repository
+    contacts = guardian_repository.get_trusted_contacts_by_user(db, user_id)
+    return [
+        {
+            "id": c.id,
+            "name": c.contact_name,
+            "phone": c.phone_masked,
+            "phone_number": c.phone_masked,
+            "relationship": c.relationship,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in contacts
+    ]
+
+
+@router.post("/{user_id}/trusted-contacts", status_code=201)
+def add_user_trusted_contact_by_path(user_id: int, payload: dict, db: Session = Depends(get_db)) -> dict:
+    from app.core.security import hash_identifier, mask_phone
+    from app.repositories import guardian_repository
+
+    name = payload.get("name") or payload.get("contact_name") or "Contact"
+    phone_raw = payload.get("phone_number") or payload.get("phone") or "+91-98765-00000"
+    rel = payload.get("relationship") or "Family"
+
+    phone_hash = hash_identifier(phone_raw)
+    phone_masked = mask_phone(phone_raw)
+
+    c = guardian_repository.create_trusted_contact(
+        db,
+        user_id=user_id,
+        contact_name=name,
+        contact_phone_hash=phone_hash,
+        phone_masked=phone_masked,
+        relationship=rel,
+    )
+    return {
+        "id": c.id,
+        "name": c.contact_name,
+        "phone": c.phone_masked,
+        "phone_number": c.phone_masked,
+        "relationship": c.relationship,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@router.delete("/{user_id}/trusted-contacts/{contact_id}")
+def delete_user_trusted_contact_by_path(user_id: int, contact_id: int, db: Session = Depends(get_db)) -> dict:
+    from app.models.guardian import TrustedContact
+    contact = db.query(TrustedContact).filter(TrustedContact.id == contact_id, TrustedContact.user_id == user_id).first()
+    if contact:
+        db.delete(contact)
+        db.commit()
+    return {"success": True}
+
