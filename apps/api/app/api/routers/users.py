@@ -53,7 +53,7 @@ def get_user_transactions(
         latest_risk = t.risk_scores[-1] if t.risk_scores else None
         items.append({
             "id": t.id,
-            "merchant": t.recipient.vpa if t.recipient else "UPI Merchant",
+            "merchant": t.recipient.display_name if (t.recipient and t.recipient.display_name) else "UPI Merchant",
             "amount": float(t.amount),
             "timestamp": t.timestamp.isoformat() if t.timestamp else "",
             "payment_method": t.payment_method or "UPI",
@@ -95,9 +95,9 @@ def get_user_overview(user_id: int, db: Session = Depends(get_db)) -> dict:
         }
 
     total_amount = sum(float(t.amount) for t in txns)
-    safe_count = sum(1 for t in txns if t.status in (TransactionStatus.CONFIRMED, TransactionStatus.SETTLED))
-    needs_review_count = sum(1 for t in txns if t.status in (TransactionStatus.HELD, TransactionStatus.NEEDS_REVIEW, TransactionStatus.PENDING))
-    blocked_count = sum(1 for t in txns if t.status in (TransactionStatus.BLOCKED, TransactionStatus.CANCELLED))
+    safe_count = sum(1 for t in txns if t.status in (TransactionStatus.CONFIRMED, TransactionStatus.ALLOWED, TransactionStatus.GUARDIAN_APPROVED))
+    needs_review_count = sum(1 for t in txns if t.status in (TransactionStatus.AWAITING_CONFIRMATION, TransactionStatus.PENDING, TransactionStatus.PENDING_GUARDIAN_APPROVAL))
+    blocked_count = sum(1 for t in txns if t.status in (TransactionStatus.CANCELLED, TransactionStatus.GUARDIAN_REJECTED))
     reported_count = sum(1 for t in txns if t.status == TransactionStatus.REPORTED)
 
     latest_risk = 12.0
