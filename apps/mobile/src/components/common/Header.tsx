@@ -14,6 +14,9 @@ interface HeaderProps {
     icon: keyof typeof Ionicons.glyphMap;
     label?: string;
     onPress: () => void;
+    color?: string;
+    backgroundColor?: string;
+    isActive?: boolean;
   };
 }
 
@@ -65,11 +68,36 @@ export const Header: React.FC<HeaderProps> = ({
           {rightAction ? (
             <TouchableOpacity
               onPress={rightAction.onPress}
-              style={styles.actionButton}
+              style={[
+                styles.actionButton,
+                rightAction.backgroundColor ? { backgroundColor: rightAction.backgroundColor } : null,
+                rightAction.isActive !== undefined
+                  ? {
+                      backgroundColor: rightAction.isActive
+                        ? colors.brandSurface
+                        : colors.surfaceSecondary,
+                      borderColor: rightAction.isActive
+                        ? colors.brandBorder
+                        : colors.borderLight,
+                      borderWidth: 1,
+                    }
+                  : null,
+              ]}
               accessibilityRole="button"
               accessibilityLabel={rightAction.label || "Action"}
             >
-              <Ionicons name={rightAction.icon} size={18} color={colors.textSecondary} />
+              <Ionicons
+                name={rightAction.icon}
+                size={18}
+                color={
+                  rightAction.color ||
+                  (rightAction.isActive !== undefined
+                    ? rightAction.isActive
+                      ? colors.brand
+                      : colors.textMuted
+                    : colors.textSecondary)
+                }
+              />
             </TouchableOpacity>
           ) : (
             <View style={styles.rightPlaceholder} />

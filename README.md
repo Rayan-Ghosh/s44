@@ -195,3 +195,32 @@ Verified: 28 passed — health endpoints, Alembic migration against a fresh
 database, ORM relationship integrity, and full CRUD/validation coverage
 for the users/transactions/risk/alerts API surface. Tests run against an
 isolated temporary SQLite database and never touch `Avaran.db`.
+
+---
+
+## Download and Install Android APK
+
+Anyone can download, install, and run the standalone AVARAN Android application on an Android phone without Expo Go, Metro, VS Code, or a development server.
+
+### Installation Steps
+
+1. **Download `AVARAN.apk`** from the [`releases/`](releases/AVARAN.apk) directory in GitHub (or repository releases).
+2. **Transfer / download** it to your Android phone (via direct browser download, USB, WhatsApp, or Google Drive).
+3. **Open the APK** file on your device (from your browser downloads or file manager).
+4. **Allow installation from unknown sources** if prompted by Android security settings:
+   - Go to *Settings* &rarr; *Install Unknown Apps* (or tap *Settings* on the install prompt) and toggle *Allow from this source*.
+5. **Install AVARAN** by tapping *Install*.
+6. **Open the app** from your app drawer or home screen.
+
+### API URL & Evaluator Configuration
+
+- **Local Backend (Android Emulator)**:
+  - Start the backend on the host machine:
+    ```bash
+    .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir apps/api
+    ```
+  - The standalone APK automatically resolves host localhost via `http://10.0.2.2:8000`.
+- **Physical Device**:
+  - Point `EXPO_PUBLIC_API_URL` to `http://<YOUR_LOCAL_IP>:8000` or a deployed public backend HTTPS URL.
+- **Offline Mode**:
+  - The app gracefully falls back to local secure protection if the backend is unreachable.

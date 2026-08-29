@@ -1,23 +1,30 @@
 {
   "expo": {
-    "name": "Avaran Fraud Protection",
+    "name": "AVARAN",
     "slug": "avaran-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "backgroundColor": "#F3F2EF",
     "icon": "./assets/icon.png",
-
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.avaran.security"
     },
     "android": {
       "package": "com.avaran.security",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F3F2EF"
-      }
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE"
+      ]
     },
     "web": {
       "bundler": "metro"

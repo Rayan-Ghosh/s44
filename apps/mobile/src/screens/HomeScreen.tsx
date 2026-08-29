@@ -17,6 +17,8 @@ import { Header } from "../components/common/Header";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { RiskGauge } from "../components/common/RiskGauge";
 import { useAuth } from "../context/AuthContext";
+import { useGuardian } from "../context/GuardianContext";
+import { useAlertBadge } from "../context/AlertBadgeContext";
 import {
   PaymentService,
   UserPaymentOverview,
@@ -24,10 +26,23 @@ import {
   SEED_PAYMENT_OVERVIEW,
 } from "../services/payment-service";
 import { AlertService, SecurityAlert } from "../services/alert-service";
+import { NotificationDropdown } from "../components/guardian/NotificationDropdown";
+import { GuardianApprovalCard } from "../components/guardian/GuardianApprovalCard";
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { session } = useAuth();
+  const {
+    pendingRequests,
+    notificationBadge,
+    openApprovalCard,
+    closeApprovalCard,
+    approvalCard,
+    respondToRequest,
+    clearNotificationBadge,
+  } = useGuardian();
+
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
 
   const [overview, setOverview] = useState<UserPaymentOverview>(SEED_PAYMENT_OVERVIEW);
   const [recentTxns, setRecentTxns] = useState<UserTransaction[]>([]);
@@ -80,6 +95,17 @@ export const HomeScreen: React.FC = () => {
     <View style={styles.screen}>
       <Header />
 
+      {/* Notification dropdown (modal overlay, positioned near bell) */}
+      <NotificationDropdown
+        visible={notifDropdownOpen}
+        requests={pendingRequests}
+        onSelectRequest={(req) => {
+          openApprovalCard(req);
+          setNotifDropdownOpen(false);
+        }}
+        onDismiss={() => setNotifDropdownOpen(false)}
+      />
+
       {isLoading ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={colors.brand} />
@@ -110,9 +136,42 @@ export const HomeScreen: React.FC = () => {
           ) : null}
 
           {/* Greeting */}
-          <Text style={styles.greetingTitle}>
-            {getGreeting()}, {userName}
-          </Text>
+          <View style={styles.greetingRow}>
+            <Text style={styles.greetingTitle}>
+              {getGreeting()}, {userName}
+            </Text>
+            <TouchableOpacity
+              style={styles.notificationBtn}
+              activeOpacity={0.7}
+              accessibilityLabel="Notifications"
+              accessibilityRole="button"
+              onPress={() => {
+                clearNotificationBadge();
+                setNotifDropdownOpen((v) => !v);
+              }}
+            >
+              <Ionicons
+                name="notifications-outline"
+                size={22}
+                color={notificationBadge > 0 ? colors.threat : colors.textSecondary}
+              />
+              {notificationBadge > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{notificationBadge}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {/* Guardian approval card (shown when guardian taps a notification) */}
+          {approvalCard && (
+            <GuardianApprovalCard
+              request={approvalCard}
+              onConfirm={() => respondToRequest(approvalCard.id, "APPROVED")}
+              onReject={() => respondToRequest(approvalCard.id, "REJECTED")}
+              onDismiss={closeApprovalCard}
+            />
+          )}
 
           {/* Protection Status Banner */}
           <View
@@ -364,13 +423,30 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.brand,
   },
+  greetingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.md,
+    marginTop: spacing.xs,
+  },
   greetingTitle: {
     ...typography.h2,
     color: colors.textPrimary,
     fontSize: 24,
     fontWeight: "700",
-    marginBottom: spacing.md,
-    marginTop: spacing.xs,
+    flex: 1,
+  },
+  notificationBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: spacing.sm,
   },
   protectionBanner: {
     flexDirection: "row",
@@ -628,5 +704,25 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontWeight: "700",
     fontSize: 10,
+  },
+  bellBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: colors.threat,
+    borderRadius: radii.full,
+    minWidth: 16,
+    height: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: colors.surface,
+  },
+  bellBadgeText: {
+    color: colors.textInverse,
+    fontSize: 9,
+    fontWeight: "800",
+    lineHeight: 11,
   },
 });

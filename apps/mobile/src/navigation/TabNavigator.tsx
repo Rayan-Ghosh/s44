@@ -11,9 +11,12 @@ import { createBottomTabNavigator, BottomTabBarProps } from "@react-navigation/b
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../theme/colors";
 import { radii, spacing } from "../theme/layout";
+import { AlertBadgeProvider, useAlertBadge } from "../context/AlertBadgeContext";
+import { GuardianProvider } from "../context/GuardianContext";
 import { HomeScreen } from "../screens/HomeScreen";
 import { PaymentsScreen } from "../screens/PaymentsScreen";
 import { ProtectionScreen } from "../screens/ProtectionScreen";
+import { TrustedScreen } from "../screens/TrustedScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 
 const Tab = createBottomTabNavigator();
@@ -44,7 +47,12 @@ const TAB_CONFIGS: TabConfig[] = [
     label: "Protection",
     iconName: "shield-checkmark",
     outlineIconName: "shield-checkmark-outline",
-    badge: 1,
+  },
+  {
+    name: "Trusted",
+    label: "Trusted",
+    iconName: "people",
+    outlineIconName: "people-outline",
   },
   {
     name: "Profile",
@@ -61,6 +69,7 @@ const CustomBottomTabBar: React.FC<BottomTabBarProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, Platform.OS === "android" ? 8 : 16);
+  const { protectionBadge } = useAlertBadge();
 
   return (
     <View style={[styles.tabBarContainer, { paddingBottom: bottomPadding }]}>
@@ -73,6 +82,8 @@ const CustomBottomTabBar: React.FC<BottomTabBarProps> = ({
             iconName: "square" as const,
             outlineIconName: "square-outline" as const,
           };
+          const badgeCount =
+            route.name === "Protection" ? protectionBadge : (config.badge ?? 0);
 
           const onPress = () => {
             const event = navigation.emit({
@@ -112,9 +123,9 @@ const CustomBottomTabBar: React.FC<BottomTabBarProps> = ({
                     size={20}
                     color={isFocused ? colors.navTextActive : colors.navText}
                   />
-                  {config.badge && config.badge > 0 ? (
+                  {badgeCount > 0 ? (
                     <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{config.badge}</Text>
+                      <Text style={styles.badgeText}>{badgeCount}</Text>
                     </View>
                   ) : null}
                 </View>
@@ -139,17 +150,22 @@ const CustomBottomTabBar: React.FC<BottomTabBarProps> = ({
 
 export const TabNavigator: React.FC = () => {
   return (
-    <Tab.Navigator
-      tabBar={(props) => <CustomBottomTabBar {...props} />}
-      screenOptions={{
-        headerShown: false,
-      }}
-    >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Payments" component={PaymentsScreen} />
-      <Tab.Screen name="Protection" component={ProtectionScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
-    </Tab.Navigator>
+    <GuardianProvider>
+      <AlertBadgeProvider>
+        <Tab.Navigator
+          tabBar={(props) => <CustomBottomTabBar {...props} />}
+          screenOptions={{
+            headerShown: false,
+          }}
+        >
+          <Tab.Screen name="Home" component={HomeScreen} />
+          <Tab.Screen name="Payments" component={PaymentsScreen} />
+          <Tab.Screen name="Protection" component={ProtectionScreen} />
+          <Tab.Screen name="Trusted" component={TrustedScreen} />
+          <Tab.Screen name="Profile" component={ProfileScreen} />
+        </Tab.Navigator>
+      </AlertBadgeProvider>
+    </GuardianProvider>
   );
 };
 

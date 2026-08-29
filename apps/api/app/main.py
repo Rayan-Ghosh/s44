@@ -40,6 +40,7 @@ app.include_router(voice_stream.router)
 
 
 @app.get("/health")
+@app.get("/api/v1/health")
 def health() -> dict:
     """Liveness check: the application process is up and responding."""
     return {"status": "ok", "app": settings.app_name, "environment": settings.environment}
