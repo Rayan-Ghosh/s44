@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from "react-native";
+import { NativeModules, PermissionsAndroid, Platform } from "react-native";
 
 /**
  * Bridges to CallGuardModule.kt (apps/mobile/android/.../telemetry/), which
@@ -22,9 +22,28 @@ const { CallGuardModule } = NativeModules as {
 export const isCallGuardAvailable = (): boolean =>
   Platform.OS === "android" && !!CallGuardModule;
 
+// Permissions used to be requested once, automatically, on app launch.
+// They're now requested here instead, the first time the user actually
+// taps "Detect Current Call" — nothing asks for the mic or shows a
+// foreground-service notification until then.
+const requestCallGuardPermissions = async (): Promise<boolean> => {
+  const granted = await PermissionsAndroid.requestMultiple([
+    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+    PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
+  ]);
+  return (
+    granted[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] === PermissionsAndroid.RESULTS.GRANTED &&
+    granted[PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE] === PermissionsAndroid.RESULTS.GRANTED
+  );
+};
+
 export const startCallDetection = async (): Promise<{ success: boolean; error?: string }> => {
   if (!isCallGuardAvailable()) {
     return { success: false, error: "Live call detection is only available on Android." };
+  }
+  const hasPermissions = await requestCallGuardPermissions();
+  if (!hasPermissions) {
+    return { success: false, error: "Microphone and phone-state permissions are required to detect a live call." };
   }
   try {
     await CallGuardModule!.startDetection();
