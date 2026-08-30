@@ -1,14 +1,8 @@
 package com.avaran.security
 import expo.modules.splashscreen.SplashScreenManager
 
-import android.Manifest
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -17,32 +11,19 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 import expo.modules.ReactActivityDelegateWrapper
 
-import com.avaran.security.telemetry.LiveCallAudioService
-
 class MainActivity : ReactActivity() {
 
-  // LiveCallAudioService (telemetry/LiveCallAudioService.kt) has the call-
-  // detection/audio-capture logic, but a plain Android Service never
-  // self-starts — something has to call startForegroundService() on it.
-  // This is that "something": request the two permissions it needs, then
-  // start it once, here, so it's alive in the background for the lifetime
-  // of the app and can react to the next call regardless of which screen
-  // the user is on.
-  private val callGuardPermissionLauncher =
-    registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
-      startLiveCallAudioServiceIfPermitted()
-    }
-
-  private fun startLiveCallAudioServiceIfPermitted() {
-    val hasRecordAudio = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-      PackageManager.PERMISSION_GRANTED
-    val hasReadPhoneState = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) ==
-      PackageManager.PERMISSION_GRANTED
-
-    if (hasRecordAudio && hasReadPhoneState) {
-      ContextCompat.startForegroundService(this, Intent(this, LiveCallAudioService::class.java))
-    }
-  }
+  // LiveCallAudioService used to be started here, on every app launch,
+  // which meant it asked for RECORD_AUDIO/READ_PHONE_STATE and put up its
+  // foreground-service notification before the user did anything. Real
+  // detection only works while the user has the app open and has tapped
+  // "Detect Current Call" anyway (see CallGuardModule.kt / VoiceScreen.tsx)
+  // — background auto-listening on a real call is currently unreachable
+  // (Android blocks a background app from getting genuine mic access
+  // during an ordinary call) and shouldn't be visibly requesting
+  // permissions or running until we have a real access path for it. The
+  // service is now started/stopped only via the explicit button, which
+  // also requests permissions on demand (see call-guard.ts).
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // Set the theme to AppTheme BEFORE onCreate to support
@@ -53,19 +34,6 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
-
-    val hasRecordAudio = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-      PackageManager.PERMISSION_GRANTED
-    val hasReadPhoneState = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) ==
-      PackageManager.PERMISSION_GRANTED
-
-    if (hasRecordAudio && hasReadPhoneState) {
-      startLiveCallAudioServiceIfPermitted()
-    } else {
-      callGuardPermissionLauncher.launch(
-        arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_PHONE_STATE)
-      )
-    }
   }
 
   /**

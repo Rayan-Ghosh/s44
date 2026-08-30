@@ -145,6 +145,11 @@ class LiveCallAudioService : Service() {
     }
 
     private fun handleCallState(state: Int) {
+        // Disabled: see AUTO_START_ON_REAL_CALL. Detection during a real
+        // (non-test) call is manual-only for now, via ACTION_START_DETECTION/
+        // ACTION_STOP_DETECTION from the "Detect Current Call" button.
+        if (!AUTO_START_ON_REAL_CALL) return
+
         when (state) {
             TelephonyManager.CALL_STATE_OFFHOOK -> startSpeechDetection()
             TelephonyManager.CALL_STATE_IDLE, TelephonyManager.CALL_STATE_RINGING -> stopSpeechDetection()
@@ -382,6 +387,19 @@ class LiveCallAudioService : Service() {
         // immediately. The classifier keeps scoring every utterance from the
         // very first one regardless — this only gates the visible alert.
         private const val MIN_LISTEN_BEFORE_ALERT_MS = 35_000L
+
+        // Real (non-test) calls don't get genuine background mic access on
+        // this Android version regardless — confirmed empirically via live
+        // testing (RMS/onBeginningOfSpeech only fired with the app
+        // foregrounded). Until there's a real access path for that (e.g. a
+        // CallScreeningService entitlement or similar), automatically
+        // starting detection off TelephonyManager's call-state callback is
+        // pointless and just means the service silently tries and requests
+        // permissions/notification state around every real call the user
+        // makes. Flip this to true once that real access path exists —
+        // handleCallState() already has the correct start/stop logic, it's
+        // just gated off.
+        private const val AUTO_START_ON_REAL_CALL = false
 
         const val SAMPLE_RATE_HZ = 16_000
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
