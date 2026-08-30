@@ -16,6 +16,7 @@ import { typography } from "../../theme/typography";
 import { spacing, radii, shadows } from "../../theme/layout";
 import { PaymentLinkService } from "../../services/payment-link-service";
 import { UserTransaction } from "../../services/payment-service";
+import { useAuth } from "../../context/AuthContext";
 
 interface SimulatePaymentLinkModalProps {
   visible: boolean;
@@ -55,23 +56,32 @@ export const SimulatePaymentLinkModal: React.FC<SimulatePaymentLinkModalProps> =
   onShowToast,
 }) => {
   const [customUrl, setCustomUrl] = useState<string>("");
+  const { session } = useAuth();
 
-  const handleTrigger = (url: string) => {
+  const handleTrigger = async (url: string) => {
     if (!url.trim()) {
       onShowToast("Please enter a valid payment link or UPI URI", "info");
+      return;
+    }
+    if (!session?.userId) {
+      onShowToast("Please log in before simulating a payment link.", "info");
       return;
     }
 
     onShowToast("Analyzing payment security in real time...", "info");
     const parsed = PaymentLinkService.parsePaymentUrl(url);
-    const newTx = PaymentLinkService.ingestPaymentRequest(parsed);
+    const newTx = await PaymentLinkService.createAndEvaluate(parsed, session.userId);
+    if (!newTx) {
+      onShowToast("Unable to reach the Avaran server to evaluate this link.", "warning");
+      return;
+    }
 
     onPaymentIntercepted(newTx);
     onShowToast(
-      parsed.riskLevel === "HIGH"
+      newTx.riskLevel === "HIGH"
         ? "🚨 High-risk payment link intercepted!"
         : "✓ Payment link analyzed successfully",
-      parsed.riskLevel === "HIGH" ? "warning" : "success"
+      newTx.riskLevel === "HIGH" ? "warning" : "success"
     );
     onClose();
   };

@@ -76,7 +76,41 @@ def generate_synthetic_dataset(num_samples: int = 50000, seed: int = 42) -> Tupl
         "Mee bank account narcotics crime tho link ayyindi. Police custody lo veyyakunda undalante ventane security amount deposit cheyyandi.",
         "Thwade account te CBI case darj hoya hai. Court challan da jurmana turant jama karwao nahi taan giraftari hovegi.",
         "Tamara bank account ma illegal hawala transactions malya che. Turant police verification fee pay karo.",
-        "Nimma bank khateyannu freeze madalagide. Police arrestinda thappisikollalu koodale hana vargayisi."
+        "Nimma bank khateyannu freeze madalagide. Police arrestinda thappisikollalu koodale hana vargayisi.",
+
+        # --- Category: Bank Impersonation (OTP / CVV Phishing) ---
+        "Sir uh, this is regarding your debit card, we noticed a suspicious charge of 500 dollars just now. To reverse it immediately I just need you to read out the O-T-P you received.",
+        "Maam I am calling from your bank's fraud department, don't worry we caught it in time, but you need to confirm your identity, please tell me the six digit code sent to your phone right now.",
+        "Hello sir, um, your card has been temporarily blocked due to unusual activity. To unblock immediately just share the CVV printed on the back of your card.",
+        "This is bank security calling, hold on, we're seeing a withdrawal attempt on your account, quickly read me the OTP so we can cancel it before it processes.",
+
+        # --- Category: Fake KYC / Account Suspension ---
+        "Sir your Aadhaar linked KYC verification has expired, uh, your account will be suspended within 24 hours, please click the link we just sent and download the verification app immediately.",
+        "This is urgent, your PAN and bank KYC mismatch has been detected, if not resolved today your account will be permanently suspended, click the SMS link now to update.",
+        "Maam we tried to update your KYC but the document upload failed, please install this application from the link so our agent can verify it remotely right now.",
+        "Your account KYC is flagged for immediate suspension due to non-compliance, click the link in the message and complete verification within the next 10 minutes.",
+
+        # --- Category: Remote Access Scam ---
+        "There's a technical error in your refund processing sir, uh, nothing to worry, just install AnyDesk from the play store and share the nine digit code so our engineer can fix it directly.",
+        "Your payment failed due to a gateway glitch, in order to process your refund I need you to download TeamViewer and give me remote access to your screen.",
+        "This is technical support, we detected a virus that's blocking your UPI, please install QuickSupport now so I can remove it remotely while you stay on the line.",
+        "Sir don't disconnect, for the refund to go through in the next two minutes I need screen share access, just open AnyDesk and read me the code on screen.",
+
+        # --- Category: Utility / Electricity Cutoff ---
+        "This is an automated notice, uh, your electricity connection will be disconnected within 2 hours due to unpaid bill, pay immediately through the UPI link sent to avoid cutoff.",
+        "Sir this is your final warning, power supply to your house will be cut in 2 hours unless the pending amount is settled right now via the payment link on SMS.",
+        "Your water and electricity connection is scheduled for disconnection today evening, transfer the due amount immediately to the account number I'm sending to avoid this.",
+
+        # --- Category: Law Enforcement / Digital Arrest / Customs ---
+        "This is customs department, uh, we've intercepted a parcel with your Aadhaar details containing illegal items, you need to join a video call with the investigating officer immediately or a digital arrest warrant will be issued.",
+        "Ma'am this is Cyber Crime, your bank account is under investigation for money laundering, do not disconnect the call, stay on line and transfer the bail amount to the court escrow account now.",
+        "Sir I am from the narcotics control bureau, a package under your name has banned substances, unless you pay the customs penalty in the next hour we will have to proceed with arrest.",
+        "This is a police verification call regarding illegal activity linked to your number, please don't inform your family, stay on this line, and transfer the security deposit to avoid immediate arrest.",
+
+        # --- Category: Lottery / Reward / Cash Prize ---
+        "Congratulations sir, uh, your credit card has ten thousand reward points expiring tonight, to redeem the cash value just confirm your card number and the OTP that's about to arrive.",
+        "You've won a cash prize of fifty thousand rupees in our anniversary lucky draw, to claim it today please share your net banking login and the OTP for verification.",
+        "This is regarding your expiring bank reward points worth 18,500 rupees, redeem now by entering your card details and the OTP on this call before midnight.",
     ]
 
 
@@ -100,7 +134,56 @@ def generate_synthetic_dataset(num_samples: int = 50000, seed: int = 42) -> Tupl
         "Donation to local charitable trust.",
         "Car servicing and engine oil change payment.",
         "Movie tickets booking for weekend show.",
-        "Mobile postpaid bill payment for self and spouse."
+        "Mobile postpaid bill payment for self and spouse.",
+        # Genuine bank/KYC/support calls that mention the exact words a
+        # scam call would (OTP, PIN, bank, KYC, verify) but in a
+        # protective or routine sense, not as a request for credentials.
+        # Added after live testing showed the model flagged real
+        # anti-fraud advisory calls as scams because it had never seen a
+        # legitimate example using these words at all.
+        "Hello, this is your bank calling for a routine KYC update. As always, please remember we will never ask you for your OTP or PIN over the phone.",
+        "This is a reminder from your bank: never share your OTP, PIN, or CVV with anyone, including bank staff. We will never ask for it.",
+        "Good afternoon, calling to confirm your KYC documents are up to date. No need to share any OTP or password for this, it is already verified in our system.",
+        "Just a heads up, your KYC is due for renewal next month. You can update it at the branch, and remember, we never ask for OTP or PIN on a call.",
+        "Namaste, hum aapke bank se KYC update ke liye call kar rahe hain. Kripya dhyan rahe, bank kabhi bhi phone par OTP ya PIN nahi maangta.",
+        "Aapka KYC verify ho chuka hai, dhanyavaad. Yaad rakhiye, kisi ko bhi apna OTP ya PIN kabhi mat batayein, chahe woh khud ko bank employee bataye.",
+        "Customer support here, just confirming your recent transaction went through fine. You never need to share your PIN or OTP with our support team.",
+        "This is a courtesy call about our new savings account features. No action needed from you, and please note we never request OTP or PIN by phone.",
+        "Hi, following up on your loan application status, it's still under review. As a reminder, do not share your CVV, PIN or OTP with anyone claiming to be from the bank.",
+
+        # --- Category: Legitimate Bank Security Warning (hard negative) ---
+        "Hi sir, this is your bank, uh, we blocked a suspicious transaction of 500 dollars on your card just now for your safety. Please do NOT share your OTP or password with anyone, including me — you can check the blocked transaction yourself in your official banking app.",
+        "Maam this is a fraud alert from your bank, we've already stopped a suspicious withdrawal attempt. Just so you know, we will never call and ask for your OTP or CVV — if anyone does, please hang up and report it.",
+        "This is an automated security message: we noticed an unusual login attempt and have locked it out. No action needed from you, and remember, our staff will never ask for your PIN over a call.",
+
+        # --- Category: Legitimate Branch / KYC Visit Reminder (hard negative) ---
+        "Good morning, your periodic KYC renewal is due this month. You can complete it by visiting your nearest branch with your Aadhaar and PAN, or update it inside the official mobile banking app — no OTP needed on this call.",
+        "This is a reminder that your KYC documents need refreshing as per RBI guidelines. Please visit the branch at your convenience, there's no urgency and nothing to pay right now.",
+        "Sir your KYC update is pending, you can either walk into any branch or use the verified app, whichever suits you, there's no deadline today.",
+
+        # --- Category: Official Telemarketing / Credit Card Offer (hard negative) ---
+        "Hello, this is regarding a pre-approved personal loan offer based on your account history. If you're interested I can email the full details, no credentials needed on this call.",
+        "Hi maam, we have a credit card upgrade offer for you with better cashback, would you like me to send the terms to your registered email so you can review it at your own pace?",
+        "This is a courtesy call about our new fixed deposit scheme with better interest rates, happy to send you a brochure by email, no rush to decide today.",
+
+        # --- Category: Transaction Verification (hard negative) ---
+        "This is an automated alert: did you authorize a charge of 1,200 rupees at Store X just now? Reply yes to confirm or no if you don't recognize it, no OTP required for this reply.",
+        "Hi sir, quick check, we see a large transaction on your card at an electronics store, can you confirm if that was you? If not we'll block the card right away.",
+        "This is your bank confirming a fund transfer of 15,000 rupees you initiated ten minutes ago, just confirming it went through successfully.",
+
+        # --- Category: Courier / Delivery Coordination (hard negative) ---
+        "Hi, I'm outside your building with your delivery, could you tell me the gate entry code or come down for a moment?",
+        "This is your delivery executive, I'm at the address but can't find the entrance, could you guide me or share your landmark?",
+        "Hello, your package is out for delivery today between 2 and 5 pm, please make sure someone is available to receive it.",
+
+        # --- Category: Customer Support Follow-up (hard negative) ---
+        "Hi, just following up on the support ticket you raised last week, has the issue been resolved on your end?",
+        "This is customer care checking in, was our technician able to fix the problem you reported yesterday?",
+        "Hello, we wanted to confirm your recent service request is closed, please let us know if you need anything else.",
+
+        # --- Hard boundary edge case: caller is suspicious, agent verifies calmly ---
+        "Sir this is your bank calling about a KYC update. — Wait, is this a fraud call? — That's a fair question, sir, I completely understand the caution. I will never ask for your OTP or PIN. You can verify this call is genuine by calling the official number on the back of your card, or checking the notice in your banking app under KYC status.",
+        "Maam we're calling to verify a recent transaction. — How do I know you're really from the bank? — Good question, you're right to check. I won't ask for any OTP, PIN or password. Please feel free to hang up and call the number on your card directly, we'll have the same record on file.",
     ]
 
 
@@ -229,8 +312,17 @@ def generate_synthetic_dataset(num_samples: int = 50000, seed: int = 42) -> Tupl
         }
         records.append(record)
 
-        # Voice script data
-        if scenario == "C" or (is_fraud == 1 and random.random() > 0.2):
+        # Voice script data — labeled independently of the transaction-level
+        # fraud scenario (voice-scam rate and transaction-fraud rate are
+        # different things). Deliberately 40% scam / 60% legitimate: rich
+        # enough scam representation for the classifier to learn real
+        # patterns, while keeping the majority class realistic — and
+        # (this matters most) diverse enough non-scam examples that
+        # protective/routine calls mentioning "OTP", "PIN", "bank", "KYC"
+        # aren't all lumped in with the 12%-ish fraud rate the transaction
+        # side uses, which is what caused the model to under-learn what a
+        # legitimate bank call actually sounds like.
+        if random.random() < 0.40:
             script = random.choice(scam_scripts)
             is_scam = 1
         else:

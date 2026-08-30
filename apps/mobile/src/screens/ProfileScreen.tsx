@@ -157,11 +157,11 @@ export const ProfileScreen: React.FC = () => {
           </View>
           <View style={styles.userTextCol}>
             <View style={styles.userNameRow}>
-              <Text style={styles.userName}>{session?.name || "Rahul Sharma"}</Text>
+              <Text style={styles.userName}>{session?.name || "Your Name"}</Text>
               <Ionicons name="pencil-outline" size={14} color={colors.textTertiary} />
             </View>
-            <Text style={styles.userPhone}>{session?.phone || "+91 98765 43210"}</Text>
-            <Text style={styles.userEmail}>{session?.email || "rahul@example.com"}</Text>
+            <Text style={styles.userPhone}>{session?.phone || ""}</Text>
+            <Text style={styles.userEmail}>{session?.email || ""}</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
         </TouchableOpacity>
@@ -355,9 +355,9 @@ export const ProfileScreen: React.FC = () => {
       {/* Edit Profile Modal */}
       <EditProfileModal
         visible={isEditProfileVisible}
-        initialName={session?.name || "Rahul Sharma"}
-        initialPhone={session?.phone || "+91 98765 43210"}
-        initialEmail={session?.email || "rahul@example.com"}
+        initialName={session?.name || "Your Name"}
+        initialPhone={session?.phone || ""}
+        initialEmail={session?.email || ""}
         onClose={() => setIsEditProfileVisible(false)}
         onSave={handleSaveProfile}
       />

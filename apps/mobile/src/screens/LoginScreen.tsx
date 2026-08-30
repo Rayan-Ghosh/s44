@@ -25,8 +25,8 @@ export const LoginScreen: React.FC = () => {
   const { login, isLoading } = useAuth();
 
   // Log in form state
-  const [identifier, setIdentifier] = useState<string>("rahul@example.com");
-  const [password, setPassword] = useState<string>("password123");
+  const [identifier, setIdentifier] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   const handleLogin = async () => {

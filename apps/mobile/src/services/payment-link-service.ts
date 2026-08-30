@@ -1,5 +1,8 @@
+import { ApiClient } from "./api-client";
 import { PaymentService, UserTransaction, RiskFactorItem } from "./payment-service";
+import { RiskService } from "./risk-service";
 import { AlertService } from "./alert-service";
+import { getDeviceIdentifier, getDeviceName, getDeviceType } from "./device-info-service";
 
 export interface PaymentRequest {
   id: string;
@@ -34,7 +37,9 @@ export interface PaymentRequest {
 
 class PaymentLinkManager {
   /**
-   * Parses a raw URI string (UPI, HTTP, or deep link) into a structured PaymentRequest
+   * Parses a raw URI string (UPI, HTTP, or deep link) into a structured
+   * PaymentRequest. Pure parsing only — no risk scoring. Call
+   * `createAndEvaluate` with the result to get a real backend risk score.
    */
   public parsePaymentUrl(url: string, sourceType: PaymentRequest["sourceType"] = "payment_link"): PaymentRequest {
     let payeeUpiId = "unknown@upi";
@@ -62,14 +67,13 @@ class PaymentLinkManager {
         }
       }
     } catch {
-      // Fallback
+      // Malformed URL — fall through with the defaults above.
     }
 
-    const id = `req-${Date.now().toString().slice(-6)}`;
     const now = new Date().toISOString();
 
-    const request: PaymentRequest = {
-      id,
+    return {
+      id: `pending-${Date.now()}`,
       merchantName: merchantName || "Unknown Merchant",
       payeeUpiId: payeeUpiId || "unknown@upi",
       amount,
@@ -85,137 +89,61 @@ class PaymentLinkManager {
       createdAt: now,
       updatedAt: now,
     };
-
-    return this.analyzePaymentRequest(request);
   }
 
   /**
-   * Evaluates security signals and calculates live risk score
+   * Creates a real backend transaction for this payment request and runs it
+   * through the authoritative risk engine (POST /api/v1/transactions then
+   * POST /api/v1/risk/evaluate), then mirrors the result into the shared
+   * PaymentService cache so the Payments screen reflects it immediately.
    */
-  public analyzePaymentRequest(request: PaymentRequest): PaymentRequest {
-    let score = 5.0;
-    const reasons: string[] = [];
-    const riskFactors: RiskFactorItem[] = [];
+  public async createAndEvaluate(
+    req: PaymentRequest,
+    userId: number
+  ): Promise<UserTransaction | null> {
+    const deviceId = await getDeviceIdentifier();
+    const createRes = await ApiClient.post<any>("/api/v1/transactions", {
+      user_id: userId,
+      recipient_identifier: req.payeeUpiId,
+      recipient_display_name: req.merchantName,
+      device_identifier: deviceId,
+      device_name: getDeviceName(),
+      device_type: getDeviceType(),
+      amount: req.amount > 0 ? req.amount : 1,
+      payment_method: "UPI",
+    });
+    if (!createRes.data) return null;
 
-    const isRecognizedMerchant =
-      request.merchantName.toLowerCase().includes("amazon") ||
-      request.merchantName.toLowerCase().includes("swiggy") ||
-      request.merchantName.toLowerCase().includes("zomato") ||
-      request.merchantName.toLowerCase().includes("bescom") ||
-      request.merchantName.toLowerCase().includes("airtel");
-
-    if (isRecognizedMerchant) {
-      score = 6.5;
-      reasons.push("Recognized verified merchant handle");
-      reasons.push("Standard transaction signature");
-    } else {
-      // 1. Amount Anomaly
-      if (request.amount >= 10000) {
-        score += 38.0;
-        reasons.push(`High transfer amount (₹${request.amount.toLocaleString("en-IN")})`);
-        riskFactors.push({
-          factor_type: "transaction",
-          factor_name: "amount_deviation",
-          contribution: 42.0,
-          explanation: "Transaction amount exceeds typical daily baseline.",
-        });
-      } else if (request.amount >= 3000) {
-        score += 15.0;
-        reasons.push("Moderate transaction amount");
-      }
-
-      // 2. Recipient Trust
-      if (request.payeeUpiId.includes("unknown") || !request.payeeUpiId.includes("@")) {
-        score += 25.0;
-        reasons.push("Unverified recipient UPI identifier");
-        riskFactors.push({
-          factor_type: "recipient",
-          factor_name: "new_recipient",
-          contribution: 30.0,
-          explanation: "First time sending money to this recipient handle.",
-        });
-      } else {
-        score += 18.0;
-        reasons.push("Unfamiliar payee handle");
-        riskFactors.push({
-          factor_type: "recipient",
-          factor_name: "first_time_contact",
-          contribution: 20.0,
-          explanation: "Recipient handle not in verified whitelist.",
-        });
-      }
-
-      // 3. Sensitive Note / Social Engineering Heuristics
-      const descLower = (request.description || "").toLowerCase();
-      if (
-        descLower.includes("urgent") ||
-        descLower.includes("lottery") ||
-        descLower.includes("kyc") ||
-        descLower.includes("customs") ||
-        descLower.includes("fee")
-      ) {
-        score += 28.0;
-        reasons.push("Urgency/coercion keywords detected in transaction note");
-        riskFactors.push({
-          factor_type: "content",
-          factor_name: "social_engineering_keywords",
-          contribution: 28.0,
-          explanation: "Note contains high-risk social engineering markers.",
-        });
-      }
-    }
-
-    const finalScore = Math.min(99.0, Math.max(4.0, score));
-    const riskLevel: "LOW" | "MEDIUM" | "HIGH" =
-      finalScore >= 60 ? "HIGH" : finalScore >= 25 ? "MEDIUM" : "LOW";
-
-    const updated: PaymentRequest = {
-      ...request,
-      riskScore: finalScore,
-      riskLevel,
-      riskFactors,
-      reasons: reasons.length > 0 ? reasons : ["Standard behavioral profile match"],
-      status: riskLevel === "HIGH" ? "Needs Review" : "Waiting For User",
-      updatedAt: new Date().toISOString(),
-    };
-
-    return updated;
-  }
-
-  /**
-   * Ingests a new intercepted payment request into the centralized PaymentService
-   */
-  public ingestPaymentRequest(req: PaymentRequest): UserTransaction {
-    const isHigh = req.riskLevel === "HIGH";
+    const txnId: number = createRes.data.id;
+    const risk = await RiskService.evaluateTransaction(txnId);
+    const isHigh = risk?.riskLevel === "HIGH";
 
     const newTx: UserTransaction = {
-      id: req.id,
+      id: String(txnId),
       title: req.merchantName,
       merchant: req.merchantName,
       amount: req.amount,
       date: "Just now",
       timestamp: new Date().toISOString(),
       paymentMethod: "UPI Direct",
-      status: isHigh ? "Risk detected" : "Safe",
-      riskLevel: req.riskLevel,
-      riskScore: req.riskScore,
-      riskFactors: req.riskFactors,
-      reasons: req.reasons,
+      status: isHigh ? "Risk detected" : risk ? "Safe" : "Held",
+      riskLevel: risk?.riskLevel,
+      riskScore: risk?.riskScore,
+      riskFactors: [],
+      reasons: risk?.reasons || [],
     };
 
-    // Add to central state
     PaymentService.addTransaction(newTx);
 
-    // If high risk, also create alert in AlertService
     if (isHigh) {
       AlertService.addAlert({
-        id: `alert-int-${req.id}`,
+        id: `alert-int-${txnId}`,
         title: "Suspicious Payment Link Intercepted",
         description: `₹${req.amount.toLocaleString("en-IN")} payment to ${req.merchantName} flagged for unusual volume and new recipient.`,
         severity: "HIGH",
         status: "ACTIVE",
         timestamp: "Just now",
-        transactionId: req.id,
+        transactionId: String(txnId),
         isRead: false,
       });
     }

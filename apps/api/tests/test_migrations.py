@@ -31,6 +31,9 @@ EXPECTED_TABLES = {
     "fraud_cases",
     "model_predictions",
     "audit_logs",
+    "trusted_contacts",
+    "guardian_requests",
+    "user_contact_info",
 }
 
 

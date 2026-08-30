@@ -29,7 +29,7 @@ import {
   PaymentService,
   UserTransaction,
   UserPaymentOverview,
-  SEED_PAYMENT_OVERVIEW,
+  EMPTY_PAYMENT_OVERVIEW,
 } from "../services/payment-service";
 
 export const PaymentsScreen: React.FC = () => {
@@ -46,7 +46,7 @@ export const PaymentsScreen: React.FC = () => {
     trustedContacts,
   } = useGuardian();
 
-  const [overview, setOverview] = useState<UserPaymentOverview>(SEED_PAYMENT_OVERVIEW);
+  const [overview, setOverview] = useState<UserPaymentOverview>(EMPTY_PAYMENT_OVERVIEW);
   const [transactions, setTransactions] = useState<UserTransaction[]>([]);
   const [filter, setFilter] = useState<"all" | "review" | "safe">("all");
   const [selectedTx, setSelectedTx] = useState<UserTransaction | null>(null);
@@ -274,7 +274,7 @@ export const PaymentsScreen: React.FC = () => {
     const trustedAudit = selectedTx?.trustedApproval?.required
       ? {
           required: true,
-          contactName: selectedTx.trustedApproval.contactName || "Priya Sharma",
+          contactName: selectedTx.trustedApproval.contactName || trustedContacts[0]?.name || "Your trusted contact",
           decision: "Approved" as const,
           decisionTime: "Just now",
         }
@@ -513,7 +513,7 @@ export const PaymentsScreen: React.FC = () => {
                         <View style={styles.auditRow}>
                           <Text style={styles.auditLabel}>Trusted Contact:</Text>
                           <Text style={styles.auditValue}>
-                            {selectedTx.trustedApproval.contactName || "Priya Sharma"}
+                            {selectedTx.trustedApproval.contactName || trustedContacts[0]?.name || "Your trusted contact"}
                           </Text>
                         </View>
                         <View style={styles.auditRow}>
@@ -581,7 +581,7 @@ export const PaymentsScreen: React.FC = () => {
                           <Text style={styles.guardianWaitTitle}>Awaiting Guardian Approval</Text>
                         </View>
                         <Text style={styles.guardianWaitSub}>
-                          Sent to your trusted contact ({trustedContacts[0]?.name || "Priya Sharma"}). Waiting for approval.
+                          Sent to your trusted contact ({trustedContacts[0]?.name || "your trusted contact"}). Waiting for approval.
                         </Text>
                         <View style={styles.countdownRow}>
                           <Text

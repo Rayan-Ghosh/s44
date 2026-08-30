@@ -27,7 +27,7 @@ import { useAuth } from "../context/AuthContext";
 import {
   PaymentService,
   UserPaymentOverview,
-  SEED_PAYMENT_OVERVIEW,
+  EMPTY_PAYMENT_OVERVIEW,
 } from "../services/payment-service";
 import { AlertService, SecurityAlert } from "../services/alert-service";
 import { useAlertBadge } from "../context/AlertBadgeContext";
@@ -145,7 +145,7 @@ export const ProtectionScreen: React.FC = () => {
   const { session } = useAuth();
   const { clearProtectionBadge } = useAlertBadge();
 
-  const [overview, setOverview] = useState<UserPaymentOverview>(SEED_PAYMENT_OVERVIEW);
+  const [overview, setOverview] = useState<UserPaymentOverview>(EMPTY_PAYMENT_OVERVIEW);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -469,6 +469,17 @@ export const ProtectionScreen: React.FC = () => {
                 />
               </View>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.tryLiveDemoRow}
+              onPress={() => navigation.navigate("Voice")}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Try the live voice scam call demo"
+            >
+              <Ionicons name="play-circle-outline" size={16} color={colors.brand} />
+              <Text style={styles.tryLiveDemoText}>Try Live Call Demo →</Text>
+            </TouchableOpacity>
           </View>
 
           {/* 4. Call / Social Engineering Alert */}
@@ -643,6 +654,18 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  tryLiveDemoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  tryLiveDemoText: {
+    ...typography.bodySemibold,
+    color: colors.brand,
+    fontSize: 13,
   },
   titleSection: {
     paddingTop: spacing.xs,

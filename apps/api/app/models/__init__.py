@@ -16,6 +16,7 @@ from app.models.risk_score import RiskScore
 from app.models.transaction import Transaction
 from app.models.trusted_contact import TrustedContact
 from app.models.user import User
+from app.models.user_contact_info import UserContactInfo
 from app.models.user_feedback import UserFeedback
 from app.models.voice_analysis import VoiceAnalysis
 
@@ -32,6 +33,7 @@ __all__ = [
     "Transaction",
     "TrustedContact",
     "User",
+    "UserContactInfo",
     "UserFeedback",
     "VoiceAnalysis",
 ]

@@ -2,10 +2,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.core.contact_encryption import decrypt_field, encrypt_field
 from app.core.database import get_db
 from app.models.enums import RiskLevel, TransactionStatus
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.models.user_contact_info import UserContactInfo
 from app.repositories import risk_repository, transaction_repository
 from app.schemas.user import UserCreate, UserRead
 from app.services import user_service
@@ -26,36 +28,51 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> UserRead:
 @router.get("/{user_id}", response_model=UserRead)
 def get_user(user_id: int, db: Session = Depends(get_db)) -> UserRead:
     try:
-        return user_service.get_user(db, user_id)
+        user = user_service.get_user(db, user_id)
     except UserNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    contact = db.query(UserContactInfo).filter(UserContactInfo.user_id == user_id).first()
+    return UserRead(
+        id=user.id,
+        name=user.name,
+        created_at=user.created_at,
+        email=decrypt_field(contact.email_encrypted) if contact and contact.email_encrypted else "",
+        phone=decrypt_field(contact.phone_encrypted) if contact and contact.phone_encrypted else "",
+    )
 
 
 @router.patch("/{user_id}")
 def update_user_profile(user_id: int, payload: dict, db: Session = Depends(get_db)) -> dict:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        # Fallback response if mock user
-        return {
-            "success": True,
-            "user": {
-                "id": user_id,
-                "name": payload.get("name", "Rahul Sharma"),
-                "email": payload.get("email", "rahul@example.com"),
-                "phone": payload.get("phone", "+91 98765 43210"),
-            }
-        }
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
+
     if "name" in payload and payload["name"]:
         user.name = payload["name"].strip()
+
+    # Real, reversible contact info lives in user_contact_info, encrypted —
+    # not on User itself. See docs/PROFILE_CONTACT_INFO_DECISION.md.
+    contact = db.query(UserContactInfo).filter(UserContactInfo.user_id == user_id).first()
+    if not contact:
+        contact = UserContactInfo(user_id=user_id)
+        db.add(contact)
+    if payload.get("email"):
+        contact.email_encrypted = encrypt_field(payload["email"].strip())
+    if payload.get("phone"):
+        contact.phone_encrypted = encrypt_field(payload["phone"].strip())
+
     db.commit()
     db.refresh(user)
+    db.refresh(contact)
+
     return {
         "success": True,
         "user": {
             "id": user.id,
             "name": user.name,
-            "email": payload.get("email", "rahul@example.com"),
-            "phone": payload.get("phone", "+91 98765 43210"),
+            "email": decrypt_field(contact.email_encrypted) if contact.email_encrypted else "",
+            "phone": decrypt_field(contact.phone_encrypted) if contact.phone_encrypted else "",
         }
     }
 
@@ -64,31 +81,24 @@ def update_user_profile(user_id: int, payload: dict, db: Session = Depends(get_d
 def get_user_devices(user_id: int, db: Session = Depends(get_db)) -> list:
     from app.models.device import Device
     devices = db.query(Device).filter(Device.user_id == user_id).all()
-    if not devices:
-        return [
-            {
-                "id": 1,
-                "device_name": "Google Pixel 8 Pro",
-                "device_type": "Android 15 (Hardware Keystore)",
-                "device_hash": "dev_hw_sha256_e8910a3f92",
-                "is_primary": True,
-                "registered_at": "2025-08-15T10:00:00Z",
-                "last_active": "Just now",
-                "security_status": "SECURE",
-            }
-        ]
+    # device_name/device_type are real columns now (see
+    # docs/PROFILE_CONTACT_INFO_DECISION.md §6.3), populated by whatever the
+    # client reported at transaction-creation time (see
+    # transaction_service.create_transaction). Older rows / clients that
+    # never reported a name fall back to a generic label instead of a
+    # fabricated one.
     return [
         {
             "id": d.id,
-            "device_name": "Google Pixel 8 Pro",
-            "device_type": "Android 15 (Hardware Keystore)",
+            "device_name": d.device_name or f"Device {d.device_hash[:8]}",
+            "device_type": d.device_type or "Unknown",
             "device_hash": d.device_hash[:16] + "...",
-            "is_primary": True,
-            "registered_at": d.first_seen.isoformat() if d.first_seen else "2025-08-15T10:00:00Z",
-            "last_active": d.last_seen.isoformat() if d.last_seen else "Just now",
-            "security_status": "SECURE",
+            "is_primary": i == 0,
+            "registered_at": d.first_seen.isoformat() if d.first_seen else None,
+            "last_active": d.last_seen.isoformat() if d.last_seen else None,
+            "security_status": "SECURE" if (d.risk_score or 0) < 50 else "REVIEW",
         }
-        for d in devices
+        for i, d in enumerate(devices)
     ]
 
 
@@ -103,15 +113,15 @@ def get_user_overview(user_id: int, db: Session = Depends(get_db)) -> dict:
 
     if not txns:
         return {
-            "total_amount_this_month": 48250.0,
-            "transaction_count": 24,
-            "safe_count": 23,
-            "needs_review_count": 1,
+            "total_amount_this_month": 0.0,
+            "transaction_count": 0,
+            "safe_count": 0,
+            "needs_review_count": 0,
             "blocked_count": 0,
             "reported_count": 0,
-            "current_risk_level": "MEDIUM",
-            "current_risk_score": 38.5,
-            "protection_status": "ATTENTION REQUIRED",
+            "current_risk_level": "LOW",
+            "current_risk_score": 0.0,
+            "protection_status": "PROTECTED",
         }
 
     total_amount = sum(float(t.amount) for t in txns)
@@ -120,7 +130,7 @@ def get_user_overview(user_id: int, db: Session = Depends(get_db)) -> dict:
     blocked_count = sum(1 for t in txns if t.status in (TransactionStatus.CANCELLED, TransactionStatus.GUARDIAN_REJECTED))
     reported_count = sum(1 for t in txns if t.status == TransactionStatus.REPORTED)
 
-    latest_risk = 12.0
+    latest_risk = 0.0
     latest_level = "LOW"
     for t in txns:
         if t.risk_scores:
@@ -183,7 +193,7 @@ def get_user_transactions(
             "payment_method": t.payment_method or "UPI",
             "status": t.status.value if hasattr(t.status, "value") else str(t.status),
             "risk_level": latest_risk.risk_level.value if (latest_risk and hasattr(latest_risk.risk_level, "value")) else "LOW",
-            "risk_score": float(latest_risk.final_score) if latest_risk else 12.0,
+            "risk_score": float(latest_risk.final_score) if latest_risk else 0.0,
             "risk_factors": factors,
         })
 
@@ -239,7 +249,7 @@ def add_user_trusted_contact_by_path(user_id: int, payload: dict, db: Session = 
 
 @router.delete("/{user_id}/trusted-contacts/{contact_id}")
 def delete_user_trusted_contact_by_path(user_id: int, contact_id: int, db: Session = Depends(get_db)) -> dict:
-    from app.models.guardian import TrustedContact
+    from app.models.trusted_contact import TrustedContact
     contact = db.query(TrustedContact).filter(TrustedContact.id == contact_id, TrustedContact.user_id == user_id).first()
     if contact:
         db.delete(contact)

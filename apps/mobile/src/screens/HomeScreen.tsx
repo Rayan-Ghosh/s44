@@ -24,7 +24,7 @@ import {
   PaymentService,
   UserPaymentOverview,
   UserTransaction,
-  SEED_PAYMENT_OVERVIEW,
+  EMPTY_PAYMENT_OVERVIEW,
 } from "../services/payment-service";
 import { AlertService, SecurityAlert } from "../services/alert-service";
 import { NotificationDropdown } from "../components/guardian/NotificationDropdown";
@@ -46,7 +46,7 @@ export const HomeScreen: React.FC = () => {
 
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
 
-  const [overview, setOverview] = useState<UserPaymentOverview>(SEED_PAYMENT_OVERVIEW);
+  const [overview, setOverview] = useState<UserPaymentOverview>(EMPTY_PAYMENT_OVERVIEW);
   const [recentTxns, setRecentTxns] = useState<UserTransaction[]>([]);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -278,7 +278,7 @@ export const HomeScreen: React.FC = () => {
 
                 <View style={styles.attentionBottom}>
                   <Text style={styles.riskScoreText}>
-                    Risk score: {suspiciousTx.riskScore || 87}/100
+                    Risk score: {suspiciousTx.riskScore ?? "—"}/100
                   </Text>
                   <View style={styles.reviewBtn}>
                     <Text style={styles.reviewBtnText}>Review Payment →</Text>

@@ -1,0 +1,83 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+  <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+  <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+  <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
+  <uses-permission android:name="android.permission.VIBRATE"/>
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
+
+  <!-- S40 live call & UPI-screen defense layer (demo PoC — see docs/SECURITY.md) -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+  <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+  <!-- Best-effort only: 3rd-party apps generally cannot end a live call on Android 9+
+       unless they are the default Dialer or hold a signature-level permission.
+       See FraudOverlayManager's "End Call & Abort Transfer" handler for the honest
+       fallback behavior when this permission's grant is insufficient. -->
+  <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"/>
+
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.VIEW"/>
+      <category android:name="android.intent.category.BROWSABLE"/>
+      <data android:scheme="https"/>
+    </intent>
+    <!-- Required on Android 11+ (API 30+) package-visibility rules for
+         SpeechRecognizer.isRecognitionAvailable()/createSpeechRecognizer()
+         to actually find the on-device recognition service (see
+         telemetry/OnDeviceSpeechRecognizer.kt) — without this it silently
+         reports unavailable even when Google Speech Services is installed. -->
+    <intent>
+      <action android:name="android.speech.RecognitionService"/>
+    </intent>
+  </queries>
+  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false">
+    <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
+    <meta-data android:name="expo.modules.updates.ENABLE_BSDIFF_PATCH_SUPPORT" android:value="true"/>
+    <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
+    <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
+    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize|assetsPaths" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="avaran"/>
+      </intent-filter>
+    </activity>
+
+    <!-- Foreground service: captures 16kHz PCM mic audio during an active call and
+         streams it to the backend for transcription/risk analysis. Raw audio is never
+         written to disk here; per docs/SECURITY.md §3 the backend discards it after
+         feature extraction. -->
+    <service
+      android:name=".telemetry.LiveCallAudioService"
+      android:exported="false"
+      android:foregroundServiceType="microphone"/>
+
+    <!-- Accessibility service: demo-only PoC that watches for pre-PIN UPI payment
+         screens in the target apps listed in res/xml/accessibility_service_config.xml.
+         NOT intended for production/Play Store distribution as-is — see docs/SECURITY.md
+         and the class-level KDoc on PaymentScreenWatcherService for the policy/consent
+         caveats this requires before any real distribution. -->
+    <service
+      android:name=".services.PaymentScreenWatcherService"
+      android:exported="true"
+      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+      android:label="@string/accessibility_service_label">
+      <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService"/>
+      </intent-filter>
+      <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/accessibility_service_config"/>
+    </service>
+  </application>
+</manifest>

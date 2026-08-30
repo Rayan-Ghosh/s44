@@ -1,4 +1,5 @@
 import React from "react";
+import { View, ActivityIndicator } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { LandingScreen } from "../screens/LandingScreen";
@@ -8,6 +9,7 @@ import { TabNavigator } from "./TabNavigator";
 import { ConnectedAppsScreen } from "../screens/ConnectedAppsScreen";
 import { AlertDetailScreen } from "../screens/AlertDetailScreen";
 import { HistoryDetailScreen } from "../screens/HistoryDetailScreen";
+import { VoiceScreen } from "../screens/VoiceScreen";
 import { SecurityAlert } from "../types/alert";
 import { HistoryItem } from "../types/history";
 
@@ -20,12 +22,21 @@ export type RootStackParamList = {
   ConnectedApps: undefined;
   AlertDetail: { alert: SecurityAlert };
   HistoryDetail: { item: HistoryItem };
+  Voice: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export const RootNavigator: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isRestoringSession } = useAuth();
+
+  if (isRestoringSession) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F3F2EF" }}>
+        <ActivityIndicator size="large" color="#0F172A" />
+      </View>
+    );
+  }
 
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -88,6 +99,14 @@ export const RootNavigator: React.FC = () => {
           <Stack.Screen
             name="HistoryDetail"
             component={HistoryDetailScreen}
+            options={{
+              presentation: "card",
+              animation: "slide_from_right",
+            }}
+          />
+          <Stack.Screen
+            name="Voice"
+            component={VoiceScreen}
             options={{
               presentation: "card",
               animation: "slide_from_right",

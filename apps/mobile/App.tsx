@@ -6,7 +6,7 @@ import { NavigationContainer, NavigationContainerRef } from "@react-navigation/n
 import { ErrorBoundary } from "./src/components/common/ErrorBoundary";
 import { AppHealthProvider } from "./src/context/AppHealthContext";
 import { BiometricProvider } from "./src/context/BiometricContext";
-import { AuthProvider } from "./src/context/AuthContext";
+import { AuthProvider, useAuth } from "./src/context/AuthContext";
 import { SecurityProvider } from "./src/context/SecurityContext";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 import { WatchdogToast } from "./src/components/common/WatchdogToast";
@@ -30,16 +30,18 @@ const linking = {
   },
 };
 
-export default function App() {
-  const navRef = useRef<NavigationContainerRef<any>>(null);
+/** Handles incoming UPI/deep-link payment URLs — needs useAuth(), so it must
+ * render inside AuthProvider rather than in App() itself. */
+const DeepLinkHandler: React.FC<{ navRef: React.RefObject<NavigationContainerRef<any> | null> }> = ({ navRef }) => {
+  const { session } = useAuth();
 
   useEffect(() => {
-    const handleUrl = (url: string | null) => {
-      if (!url) return;
+    const handleUrl = async (url: string | null) => {
+      if (!url || !session?.userId) return;
       if (url.startsWith("upi://") || url.startsWith("avaran://pay") || url.includes("/pay?")) {
         const parsed = PaymentLinkService.parsePaymentUrl(url);
-        const newTx = PaymentLinkService.ingestPaymentRequest(parsed);
-        if (navRef.current && navRef.current.isReady()) {
+        const newTx = await PaymentLinkService.createAndEvaluate(parsed, session.userId);
+        if (newTx && navRef.current && navRef.current.isReady()) {
           navRef.current.navigate("Tabs", {
             screen: "Payments",
             params: { selectedTxId: newTx.id },
@@ -48,10 +50,7 @@ export default function App() {
       }
     };
 
-    // Check initial deep link
     Linking.getInitialURL().then(handleUrl);
-
-    // Listen for incoming deep links while app is open
     const sub = Linking.addEventListener("url", (event) => {
       handleUrl(event.url);
     });
@@ -59,7 +58,13 @@ export default function App() {
     return () => {
       sub.remove();
     };
-  }, []);
+  }, [session?.userId]);
+
+  return null;
+};
+
+export default function App() {
+  const navRef = useRef<NavigationContainerRef<any>>(null);
 
   return (
     <ErrorBoundary>
@@ -70,6 +75,7 @@ export default function App() {
               <SecurityProvider>
                 <NavigationContainer ref={navRef} linking={linking}>
                   <StatusBar style="dark" />
+                  <DeepLinkHandler navRef={navRef} />
                   <RootNavigator />
                   <WatchdogToast />
                   <BiometricLockOverlay />

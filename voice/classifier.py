@@ -6,7 +6,7 @@ to produce a normalized voice risk score and categorical scam flags.
 """
 
 from typing import Dict, Any, Tuple
-from ml.features.voice_features import VoiceFeatureExtractor
+from ml.features.voice_features import VoiceFeatureExtractor, _is_negated
 from voice.preprocessing import AudioPreprocessor
 
 
@@ -73,11 +73,22 @@ class VoiceClassifier:
         else:
             overall_voice_risk = min(1.0, combined_score)
 
+        # A raw substring check ("otp" in clean_text) can't tell a demand
+        # ("share your OTP") from a warning ("don't share your OTP") apart —
+        # confirmed live: a caller telling the user to protect their OTP/PIN
+        # was flagged identically to a caller asking for it. This helper
+        # applies the same negation-window check the feature extractor uses,
+        # so a keyword only counts here if it isn't immediately preceded by
+        # a negation marker.
+        def _keyword_present(kw: str) -> bool:
+            idx = clean_text.find(kw)
+            return idx != -1 and not _is_negated(clean_text, idx)
+
         # Categorical Flags & Active Threat Dimensions
-        urgency_detected = urgency >= 0.35 or "immediately" in clean_text or "now" in clean_text
-        threat_detected = threat >= 0.35 or "police" in clean_text or "block" in clean_text or "arrest" in clean_text
-        authority_impersonation = authority >= 0.35 or "rbi" in clean_text or "cbi" in clean_text or "manager" in clean_text
-        credential_harvesting = phishing >= 0.35 or "otp" in clean_text or "pin" in clean_text
+        urgency_detected = urgency >= 0.35 or _keyword_present("immediately") or _keyword_present("now")
+        threat_detected = threat >= 0.35 or _keyword_present("police") or _keyword_present("block") or _keyword_present("arrest")
+        authority_impersonation = authority >= 0.35 or _keyword_present("rbi") or _keyword_present("cbi") or _keyword_present("manager")
+        credential_harvesting = phishing >= 0.35 or _keyword_present("otp") or _keyword_present("pin")
 
         active_dimensions = []
         if urgency_detected: active_dimensions.append("URGENCY")
@@ -88,7 +99,7 @@ class VoiceClassifier:
 
         matched_phrases = []
         for kw in ["cbi", "police", "arrest", "digital arrest", "immediately", "block", "freeze", "now", "otp", "pin", "fine", "narcotics", "court", "anydesk", "warrant", "charges"]:
-            if kw in clean_text:
+            if _keyword_present(kw):
                 matched_phrases.append(kw)
 
         return {

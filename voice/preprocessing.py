@@ -191,7 +191,13 @@ HINGLISH_MAPPINGS = {
     r"\bline cut\b": "power disconnection",
     r"\bsim card band\b": "sim card deactivation",
     r"\bmobile block\b": "phone deactivation",
-    r"\bkyc update\b": "mandatory kyc suspension",
+    # NOT "mandatory kyc suspension" — that was injecting the word
+    # "suspension" (a THREAT_KEYWORDS hit) into completely routine banking
+    # language. "KYC update" is standard English already; it needs no
+    # dialect normalization, and definitely shouldn't be editorialized into
+    # alarming phrasing. Confirmed live: this alone caused a genuine
+    # anti-fraud advisory call to be flagged as a scam threat.
+    r"\bkyc update\b": "kyc update",
     r"\blpg cylinder block\b": "gas connection suspension",
 
     # ---------------------------------------------------------

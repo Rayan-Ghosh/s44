@@ -30,6 +30,13 @@ class Device(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     device_hash: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    # Human-readable label reported by the client at creation time (e.g. via
+    # expo-device on mobile). Nullable: the backend has no way to know a
+    # real device model/OS on its own, and older rows predate this column.
+    # Not sensitive the way phone/device_hash are, so — unlike
+    # UserContactInfo — this is a plain column, no encryption needed.
+    device_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    device_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     first_seen: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )

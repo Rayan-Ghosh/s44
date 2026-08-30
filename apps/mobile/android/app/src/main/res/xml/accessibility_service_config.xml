@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Demo-only PoC scope: restricted to the three UPI apps named in the S40 task brief.
+  canRetrieveWindowContent lets PaymentScreenWatcherService read the on-screen node
+  tree of these packages only — see the KDoc on PaymentScreenWatcherService.kt for
+  the privacy/consent requirements this carries before any real-world distribution.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_label"
+    android:notificationTimeout="100"
+    android:packageNames="com.google.android.apps.nbu.paisa.user,com.phonepe.app,net.one97.paytm" />

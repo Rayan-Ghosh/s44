@@ -386,7 +386,7 @@ export const TrustedScreen: React.FC = () => {
               ]}
             >
               {isTrustedFeatureEnabled
-                ? "When a high-risk payment is detected, your trusted contact will receive a 60-second approval request before the payment is processed."
+                ? "When a high-risk payment is detected, your trusted contact will receive a 2-minute approval request before the payment is processed."
                 : "The Trusted Guardian feature is currently turned OFF. High-risk payments will proceed directly without guardian verification."}
             </Text>
           </View>

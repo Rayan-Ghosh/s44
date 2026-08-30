@@ -25,7 +25,17 @@ pnpm-debug.log*
 # Android / Gradle build caches & Generated Native Projects
 # --------------------------------------------------------------------------
 .gradle/
-apps/mobile/android/
+# android/ used to be blanket-ignored as "fully regenerable via `expo
+# prebuild`". That stopped being true once this app got real custom native
+# code (live-call/UPI-watcher/fraud-overlay Kotlin services, the
+# CallGuardModule native bridge, manifest permissions/service
+# declarations) that prebuild does NOT generate and WILL silently delete
+# if a teammate re-runs prebuild without it being tracked. Git can't
+# selectively re-include files under a directory that's itself excluded
+# (see `git help gitignore`, "It is not possible to re-include a file..."),
+# so rather than fight that with a huge negation list, the directory is
+# tracked and only the genuinely disposable/machine-specific build output
+# below is excluded.
 **/android/.gradle/
 **/android/app/build/
 **/android/build/

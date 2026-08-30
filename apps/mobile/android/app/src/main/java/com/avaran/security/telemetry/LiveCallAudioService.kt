@@ -1,0 +1,393 @@
+package com.avaran.security.telemetry
+
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.os.Build
+import android.os.IBinder
+import android.content.pm.ServiceInfo
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyCallback
+import android.telephony.TelephonyManager
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import com.avaran.security.MainActivity
+import com.avaran.security.R
+import com.avaran.security.config.DevConfig
+import com.avaran.security.net.RiskApiClient
+import com.avaran.security.ui.FraudOverlayManager
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
+
+/**
+ * Foreground service that watches for an active call and runs live scam
+ * detection against it.
+ *
+ * Real detection path: [OnDeviceSpeechRecognizer] (Android's built-in,
+ * free, no-API-key speech recognizer) transcribes speech during the call;
+ * each utterance is sent as text to apps/api's real classifier
+ * (`/ws/voice-stream`, already verified live) via [VoiceClassifierClient].
+ * A HIGH/CRITICAL result triggers [FraudOverlayManager]. This exists
+ * because the original raw-audio design below needs Bhashini credentials
+ * that aren't configured — this is the working substitute.
+ *
+ * Legacy path (kept, not currently invoked): [startRawAudioCapture] streams
+ * raw 16kHz PCM to `main.py`'s `/ws/call-stream/{session_id}`
+ * (Bhashini-backed). Captured with [AudioRecord] (not [MediaRecorder],
+ * which only produces encoded container files) using
+ * [MediaRecorder.AudioSource.MIC] — on a call this only reliably picks up
+ * the far-end party with speakerphone on, a known Android platform
+ * limitation for any non-system app. Re-enable by calling it from
+ * [handleCallState] once BHASHINI_API_KEY/USER_ID/PIPELINE_ID are set.
+ *
+ * Per docs/SECURITY.md §3, neither path writes raw audio or transcripts to
+ * disk — everything is forwarded live and discarded.
+ */
+class LiveCallAudioService : Service() {
+
+    private val sessionId: String = UUID.randomUUID().toString()
+    private val isRecording = AtomicBoolean(false)
+    private var audioRecord: AudioRecord? = null
+    private var webSocket: WebSocket? = null
+    private var recordingThread: Thread? = null
+    private lateinit var telephonyManager: TelephonyManager
+
+    private var speechRecognizer: OnDeviceSpeechRecognizer? = null
+    private var classifierClient: VoiceClassifierClient? = null
+    private val isDetecting = AtomicBoolean(false)
+    private var detectionStartedAtMillis: Long = 0
+
+    private val legacyPhoneStateListener = object : PhoneStateListener() {
+        @Deprecated("Deprecated in Java")
+        override fun onCallStateChanged(state: Int, phoneNumber: String?) = handleCallState(state)
+    }
+
+    private var modernTelephonyCallback: TelephonyCallback? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        registerCallStateWatcher()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            buildNotification(),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            } else {
+                0
+            },
+        )
+
+        // Manual trigger for the "Detect Current Call" / "Hang Up" buttons
+        // (CallGuardModule.kt bridges these from the RN UI). Real speech
+        // recognition only gets genuine mic access when the app is
+        // foregrounded (confirmed via live device testing — a background-
+        // only foreground Service does not reliably get it), so this is
+        // deliberately a manual, user-initiated action rather than fully
+        // automatic — the user has the app open when they tap it.
+        when (intent?.action) {
+            ACTION_START_DETECTION -> startSpeechDetection()
+            ACTION_STOP_DETECTION -> stopSpeechDetection()
+        }
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun registerCallStateWatcher() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "READ_PHONE_STATE not granted; cannot watch call state")
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+                override fun onCallStateChanged(state: Int) = handleCallState(state)
+            }
+            modernTelephonyCallback = callback
+            telephonyManager.registerTelephonyCallback(mainExecutor, callback)
+        } else {
+            @Suppress("DEPRECATION")
+            telephonyManager.listen(legacyPhoneStateListener, PhoneStateListener.LISTEN_CALL_STATE)
+        }
+    }
+
+    private fun unregisterCallStateWatcher() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            modernTelephonyCallback?.let { telephonyManager.unregisterTelephonyCallback(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            telephonyManager.listen(legacyPhoneStateListener, PhoneStateListener.LISTEN_NONE)
+        }
+    }
+
+    private fun handleCallState(state: Int) {
+        when (state) {
+            TelephonyManager.CALL_STATE_OFFHOOK -> startSpeechDetection()
+            TelephonyManager.CALL_STATE_IDLE, TelephonyManager.CALL_STATE_RINGING -> stopSpeechDetection()
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Real detection path: on-device STT -> apps/api's real classifier.
+    // -------------------------------------------------------------------
+
+    private fun startSpeechDetection() {
+        if (!isDetecting.compareAndSet(false, true)) return
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "RECORD_AUDIO not granted; aborting speech detection")
+            isDetecting.set(false)
+            return
+        }
+
+        detectionStartedAtMillis = System.currentTimeMillis()
+        var highestSuppressedRiskPercent = -1
+
+        val classifier = VoiceClassifierClient { classification ->
+            Log.i(
+                TAG,
+                "classification: risk=${classification.accumulatedRisk} level=${classification.coercionLevel} " +
+                    "scamAlert=${classification.isScamAlert}",
+            )
+            if (classification.isScamAlert || classification.coercionLevel == "CRITICAL") {
+                val riskScorePercent = (classification.accumulatedRisk * 100).toInt().coerceIn(0, 100)
+                val elapsedMs = System.currentTimeMillis() - detectionStartedAtMillis
+
+                // A single ambiguous line ("calling from SBI") can spike the
+                // model's score immediately — confirmed live during testing.
+                // Requiring a minimum listening window before the visible
+                // warning can fire (the classifier itself keeps scoring the
+                // whole time, building real accumulated context) means the
+                // alert reflects a sustained pattern across the call, not
+                // one early, possibly-innocent line.
+                if (elapsedMs < MIN_LISTEN_BEFORE_ALERT_MS) {
+                    highestSuppressedRiskPercent = maxOf(highestSuppressedRiskPercent, riskScorePercent)
+                    Log.i(
+                        TAG,
+                        "risk hit $riskScorePercent within the first ${elapsedMs}ms — still within the " +
+                            "${MIN_LISTEN_BEFORE_ALERT_MS}ms minimum listening window, holding off the warning",
+                    )
+                    return@VoiceClassifierClient
+                }
+
+                // VoiceClassifierClient's callback runs on OkHttp's WebSocket
+                // dispatcher thread, not the main thread — FraudOverlayManager
+                // does real UI work (inflating a Button triggers a
+                // StateListAnimator, which requires the main Looper), so it
+                // must be dispatched here rather than called directly. Found
+                // via a real crash: "Animators may only be run on Looper
+                // threads", not assumed upfront.
+                mainExecutor.execute {
+                    FraudOverlayManager.show(applicationContext, riskScorePercent, sessionId)
+                }
+            }
+        }
+        classifier.connect()
+        classifierClient = classifier
+
+        val recognizer = OnDeviceSpeechRecognizer(
+            context = this,
+            onTranscript = { text ->
+                Log.i(TAG, "transcript: $text")
+                classifierClient?.sendTranscript(text)
+            },
+        )
+        if (!recognizer.isAvailable()) {
+            Log.w(TAG, "on-device speech recognition unavailable on this device")
+        }
+        recognizer.start()
+        speechRecognizer = recognizer
+    }
+
+    private fun stopSpeechDetection() {
+        if (!isDetecting.compareAndSet(true, false)) return
+        speechRecognizer?.stop()
+        speechRecognizer = null
+        classifierClient?.close()
+        classifierClient = null
+    }
+
+    // -------------------------------------------------------------------
+    // Legacy path: raw audio -> main.py -> Bhashini. Not currently invoked
+    // (see class KDoc) — kept for when BHASHINI_API_KEY is configured.
+    // -------------------------------------------------------------------
+
+    private fun startRawAudioCapture() {
+        if (!isRecording.compareAndSet(false, true)) return
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "RECORD_AUDIO not granted; aborting capture")
+            isRecording.set(false)
+            return
+        }
+
+        connectWebSocket()
+
+        val minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE_HZ, CHANNEL_CONFIG, AUDIO_FORMAT)
+        if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
+            Log.e(TAG, "device does not support 16kHz mono PCM capture")
+            isRecording.set(false)
+            return
+        }
+        val bufferSize = minBufferSize * 2
+
+        val record = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                SAMPLE_RATE_HZ,
+                CHANNEL_CONFIG,
+                AUDIO_FORMAT,
+                bufferSize,
+            )
+        } catch (e: SecurityException) {
+            Log.e(TAG, "AudioRecord init failed: ${e.message}")
+            isRecording.set(false)
+            return
+        }
+
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            Log.e(TAG, "AudioRecord failed to initialize")
+            record.release()
+            isRecording.set(false)
+            return
+        }
+
+        audioRecord = record
+        record.startRecording()
+
+        recordingThread = thread(name = "s40-live-call-audio") {
+            val buffer = ByteArray(bufferSize)
+            while (isRecording.get()) {
+                val read = record.read(buffer, 0, buffer.size)
+                if (read > 0) {
+                    val frame = if (read == buffer.size) buffer else buffer.copyOf(read)
+                    webSocket?.send(ByteString.of(*frame))
+                }
+            }
+        }
+    }
+
+    private fun stopRawAudioCapture() {
+        if (!isRecording.compareAndSet(true, false)) return
+
+        recordingThread?.join(500)
+        recordingThread = null
+
+        audioRecord?.let {
+            try {
+                it.stop()
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "AudioRecord.stop() on non-recording instance: ${e.message}")
+            }
+            it.release()
+        }
+        audioRecord = null
+
+        webSocket?.close(NORMAL_CLOSURE_CODE, "call ended")
+        webSocket = null
+    }
+
+    private fun connectWebSocket() {
+        val request = Request.Builder()
+            .url(DevConfig.callStreamWsUrl(sessionId))
+            .build()
+
+        webSocket = RiskApiClient().okHttpClient().newWebSocket(
+            request,
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    Log.i(TAG, "call-stream WebSocket open (session=$sessionId)")
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    Log.w(TAG, "call-stream WebSocket failed: ${t.message}")
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.i(TAG, "call-stream WebSocket closed: $reason")
+                }
+            },
+        )
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.call_guard_notification_channel),
+                NotificationManager.IMPORTANCE_LOW,
+            )
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
+        .setContentTitle(getString(R.string.call_guard_notification_title))
+        .setContentText(getString(R.string.call_guard_notification_text))
+        .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
+        .setOngoing(true)
+        .setContentIntent(
+            PendingIntent.getActivity(
+                this, 0, Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE,
+            ),
+        )
+        .build()
+
+    override fun onDestroy() {
+        stopSpeechDetection()
+        stopRawAudioCapture()
+        unregisterCallStateWatcher()
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val TAG = "LiveCallAudioService"
+        private const val CHANNEL_ID = "s40_call_guard"
+        private const val NOTIFICATION_ID = 4201
+        private const val NORMAL_CLOSURE_CODE = 1000
+
+        // Minimum time listening before a CRITICAL/scam-alert classification
+        // is allowed to actually show the warning overlay — chosen to sit in
+        // the 30-45s window requested after live testing showed a single
+        // early line (e.g. "calling from SBI") could otherwise trigger it
+        // immediately. The classifier keeps scoring every utterance from the
+        // very first one regardless — this only gates the visible alert.
+        private const val MIN_LISTEN_BEFORE_ALERT_MS = 35_000L
+
+        const val SAMPLE_RATE_HZ = 16_000
+        const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
+        const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
+
+        const val ACTION_START_DETECTION = "com.avaran.security.action.START_DETECTION"
+        const val ACTION_STOP_DETECTION = "com.avaran.security.action.STOP_DETECTION"
+    }
+}

@@ -42,5 +42,14 @@ class Settings(BaseSettings):
     # docs/SECURITY.md's open item on hashing/key management.
     hash_pepper: str = "s40-dev-only-pepper-change-me"
 
+    # Symmetric key for app/core/contact_encryption.py (Fernet). Guards the
+    # one place raw, reversible contact info (email/phone) is allowed to
+    # live — see docs/PROFILE_CONTACT_INFO_DECISION.md. This dev default is
+    # a real, valid Fernet key (so the app boots out of the box) but is
+    # checked into source, so it is NOT secret — generate and set a real
+    # one via .env for anything beyond local dev:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    contact_info_encryption_key: str = "_SiZeLTNC9qRCBhjjnil3lbCAYqQYDheLL-DYZ0fq1g="
+
 
 settings = Settings()

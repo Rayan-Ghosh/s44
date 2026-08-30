@@ -1,4 +1,6 @@
-import { CallSnapshot, CallerInfo, TranscriptLine } from "../types/voice";
+import { CallSnapshot, CallerInfo, DetectedPattern, TranscriptLine } from "../types/voice";
+import { RiskLevel } from "../types/risk";
+import { getApiBaseUrl } from "./api-client";
 
 export const DEFAULT_CALLER: CallerInfo = {
   displayName: "Unknown / Toll-Free Support",
@@ -6,6 +8,16 @@ export const DEFAULT_CALLER: CallerInfo = {
   direction: "inbound",
 };
 
+/**
+ * Illustrative scripted call for the in-app "step through a scam call" demo
+ * screen (VoiceScreen). The dialogue itself is a fixture — there's no live
+ * microphone audio in this in-app flow — but each line is sent as a real
+ * `text_chunk` to the backend's `/ws/voice-stream` classifier below, so the
+ * risk scores, detected patterns, and alert copy shown to the user are real
+ * ML output, not canned numbers. (Live call audio capture from an actual
+ * phone call is a separate, native-Android concern — see
+ * telemetry/LiveCallAudioService.kt — not this in-app demo screen.)
+ */
 export const SIMULATION_TRANSCRIPT: { speaker: "caller" | "user"; text: string; atSec: number }[] = [
   {
     speaker: "caller",
@@ -34,6 +46,90 @@ export const SIMULATION_TRANSCRIPT: { speaker: "caller" | "user"; text: string; 
   },
 ];
 
+// Matches voice/classifier.py's `active_threat_dimensions` vocabulary
+// exactly (URGENCY, LEGAL_THREAT, AUTHORITY_IMPERSONATION,
+// FINANCIAL_EXTRACTION, CREDENTIAL_HARVESTING) — see that file for the
+// authoritative list.
+const PATTERN_MAP: Record<string, DetectedPattern> = {
+  authority_impersonation: "AUTHORITY_IMPERSONATION",
+  urgency: "URGENT_LANGUAGE",
+  legal_threat: "SUSPICIOUS_CALL_PATTERN",
+  financial_extraction: "FINANCIAL_CREDENTIAL_EXTRACTION",
+  credential_harvesting: "OTP_SOLICITATION",
+};
+
+const mapDetectedPatterns = (intents: string[]): DetectedPattern[] => {
+  const mapped = intents.map((i) => PATTERN_MAP[i.toLowerCase()]).filter(Boolean) as DetectedPattern[];
+  return Array.from(new Set(mapped));
+};
+
+const coercionToLevel = (level: string): RiskLevel =>
+  level === "CRITICAL" ? "HIGH" : level === "ELEVATED" ? "MEDIUM" : "LOW";
+
+interface ClassifierResponse {
+  accumulated_risk: number;
+  coercion_level: "SAFE" | "ELEVATED" | "CRITICAL";
+  detected_intents: string[];
+  matched_phrases: string[];
+  is_scam_alert: boolean;
+  message: string;
+}
+
+/**
+ * Thin real-time client for the backend's `/ws/voice-stream` classifier.
+ * One socket per active "call" — the backend keeps a stateful leaky-bucket
+ * accumulator per connection, so risk genuinely builds up across chunks the
+ * same way it would for a real streamed call.
+ */
+class VoiceStreamSession {
+  private socket: WebSocket | null = null;
+  private connectPromise: Promise<void> | null = null;
+
+  private connect(): Promise<void> {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (this.connectPromise) return this.connectPromise;
+
+    const wsUrl = getApiBaseUrl().replace(/^http/, "ws") + "/ws/voice-stream";
+    this.connectPromise = new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error("Unable to connect to the voice classifier."));
+      this.socket = ws;
+    });
+    return this.connectPromise;
+  }
+
+  async sendChunk(text: string): Promise<ClassifierResponse | null> {
+    try {
+      await this.connect();
+    } catch {
+      return null;
+    }
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return null;
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(null), 5000);
+      this.socket!.onmessage = (event) => {
+        clearTimeout(timeout);
+        try {
+          resolve(JSON.parse(event.data as string));
+        } catch {
+          resolve(null);
+        }
+      };
+      this.socket!.send(JSON.stringify({ text_chunk: text }));
+    });
+  }
+
+  close() {
+    this.socket?.close();
+    this.socket = null;
+    this.connectPromise = null;
+  }
+}
+
+const activeSession = new VoiceStreamSession();
+
 export class VoiceService {
   static getInitialSnapshot(): CallSnapshot {
     return {
@@ -41,19 +137,19 @@ export class VoiceService {
       caller: DEFAULT_CALLER,
       durationSec: 0,
       transcript: [],
-      riskScore: 12,
+      riskScore: 0,
       riskLevel: "LOW",
       detectedPatterns: [],
       signals: [
         {
           key: "voice",
           label: "Acoustic & Linguistic Scanner",
-          score: 0.12,
+          score: 0,
           status: "ok",
           factors: [],
         },
       ],
-      reasons: ["Call background noise within standard threshold"],
+      reasons: ["No active call"],
       alert: {
         triggered: false,
         pattern: null,
@@ -64,120 +160,96 @@ export class VoiceService {
     };
   }
 
-  static getActiveCallSnapshot(step: number): CallSnapshot {
-    const lines: TranscriptLine[] = SIMULATION_TRANSCRIPT.slice(0, step).map((t, idx) => ({
+  /**
+   * Streams every scripted line up to `step` through the real classifier
+   * (rebuilding leaky-bucket state each call keeps this idempotent even if
+   * the UI re-requests the same step) and returns a snapshot built from the
+   * backend's actual response.
+   */
+  static async getActiveCallSnapshot(step: number): Promise<CallSnapshot> {
+    activeSession.close();
+    const upToStep = SIMULATION_TRANSCRIPT.slice(0, step);
+
+    const lines: TranscriptLine[] = upToStep.map((t, idx) => ({
       id: `line-${idx}`,
       speaker: t.speaker,
       text: t.text,
       atSec: t.atSec,
       isFinal: true,
     }));
-
     const duration = lines.length > 0 ? lines[lines.length - 1].atSec + 3 : 5;
 
-    if (step <= 1) {
+    let latest: ClassifierResponse | null = null;
+    for (const line of upToStep) {
+      if (line.speaker !== "caller") continue; // only the caller's speech carries scam signal
+      latest = await activeSession.sendChunk(line.text);
+    }
+
+    if (!latest) {
+      // Classifier unreachable — surface a real "unknown" state rather than
+      // a fabricated risk number.
       return {
         status: "active",
         caller: DEFAULT_CALLER,
         durationSec: duration,
         transcript: lines,
-        riskScore: 48,
-        riskLevel: "MEDIUM",
-        detectedPatterns: ["AUTHORITY_IMPERSONATION", "URGENT_LANGUAGE"],
+        riskScore: 0,
+        riskLevel: "LOW",
+        detectedPatterns: [],
         signals: [
           {
             key: "voice",
-            label: "Authority Impersonation Detector",
-            score: 0.65,
-            status: "ok",
-            factors: [
-              { label: "Claims of police / regulatory authority", contribution: 0.4, direction: "increases" },
-            ],
+            label: "Acoustic & Linguistic Scanner",
+            score: null,
+            status: "unavailable",
+            note: "Could not reach the voice classifier.",
+            factors: [],
           },
         ],
-        reasons: ["Caller claiming official regulatory authority without verification"],
-        alert: {
-          triggered: false,
-          pattern: null,
-          title: "",
-          explanation: "",
-          recommendedAction: "",
-        },
+        reasons: ["Unable to reach the voice classifier backend."],
+        alert: { triggered: false, pattern: null, title: "", explanation: "", recommendedAction: "" },
       };
     }
 
-    if (step <= 3) {
-      return {
-        status: "fraud_alert",
-        caller: DEFAULT_CALLER,
-        durationSec: duration,
-        transcript: lines,
-        riskScore: 78,
-        riskLevel: "HIGH",
-        detectedPatterns: ["AUTHORITY_IMPERSONATION", "REMOTE_ACCESS_COERCION", "URGENT_LANGUAGE"],
-        signals: [
-          {
-            key: "voice",
-            label: "Remote Access Detection",
-            score: 0.88,
-            status: "ok",
-            factors: [
-              { label: "Solicitation to install remote desktop tool (AnyDesk)", contribution: 0.55, direction: "increases" },
-            ],
-          },
-        ],
-        reasons: [
-          "Urgent demand to install remote control software",
-          "Attempt to isolate customer from bank branch",
-        ],
-        alert: {
-          triggered: true,
-          pattern: "REMOTE_ACCESS_COERCION",
-          title: "Remote Access Scam Detected",
-          explanation: "The caller is asking you to install AnyDesk. Genuine bank and government officials will never ask you to install remote desktop software.",
-          recommendedAction: "Do not install AnyDesk or grant device permissions. Hang up immediately.",
-        },
-      };
-    }
+    const riskLevel = coercionToLevel(latest.coercion_level);
+    const patterns = mapDetectedPatterns(latest.detected_intents);
+    const riskScore = Math.round(latest.accumulated_risk * 100);
 
-    // Step >= 4 (Full Phishing with OTP solicitation)
     return {
-      status: "fraud_alert",
+      status: latest.is_scam_alert ? "fraud_alert" : "active",
       caller: DEFAULT_CALLER,
       durationSec: duration,
       transcript: lines,
-      riskScore: 91,
-      riskLevel: "HIGH",
-      detectedPatterns: [
-        "AUTHORITY_IMPERSONATION",
-        "REMOTE_ACCESS_COERCION",
-        "OTP_SOLICITATION",
-        "URGENT_LANGUAGE",
-      ],
+      riskScore,
+      riskLevel,
+      detectedPatterns: patterns,
       signals: [
         {
           key: "voice",
-          label: "Voice Phishing Engine",
-          score: 0.95,
+          label: "Live Voice Scam Classifier",
+          score: latest.accumulated_risk,
           status: "ok",
-          factors: [
-            { label: "Direct solicitation of 6-digit SMS OTP", contribution: 0.6, direction: "increases" },
-            { label: "Threats of penalty and artificial urgency", contribution: 0.35, direction: "increases" },
-          ],
+          factors: latest.matched_phrases.map((phrase) => ({
+            label: `Matched phrase: "${phrase}"`,
+            contribution: latest.accumulated_risk,
+            direction: "increases" as const,
+          })),
         },
       ],
-      reasons: [
-        "OTP solicitation detected in live conversation",
-        "Remote desktop application coercion",
-        "Impersonation of law enforcement officials",
-      ],
-      alert: {
-        triggered: true,
-        pattern: "OTP_SOLICITATION",
-        title: "High-Threat Social Engineering Attack",
-        explanation: "Never share an OTP or allow remote access because of an unsolicited call. Banks and police will NEVER ask for your OTP.",
-        recommendedAction: "Refuse the OTP request, end this call immediately, and report the scammer.",
-      },
+      reasons: latest.matched_phrases.length > 0 ? latest.matched_phrases : [latest.message],
+      alert: latest.is_scam_alert
+        ? {
+            triggered: true,
+            pattern: patterns[0] || "SUSPICIOUS_CALL_PATTERN",
+            title: "High-Threat Social Engineering Attack",
+            explanation: latest.message,
+            recommendedAction: "Refuse any OTP/PIN request, end this call immediately, and report the caller.",
+          }
+        : { triggered: false, pattern: null, title: "", explanation: "", recommendedAction: "" },
     };
+  }
+
+  static resetSession(): void {
+    activeSession.close();
   }
 }

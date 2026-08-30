@@ -13,6 +13,18 @@ export interface UserPaymentOverview {
   protectionStatus: "PROTECTED" | "ATTENTION REQUIRED";
 }
 
+export const EMPTY_PAYMENT_OVERVIEW: UserPaymentOverview = {
+  totalAmountThisMonth: 0,
+  transactionCount: 0,
+  safeCount: 0,
+  needsReviewCount: 0,
+  blockedCount: 0,
+  reportedCount: 0,
+  currentRiskLevel: "LOW",
+  currentRiskScore: 0,
+  protectionStatus: "PROTECTED",
+};
+
 export interface RiskFactorItem {
   factor_type: string;
   factor_name: string;
@@ -47,309 +59,45 @@ export interface UserTransaction {
   trustedApproval?: TrustedApprovalAudit;
 }
 
-export const SEED_USER_TRANSACTIONS: UserTransaction[] = [
-  {
-    id: "txn-1",
-    title: "Unknown Merchant",
-    merchant: "Unknown Merchant",
-    amount: 14200,
-    date: "Today · 10 min ago",
-    timestamp: new Date().toISOString(),
-    paymentMethod: "UPI FastPay",
-    status: "Risk detected",
-    riskLevel: "HIGH",
-    riskScore: 78.4,
-    isCompleted: false,
-    riskFactors: [
-      {
-        factor_type: "transaction",
-        factor_name: "amount_deviation",
-        contribution: 45.0,
-        explanation: "Unusual amount compared to past 30 days history",
-      },
-      {
-        factor_type: "transaction",
-        factor_name: "new_recipient",
-        contribution: 30.0,
-        explanation: "First time sending money to this recipient identifier",
-      },
-      {
-        factor_type: "device",
-        factor_name: "new_device",
-        contribution: 25.0,
-        explanation: "Unusual transaction velocity and device activity",
-      },
-    ],
-    reasons: ["Unusual amount (7.2× above normal)", "New recipient handle", "New device fingerprint"],
-    trustedApproval: {
-      required: true,
-      contactName: "Priya Sharma",
-      notes: "Pending guardian verification",
-    },
-  },
-  {
-    id: "txn-2",
-    title: "Amazon India",
-    merchant: "Amazon India",
-    amount: 2499,
-    date: "Today",
-    timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
-    paymentMethod: "Google Pay UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 8.2,
-    isCompleted: true,
-    paymentAppUsed: "Google Pay",
-    completionTimestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
-    riskFactors: [],
-    reasons: ["Recognized merchant", "Normal spending range"],
-    trustedApproval: {
-      required: false,
-      notes: "Standard recognized merchant",
-    },
-  },
-  {
-    id: "txn-3",
-    title: "UPI Transfer",
-    merchant: "Rohit Verma",
-    amount: 8500,
-    date: "Yesterday",
-    timestamp: new Date(Date.now() - 86400000).toISOString(),
-    paymentMethod: "PhonePe",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 12.0,
-    isCompleted: true,
-    paymentAppUsed: "PhonePe",
-    completionTimestamp: new Date(Date.now() - 86400000).toISOString(),
-    riskFactors: [],
-    reasons: ["Frequent contact", "Verified device"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-4",
-    title: "Swiggy India",
-    merchant: "Swiggy India",
-    amount: 480,
-    date: "2 days ago",
-    timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
-    paymentMethod: "Paytm UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 4.5,
-    isCompleted: true,
-    paymentAppUsed: "Paytm Payments",
-    completionTimestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
-    riskFactors: [],
-    reasons: ["Verified merchant", "Small ticket transaction"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-5",
-    title: "BESCOM Electricity Bill",
-    merchant: "BESCOM Bangalore",
-    amount: 1850,
-    date: "3 days ago",
-    timestamp: new Date(Date.now() - 86400000 * 3).toISOString(),
-    paymentMethod: "BHIM UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 5.0,
-    isCompleted: true,
-    paymentAppUsed: "BHIM UPI",
-    completionTimestamp: new Date(Date.now() - 86400000 * 3).toISOString(),
-    riskFactors: [],
-    reasons: ["Government verified utility provider"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-6",
-    title: "Flipkart Internet Pvt Ltd",
-    merchant: "Flipkart",
-    amount: 3290,
-    date: "4 days ago",
-    timestamp: new Date(Date.now() - 86400000 * 4).toISOString(),
-    paymentMethod: "Google Pay UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 6.8,
-    isCompleted: true,
-    paymentAppUsed: "Google Pay",
-    completionTimestamp: new Date(Date.now() - 86400000 * 4).toISOString(),
-    riskFactors: [],
-    reasons: ["Verified e-commerce platform"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-7",
-    title: "Zomato Online",
-    merchant: "Zomato India",
-    amount: 620,
-    date: "5 days ago",
-    timestamp: new Date(Date.now() - 86400000 * 5).toISOString(),
-    paymentMethod: "PhonePe",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 5.2,
-    isCompleted: true,
-    paymentAppUsed: "PhonePe",
-    completionTimestamp: new Date(Date.now() - 86400000 * 5).toISOString(),
-    riskFactors: [],
-    reasons: ["Frequent food delivery merchant"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-8",
-    title: "Airtel Prepaid Recharge",
-    merchant: "Bharti Airtel",
-    amount: 719,
-    date: "6 days ago",
-    timestamp: new Date(Date.now() - 86400000 * 6).toISOString(),
-    paymentMethod: "Paytm UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 4.1,
-    isCompleted: true,
-    paymentAppUsed: "Paytm Payments",
-    completionTimestamp: new Date(Date.now() - 86400000 * 6).toISOString(),
-    riskFactors: [],
-    reasons: ["Recurring monthly recharge handle"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-9",
-    title: "Apollo Pharmacy",
-    merchant: "Apollo Pharmacy",
-    amount: 1450,
-    date: "1 week ago",
-    timestamp: new Date(Date.now() - 86400000 * 7).toISOString(),
-    paymentMethod: "Google Pay UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 7.0,
-    isCompleted: true,
-    paymentAppUsed: "Google Pay",
-    completionTimestamp: new Date(Date.now() - 86400000 * 7).toISOString(),
-    riskFactors: [],
-    reasons: ["Verified healthcare merchant"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-10",
-    title: "Uber India Mobility",
-    merchant: "Uber India",
-    amount: 340,
-    date: "1 week ago",
-    timestamp: new Date(Date.now() - 86400000 * 8).toISOString(),
-    paymentMethod: "PhonePe",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 4.8,
-    isCompleted: true,
-    paymentAppUsed: "PhonePe",
-    completionTimestamp: new Date(Date.now() - 86400000 * 8).toISOString(),
-    riskFactors: [],
-    reasons: ["Verified transportation gateway"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-11",
-    title: "Cult.fit Healthcare",
-    merchant: "Curefit Healthcare",
-    amount: 12500,
-    date: "2 weeks ago",
-    timestamp: new Date(Date.now() - 86400000 * 14).toISOString(),
-    paymentMethod: "BHIM UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 14.5,
-    isCompleted: true,
-    paymentAppUsed: "BHIM UPI",
-    completionTimestamp: new Date(Date.now() - 86400000 * 14).toISOString(),
-    riskFactors: [],
-    reasons: ["Verified fitness merchant handle", "Annual membership"],
-    trustedApproval: {
-      required: true,
-      contactName: "Priya Sharma",
-      decision: "Approved",
-      decisionTime: "2 weeks ago",
-      notes: "Approved by trusted contact for annual plan",
-    },
-  },
-  {
-    id: "txn-12",
-    title: "BookMyShow Entertainment",
-    merchant: "Bigtree Entertainment",
-    amount: 920,
-    date: "2 weeks ago",
-    timestamp: new Date(Date.now() - 86400000 * 15).toISOString(),
-    paymentMethod: "Google Pay UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 6.0,
-    isCompleted: true,
-    paymentAppUsed: "Google Pay",
-    completionTimestamp: new Date(Date.now() - 86400000 * 15).toISOString(),
-    riskFactors: [],
-    reasons: ["Verified ticketing merchant"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-  {
-    id: "txn-13",
-    title: "Nature Basket Grocery",
-    merchant: "Nature Basket",
-    amount: 1539,
-    date: "3 weeks ago",
-    timestamp: new Date(Date.now() - 86400000 * 21).toISOString(),
-    paymentMethod: "PhonePe",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 5.9,
-    isCompleted: true,
-    paymentAppUsed: "PhonePe",
-    completionTimestamp: new Date(Date.now() - 86400000 * 21).toISOString(),
-    riskFactors: [],
-    reasons: ["Verified retail grocery store"],
-    trustedApproval: {
-      required: false,
-    },
-  },
-];
+const STATUS_MAP: Record<string, UserTransaction["status"]> = {
+  PENDING: "Held",
+  AWAITING_CONFIRMATION: "Held",
+  PENDING_GUARDIAN_APPROVAL: "Held",
+  ALLOWED: "Safe",
+  CONFIRMED: "Approved by you",
+  GUARDIAN_APPROVED: "Approved by you",
+  GUARDIAN_TIMEOUT_USER_OVERRODE: "Approved by you",
+  CANCELLED: "Blocked",
+  GUARDIAN_REJECTED: "Blocked",
+  REPORTED: "Reported",
+};
 
-export const SEED_PAYMENT_OVERVIEW: UserPaymentOverview = {
-  totalAmountThisMonth: 48907,
-  transactionCount: 13,
-  safeCount: 12,
-  needsReviewCount: 1,
-  blockedCount: 0,
-  reportedCount: 0,
-  currentRiskLevel: "HIGH",
-  currentRiskScore: 78.4,
-  protectionStatus: "ATTENTION REQUIRED",
+const mapBackendTransaction = (t: any): UserTransaction => {
+  const status = STATUS_MAP[String(t.status).toUpperCase()] || "Held";
+  const isRisky = (t.risk_level === "HIGH" || t.risk_level === "MEDIUM") && status === "Held";
+  return {
+    id: String(t.id),
+    title: t.merchant || "UPI Payment",
+    merchant: t.merchant || "UPI Payment",
+    amount: Number(t.amount) || 0,
+    date: t.timestamp ? new Date(t.timestamp).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "",
+    timestamp: t.timestamp || new Date().toISOString(),
+    paymentMethod: t.payment_method || "UPI",
+    status: isRisky ? "Risk detected" : status,
+    riskLevel: t.risk_level,
+    riskScore: typeof t.risk_score === "number" ? t.risk_score : undefined,
+    riskFactors: Array.isArray(t.risk_factors) ? t.risk_factors : [],
+    reasons: Array.isArray(t.risk_factors) ? t.risk_factors.map((f: any) => f.explanation).filter(Boolean) : [],
+    isCompleted: status === "Approved by you" || status === "Safe",
+    completionTimestamp: status !== "Held" ? t.timestamp : undefined,
+  };
 };
 
 type PaymentSubscriber = (overview: UserPaymentOverview, transactions: UserTransaction[]) => void;
 
 class CentralPaymentManager {
-  private transactions: UserTransaction[] = [...SEED_USER_TRANSACTIONS];
+  private transactions: UserTransaction[] = [];
+  private overview: UserPaymentOverview = EMPTY_PAYMENT_OVERVIEW;
   private subscribers: Set<PaymentSubscriber> = new Set();
 
   public subscribe(fn: PaymentSubscriber): () => void {
@@ -360,81 +108,63 @@ class CentralPaymentManager {
   }
 
   private notify() {
-    const ov = this.computeOverview();
     const txCopy = [...this.transactions];
     this.subscribers.forEach((fn) => {
       try {
-        fn(ov, txCopy);
+        fn(this.overview, txCopy);
       } catch {
         // Safe subscriber notification
       }
     });
   }
 
-  public computeOverview(): UserPaymentOverview {
-    const totalAmount = this.transactions.reduce((acc, t) => acc + (t.amount || 0), 0);
-    const count = this.transactions.length;
-    const reviewItems = this.transactions.filter(
-      (t) => t.status === "Risk detected" || t.status === "Held"
-    );
-    const safeCount = this.transactions.filter(
-      (t) => t.status === "Safe" || t.status === "Approved by you" || t.status === "Completed"
-    );
-    const blockedCount = this.transactions.filter((t) => t.status === "Blocked");
-    const reportedCount = this.transactions.filter((t) => t.status === "Reported");
-
-    const hasRisk = reviewItems.length > 0;
-    const currentScore = hasRisk ? reviewItems[0].riskScore || 78.4 : 8.2;
-    const currentLevel = hasRisk ? "HIGH" : "LOW";
-    const protStatus = hasRisk ? "ATTENTION REQUIRED" : "PROTECTED";
-
-    return {
-      totalAmountThisMonth: totalAmount,
-      transactionCount: count,
-      safeCount: safeCount.length,
-      needsReviewCount: reviewItems.length,
-      blockedCount: blockedCount.length,
-      reportedCount: reportedCount.length,
-      currentRiskLevel: currentLevel,
-      currentRiskScore: currentScore,
-      protectionStatus: protStatus,
+  /** Real GET /api/v1/users/{id}/overview. */
+  public async getOverview(userId: number): Promise<UserPaymentOverview> {
+    const res = await ApiClient.get<any>(`/api/v1/users/${userId}/overview`);
+    if (!res.data) return this.overview;
+    this.overview = {
+      totalAmountThisMonth: res.data.total_amount_this_month ?? 0,
+      transactionCount: res.data.transaction_count ?? 0,
+      safeCount: res.data.safe_count ?? 0,
+      needsReviewCount: res.data.needs_review_count ?? 0,
+      blockedCount: res.data.blocked_count ?? 0,
+      reportedCount: res.data.reported_count ?? 0,
+      currentRiskLevel: res.data.current_risk_level ?? "LOW",
+      currentRiskScore: res.data.current_risk_score ?? 0,
+      protectionStatus: res.data.protection_status ?? "PROTECTED",
     };
+    return this.overview;
   }
 
-  public async getOverview(_userId?: number): Promise<UserPaymentOverview> {
-    try {
-      const resp = await (ApiClient as any).getOverview?.();
-      if (resp && resp.overview) {
-        return resp.overview;
-      }
-    } catch {
-      // Fallback to local store
-    }
-    return this.computeOverview();
-  }
-
+  /** Real GET /api/v1/users/{id}/transactions. */
   public async getTransactions(
-    _userId?: number,
+    userId: number,
     filter?: "all" | "review" | "safe" | "completed",
     limit?: number,
     offset?: number
   ): Promise<{ items: UserTransaction[]; total: number }> {
-    let items = [...this.transactions];
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (offset !== undefined) params.set("offset", String(offset));
+    const qs = params.toString();
+    const res = await ApiClient.get<{ items: any[]; total: number }>(
+      `/api/v1/users/${userId}/transactions${qs ? `?${qs}` : ""}`
+    );
+    if (!res.data) return { items: [], total: 0 };
+
+    let items = res.data.items.map(mapBackendTransaction);
     if (filter === "review") {
       items = items.filter((t) => t.status === "Risk detected" || t.status === "Held");
     } else if (filter === "safe" || filter === "completed") {
-      items = items.filter(
-        (t) => t.status === "Safe" || t.status === "Approved by you" || t.status === "Completed"
-      );
+      items = items.filter((t) => t.status === "Safe" || t.status === "Approved by you" || t.status === "Completed");
     }
-    if (offset !== undefined && limit !== undefined) {
-      items = items.slice(offset, offset + limit);
-    } else if (limit !== undefined) {
-      items = items.slice(0, limit);
-    }
-    return { items, total: items.length };
+
+    this.transactions = res.data.items.map(mapBackendTransaction);
+    this.notify();
+    return { items, total: res.data.total };
   }
 
+  /** Optimistic local cache update — the backend remains the source of truth. */
   public addTransaction(newTx: UserTransaction) {
     this.transactions = [newTx, ...this.transactions];
     this.notify();
@@ -483,7 +213,7 @@ class CentralPaymentManager {
           ...t,
           status: "Approved by you",
           isCompleted: true,
-          paymentAppUsed: paymentAppUsed || t.paymentAppUsed || "Google Pay UPI",
+          paymentAppUsed: paymentAppUsed || t.paymentAppUsed,
           completionTimestamp: new Date().toISOString(),
           trustedApproval: trustedDetails || t.trustedApproval || { required: false },
         };
@@ -498,23 +228,18 @@ class CentralPaymentManager {
     return found;
   }
 
+  /** Real POST /api/v1/transactions/{id}/confirm. */
   public async confirmTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    try {
-      await (ApiClient as any).confirmPayment?.(Number(transactionId.replace(/\D/g, "")) || 1);
-    } catch {
-      // Offline fallback
-    }
-
-    const ok = this.updateTransactionStatus(transactionId, "Approved by you");
-    return { success: ok };
+    const res = await ApiClient.post(`/api/v1/transactions/${transactionId}/confirm`);
+    if (!res.data) return { success: false, error: res.error || "Unable to confirm payment." };
+    this.updateTransactionStatus(transactionId, "Approved by you");
+    return { success: true };
   }
 
+  /** Real POST /api/v1/transactions/{id}/report. */
   public async reportTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    try {
-      await (ApiClient as any).reportFraud?.(Number(transactionId.replace(/\D/g, "")) || 1);
-    } catch {
-      // Offline fallback
-    }
+    const res = await ApiClient.post(`/api/v1/transactions/${transactionId}/report`);
+    if (!res.data) return { success: false, error: res.error || "Unable to report transaction." };
 
     let reportedTx: UserTransaction | undefined;
     this.transactions = this.transactions.map((t) => {
@@ -537,14 +262,16 @@ class CentralPaymentManager {
         isRead: false,
       });
       this.notify();
-      return { success: true };
     }
-    return { success: false, error: "Transaction not found" };
+    return { success: true };
   }
 
+  /** Real POST /api/v1/transactions/{id}/cancel. */
   public async cancelTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    const ok = this.updateTransactionStatus(transactionId, "Blocked");
-    return { success: ok };
+    const res = await ApiClient.post(`/api/v1/transactions/${transactionId}/cancel`);
+    if (!res.data) return { success: false, error: res.error || "Unable to cancel payment." };
+    this.updateTransactionStatus(transactionId, "Blocked");
+    return { success: true };
   }
 }
 
