@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../theme/colors";
 import { typography } from "../../theme/typography";
 import { spacing, radii } from "../../theme/layout";
+import { AvaranLogo } from "./AvaranLogo";
 
 interface HeaderProps {
   title?: string;
@@ -50,9 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
             </TouchableOpacity>
           ) : (
             <View style={styles.brandContainer}>
-              <View style={styles.shieldIcon}>
-                <Ionicons name="shield-checkmark" size={15} color={colors.brand} />
-              </View>
+              <AvaranLogo size="sm" showText={false} style={{ marginRight: spacing.sm }} />
               <Text style={styles.brandTitle}>AVARAN</Text>
             </View>
           )}

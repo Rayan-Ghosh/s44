@@ -8,6 +8,7 @@ import { VoiceService } from "../services/voice-service";
 import { AlertsService, INITIAL_ALERTS } from "../services/alerts-service";
 import { HistoryService, INITIAL_HISTORY } from "../services/history-service";
 import { RiskService } from "../services/risk-service";
+import { PaymentService } from "../services/payment-service";
 
 interface SecurityContextType {
   protectionActive: boolean;
@@ -86,6 +87,27 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       outcome: "pending",
       evaluatedAt: new Date().toISOString(),
     });
+
+    // Synchronize into shared central PaymentService
+    PaymentService.addTransaction({
+      id: String(tx.id),
+      title: tx.recipientName,
+      merchant: tx.recipientName,
+      amount: tx.amount,
+      date: "Today · Just now",
+      timestamp: tx.timestamp,
+      paymentMethod: tx.paymentMethod,
+      status: risk.riskLevel === "HIGH" ? "Risk detected" : "Safe",
+      riskLevel: risk.riskLevel,
+      riskScore: risk.riskScore,
+      riskFactors: risk.reasons.map((r, i) => ({
+        factor_type: "transaction",
+        factor_name: `factor_${i}`,
+        contribution: Math.round(100 / (risk.reasons.length || 1)),
+        explanation: r,
+      })),
+      reasons: risk.reasons,
+    });
   }, []);
 
   const submitPaymentDecision = useCallback(
@@ -94,6 +116,15 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         outcome,
       }));
+
+      const txIdStr = String(heldPayment.transaction.id);
+      if (outcome === "confirmed") {
+        PaymentService.confirmTransaction(txIdStr);
+      } else if (outcome === "cancelled") {
+        PaymentService.cancelTransaction(txIdStr);
+      } else if (outcome === "reported") {
+        PaymentService.reportTransaction(txIdStr);
+      }
 
       // Add to History
       const newHistoryItem: HistoryItem = {

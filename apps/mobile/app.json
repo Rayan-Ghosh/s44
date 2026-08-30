@@ -2,6 +2,7 @@
   "expo": {
     "name": "AVARAN",
     "slug": "avaran-mobile",
+    "scheme": "avaran",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",

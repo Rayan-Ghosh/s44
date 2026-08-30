@@ -48,7 +48,7 @@ export const LandingScreen: React.FC = () => {
           {/* Primary CTA */}
           <Button
             label="GET STARTED"
-            onPress={() => navigation.navigate("Login")}
+            onPress={() => navigation.navigate("CreateAccount")}
             variant="primary"
             size="lg"
             icon="arrow-forward"

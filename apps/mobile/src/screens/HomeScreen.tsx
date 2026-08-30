@@ -19,6 +19,7 @@ import { RiskGauge } from "../components/common/RiskGauge";
 import { useAuth } from "../context/AuthContext";
 import { useGuardian } from "../context/GuardianContext";
 import { useAlertBadge } from "../context/AlertBadgeContext";
+import { useSecurity } from "../context/SecurityContext";
 import {
   PaymentService,
   UserPaymentOverview,
@@ -32,6 +33,7 @@ import { GuardianApprovalCard } from "../components/guardian/GuardianApprovalCar
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { session } = useAuth();
+  const { alerts: securityAlerts } = useSecurity();
   const {
     pendingRequests,
     notificationBadge,
@@ -73,6 +75,14 @@ export const HomeScreen: React.FC = () => {
 
   useEffect(() => {
     loadData();
+
+    // Real-time synchronization subscription with PaymentService
+    const unsubscribe = PaymentService.subscribe((updatedOverview, updatedTxns) => {
+      setOverview(updatedOverview);
+      setRecentTxns(updatedTxns.slice(0, 5));
+    });
+
+    return unsubscribe;
   }, [loadData]);
 
   const onRefresh = () => {
@@ -81,7 +91,8 @@ export const HomeScreen: React.FC = () => {
   };
 
   const userName = session?.name ? session.name.split(" ")[0] : "Rahul";
-  const unreadAlerts = alerts.filter((a) => !a.isRead);
+  const activeAlertsList = securityAlerts && securityAlerts.length > 0 ? securityAlerts : alerts;
+  const unreadAlerts = activeAlertsList.filter((a: any) => !a.isRead);
   const suspiciousTx = recentTxns.find((t) => t.status === "Risk detected" || t.status === "Held");
 
   const getGreeting = () => {
@@ -249,7 +260,7 @@ export const HomeScreen: React.FC = () => {
 
               <TouchableOpacity
                 style={styles.attentionCard}
-                onPress={() => navigation.navigate("Payments")}
+                onPress={() => navigation.navigate("Payments", { selectedTxId: suspiciousTx.id })}
                 activeOpacity={0.85}
               >
                 <View style={styles.attentionTop}>
@@ -299,7 +310,7 @@ export const HomeScreen: React.FC = () => {
                         styles.paymentItem,
                         idx === recentTxns.length - 1 && styles.paymentItemNoBorder,
                       ]}
-                      onPress={() => navigation.navigate("Payments")}
+                      onPress={() => navigation.navigate("Payments", { selectedTxId: item.id })}
                       activeOpacity={0.8}
                     >
                       <View style={styles.paymentItemLeft}>

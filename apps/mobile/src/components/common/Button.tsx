@@ -7,6 +7,7 @@ import {
   ViewStyle,
   TextStyle,
   View,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../theme/colors";
@@ -75,7 +76,7 @@ export const Button: React.FC<ButtonProps> = ({
     }
 
     const minHeight = size === "sm" ? 38 : size === "lg" ? 52 : 44;
-    const paddingHorizontal = size === "sm" ? spacing.md : spacing.xl;
+    const paddingHorizontal = size === "sm" ? spacing.xs : spacing.sm;
 
     return {
       backgroundColor: bg,
@@ -124,17 +125,19 @@ export const Button: React.FC<ButtonProps> = ({
           {icon && iconPosition === "left" && (
             <Ionicons
               name={icon}
-              size={size === "sm" ? 16 : 18}
+              size={size === "sm" ? 15 : 16}
               color={textColor}
               style={styles.iconLeft}
             />
           )}
           <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
             style={[
               styles.text,
               {
                 color: textColor,
-                fontSize: size === "sm" ? 13 : size === "lg" ? 16 : 14,
+                fontSize: size === "sm" ? 12 : size === "lg" ? 15 : 13,
               },
               textStyle,
             ]}
@@ -144,7 +147,7 @@ export const Button: React.FC<ButtonProps> = ({
           {icon && iconPosition === "right" && (
             <Ionicons
               name={icon}
-              size={size === "sm" ? 16 : 18}
+              size={size === "sm" ? 15 : 16}
               color={textColor}
               style={styles.iconRight}
             />
@@ -161,6 +164,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
+    ...(Platform.OS === "web" ? ({ cursor: "pointer", userSelect: "none" } as any) : {}),
   },
   content: {
     flexDirection: "row",

@@ -13,6 +13,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (credentials: UserLoginCredentials) => Promise<{ success: boolean; error?: string }>;
   signup: (data: UserSignupCredentials) => Promise<{ success: boolean; error?: string }>;
+  updateProfile: (data: { name: string; email: string; phone: string }) => Promise<{ success: boolean; error?: string }>;
   loginWithDemo: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -51,6 +52,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const updateProfile = useCallback(async (data: { name: string; email: string; phone: string }) => {
+    setIsLoading(true);
+    try {
+      const currentId = session?.userId || 1;
+      const res = await AuthService.updateProfile(currentId, data);
+      if (res.success && res.session) {
+        setSession(res.session);
+        return { success: true };
+      }
+      return { success: false, error: res.error || "Profile update failed." };
+    } finally {
+      setIsLoading(false);
+    }
+  }, [session?.userId]);
+
   const loginWithDemo = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -78,6 +94,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         login,
         signup,
+        updateProfile,
         loginWithDemo,
         logout,
       }}

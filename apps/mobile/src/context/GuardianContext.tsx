@@ -9,7 +9,7 @@ import React, {
 import { Vibration } from "react-native";
 import { TrustedContact, GuardianRequest, GuardianStatus } from "../types/guardian";
 import { GuardianService } from "../services/guardian-service";
-import { UserTransaction } from "../services/payment-service";
+import { PaymentService, UserTransaction } from "../services/payment-service";
 
 // ---------------------------------------------------------------------------
 // Context shape
@@ -283,6 +283,7 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
               : r
           )
         );
+        PaymentService.updateTransactionStatus(request.transactionId, "Blocked");
         setPaymentOutcome("EXPIRED");
         setNotificationBadge(0);
         setApprovalCard(null);
@@ -304,11 +305,18 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const finalStatus: GuardianStatus = decision;
 
-      setActiveRequest((prev) =>
-        prev && prev.id === requestId
-          ? { ...prev, status: finalStatus, resolvedAt: Date.now() }
-          : prev
-      );
+      setActiveRequest((prev) => {
+        if (prev && prev.id === requestId) {
+          const updated = { ...prev, status: finalStatus, resolvedAt: Date.now() };
+          PaymentService.updateTransactionStatus(
+            updated.transactionId,
+            decision === "APPROVED" ? "Approved by you" : "Blocked"
+          );
+          return updated;
+        }
+        return prev;
+      });
+
       setPendingRequests((prev) =>
         prev.map((r) =>
           r.id === requestId ? { ...r, status: finalStatus, resolvedAt: Date.now() } : r

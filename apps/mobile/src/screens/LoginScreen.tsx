@@ -22,44 +22,27 @@ import { useAuth } from "../context/AuthContext";
 
 export const LoginScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { login, signup, isLoading } = useAuth();
-
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const { login, isLoading } = useAuth();
 
   // Log in form state
   const [identifier, setIdentifier] = useState<string>("rahul@example.com");
   const [password, setPassword] = useState<string>("password123");
-
-  // Create account form state
-  const [fullName, setFullName] = useState<string>("");
-  const [mobileNumber, setMobileNumber] = useState<string>("");
-  const [signupEmail, setSignupEmail] = useState<string>("");
-  const [signupPassword, setSignupPassword] = useState<string>("");
-  const [confirmPassword, setConfirmPassword] = useState<string>("");
-  const [termsAccepted, setTermsAccepted] = useState<boolean>(true);
-
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   const handleLogin = async () => {
     setErrorMessage("");
-    const res = await login({ identifier, password });
+    if (!identifier.trim()) {
+      setErrorMessage("Please enter your email address or mobile number.");
+      return;
+    }
+    if (!password) {
+      setErrorMessage("Please enter your password.");
+      return;
+    }
+
+    const res = await login({ identifier: identifier.trim(), password });
     if (!res.success) {
       setErrorMessage(res.error || "Login failed. Please verify your credentials.");
-    }
-  };
-
-  const handleSignup = async () => {
-    setErrorMessage("");
-    const res = await signup({
-      fullName,
-      mobileNumber,
-      email: signupEmail,
-      password: signupPassword,
-      confirmPassword,
-      termsAccepted,
-    });
-    if (!res.success) {
-      setErrorMessage(res.error || "Signup failed.");
     }
   };
 
@@ -95,43 +78,10 @@ export const LoginScreen: React.FC = () => {
 
           {/* Welcome Message */}
           <View style={styles.welcomeSection}>
-            <Text style={styles.welcomeTitle}>
-              {mode === "login" ? "Welcome back" : "Create Account"}
-            </Text>
+            <Text style={styles.welcomeTitle}>Welcome back</Text>
             <Text style={styles.welcomeSubtitle}>
-              {mode === "login"
-                ? "Secure access to your Avaran account"
-                : "Join Avaran to protect your UPI and wallet payments"}
+              Secure access to your Avaran account
             </Text>
-          </View>
-
-          {/* Mode Switcher */}
-          <View style={styles.tabSwitcher}>
-            <TouchableOpacity
-              style={[styles.tabBtn, mode === "login" && styles.tabBtnActive]}
-              onPress={() => {
-                setMode("login");
-                setErrorMessage("");
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.tabBtnText, mode === "login" && styles.tabBtnTextActive]}>
-                LOG IN
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.tabBtn, mode === "signup" && styles.tabBtnActive]}
-              onPress={() => {
-                setMode("signup");
-                setErrorMessage("");
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.tabBtnText, mode === "signup" && styles.tabBtnTextActive]}>
-                CREATE ACCOUNT
-              </Text>
-            </TouchableOpacity>
           </View>
 
           {/* Error */}
@@ -143,142 +93,52 @@ export const LoginScreen: React.FC = () => {
           ) : null}
 
           {/* Form */}
-          {mode === "login" ? (
-            <>
-              <TextInput
-                label="Email or mobile number"
-                placeholder="e.g. rahul@example.com or +91 98765 43210"
-                value={identifier}
-                onChangeText={setIdentifier}
-                icon="person-outline"
-                autoCapitalize="none"
-              />
+          <TextInput
+            label="Email or mobile number"
+            placeholder="e.g. rahul@example.com or +91 98765 43210"
+            value={identifier}
+            onChangeText={setIdentifier}
+            icon="person-outline"
+            autoCapitalize="none"
+          />
 
-              <TextInput
-                label="Password"
-                placeholder="Enter your password"
-                value={password}
-                onChangeText={setPassword}
-                icon="lock-closed-outline"
-                isPassword
-              />
+          <TextInput
+            label="Password"
+            placeholder="Enter your password"
+            value={password}
+            onChangeText={setPassword}
+            icon="lock-closed-outline"
+            isPassword
+          />
 
-              <TouchableOpacity
-                onPress={handleForgotPassword}
-                style={styles.forgotBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Text style={styles.forgotText}>Forgot password?</Text>
-              </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleForgotPassword}
+            style={styles.forgotBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </TouchableOpacity>
 
-              <Button
-                label={isLoading ? "Logging in..." : "LOG IN"}
-                onPress={handleLogin}
-                loading={isLoading}
-                variant="primary"
-                size="lg"
-                icon="arrow-forward"
-                iconPosition="right"
-                style={styles.submitBtn}
-              />
+          <Button
+            label={isLoading ? "Logging in..." : "LOG IN"}
+            onPress={handleLogin}
+            loading={isLoading}
+            variant="primary"
+            size="lg"
+            icon="arrow-forward"
+            iconPosition="right"
+            style={styles.submitBtn}
+          />
 
-              <TouchableOpacity
-                style={styles.switchModeLink}
-                onPress={() => {
-                  setMode("signup");
-                  setErrorMessage("");
-                }}
-              >
-                <Text style={styles.switchModeText}>
-                  Don't have an account? <Text style={styles.switchModeBold}>Create Account</Text>
-                </Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TextInput
-                label="Full Name"
-                placeholder="e.g. Rahul Sharma"
-                value={fullName}
-                onChangeText={setFullName}
-                icon="person-outline"
-              />
-
-              <TextInput
-                label="Mobile Number"
-                placeholder="e.g. +91 98765 43210"
-                value={mobileNumber}
-                onChangeText={setMobileNumber}
-                icon="call-outline"
-                keyboardType="phone-pad"
-              />
-
-              <TextInput
-                label="Email Address"
-                placeholder="e.g. rahul@example.com"
-                value={signupEmail}
-                onChangeText={setSignupEmail}
-                icon="mail-outline"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-
-              <TextInput
-                label="Password"
-                placeholder="Create a strong password"
-                value={signupPassword}
-                onChangeText={setSignupPassword}
-                icon="lock-closed-outline"
-                isPassword
-              />
-
-              <TextInput
-                label="Confirm Password"
-                placeholder="Re-enter password"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                icon="lock-closed-outline"
-                isPassword
-              />
-
-              <TouchableOpacity
-                style={styles.termsRow}
-                onPress={() => setTermsAccepted((v) => !v)}
-                activeOpacity={0.8}
-              >
-                <Ionicons
-                  name={termsAccepted ? "checkbox" : "square-outline"}
-                  size={20}
-                  color={termsAccepted ? colors.brand : colors.textMuted}
-                />
-                <Text style={styles.termsText}>
-                  I agree to the <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
-                  <Text style={styles.termsLink}>Privacy Policy</Text>
-                </Text>
-              </TouchableOpacity>
-
-              <Button
-                label={isLoading ? "Creating Account..." : "CREATE ACCOUNT"}
-                onPress={handleSignup}
-                loading={isLoading}
-                variant="primary"
-                size="lg"
-                style={styles.submitBtn}
-              />
-
-              <TouchableOpacity
-                style={styles.switchModeLink}
-                onPress={() => {
-                  setMode("login");
-                  setErrorMessage("");
-                }}
-              >
-                <Text style={styles.switchModeText}>
-                  Already have an account? <Text style={styles.switchModeBold}>Log In</Text>
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <TouchableOpacity
+            style={styles.switchModeLink}
+            onPress={() => navigation.navigate("CreateAccount")}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.switchModeText}>
+              Don't have an account? <Text style={styles.switchModeBold}>Create Account</Text>
+            </Text>
+          </TouchableOpacity>
 
           {/* Footer */}
           <View style={styles.footerNote}>
@@ -335,34 +195,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 22,
   },
-  tabSwitcher: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radii.md,
-    padding: 3,
-    marginBottom: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  tabBtn: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    alignItems: "center",
-    borderRadius: radii.sm,
-  },
-  tabBtnActive: {
-    backgroundColor: colors.surface,
-  },
-  tabBtnText: {
-    ...typography.caption,
-    color: colors.textMuted,
-    fontWeight: "700",
-    fontSize: 11,
-    letterSpacing: 0.4,
-  },
-  tabBtnTextActive: {
-    color: colors.textPrimary,
-  },
   errorBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -406,22 +238,6 @@ const styles = StyleSheet.create({
   switchModeBold: {
     color: colors.textPrimary,
     fontWeight: "700",
-  },
-  termsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: spacing.md,
-    gap: spacing.sm,
-  },
-  termsText: {
-    ...typography.small,
-    color: colors.textSecondary,
-    fontSize: 13,
-    flex: 1,
-  },
-  termsLink: {
-    color: colors.textPrimary,
-    fontWeight: "600",
   },
   footerNote: {
     flexDirection: "row",

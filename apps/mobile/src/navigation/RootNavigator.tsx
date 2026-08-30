@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { LandingScreen } from "../screens/LandingScreen";
 import { LoginScreen } from "../screens/LoginScreen";
+import { CreateAccountScreen } from "../screens/CreateAccountScreen";
 import { TabNavigator } from "./TabNavigator";
 import { ConnectedAppsScreen } from "../screens/ConnectedAppsScreen";
 import { AlertDetailScreen } from "../screens/AlertDetailScreen";
@@ -13,6 +14,8 @@ import { HistoryItem } from "../types/history";
 export type RootStackParamList = {
   Landing: undefined;
   Login: undefined;
+  CreateAccount: undefined;
+  Signup: undefined;
   Tabs: undefined;
   ConnectedApps: undefined;
   AlertDetail: { alert: SecurityAlert };
@@ -33,6 +36,20 @@ export const RootNavigator: React.FC = () => {
             component={LandingScreen}
             options={{
               animation: "fade",
+            }}
+          />
+          <Stack.Screen
+            name="CreateAccount"
+            component={CreateAccountScreen}
+            options={{
+              animation: "slide_from_right",
+            }}
+          />
+          <Stack.Screen
+            name="Signup"
+            component={CreateAccountScreen}
+            options={{
+              animation: "slide_from_right",
             }}
           />
           <Stack.Screen

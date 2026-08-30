@@ -23,6 +23,7 @@ import { TextInput } from "../components/common/TextInput";
 import { useAuth } from "../context/AuthContext";
 import { useGuardian } from "../context/GuardianContext";
 import { TrustedContact } from "../types/guardian";
+import { GuardianApprovalCard } from "../components/guardian/GuardianApprovalCard";
 
 // ---------------------------------------------------------------------------
 // Relationship options
@@ -241,6 +242,8 @@ export const TrustedScreen: React.FC = () => {
     loadContacts,
     addContact,
     removeContact,
+    pendingRequests,
+    respondToRequest,
   } = useGuardian();
 
   const [showForm, setShowForm] = useState(false);
@@ -387,6 +390,17 @@ export const TrustedScreen: React.FC = () => {
                 : "The Trusted Guardian feature is currently turned OFF. High-risk payments will proceed directly without guardian verification."}
             </Text>
           </View>
+
+          {/* Pending Approval Requests */}
+          {pendingRequests && pendingRequests.filter((r) => r.status === "PENDING").map((req) => (
+            <GuardianApprovalCard
+              key={req.id}
+              request={req}
+              onConfirm={() => respondToRequest(req.id, "APPROVED")}
+              onReject={() => respondToRequest(req.id, "REJECTED")}
+              onDismiss={() => {}}
+            />
+          ))}
 
           {/* Add form (inline) - only allowed when 0 contacts exist */}
           {showForm && trustedContacts.length === 0 && (
