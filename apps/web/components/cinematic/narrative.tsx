@@ -297,21 +297,19 @@ function FusionMeter({ active }: { active: boolean }) {
   )
 }
 
-/** The held-payment screen: the REAL risk card, embedded live. */
+/** The held-payment screen: the real Avaran app verification interface. */
 function HeldPaymentFrame({ active }: { active: boolean }) {
   return (
     <div className="phone" data-on={active ? "1" : "0"}>
       <div className="phone-bezel">
         <span className="phone-notch" aria-hidden />
         <div className="phone-screen">
-          {/* Not a mockup and not a screenshot: this is the same
-              <RiskDecisionCard /> the product route renders, loaded from
-              /embed/risk-card so its own breakpoints resolve at true phone
-              width. It cannot drift from the product, because there is only
-              one implementation. `inert` keeps it out of the tab order. */}
-          <iframe src="/embed/risk-card?y=0" title="Avaran held-payment screen"
-            loading="lazy" tabIndex={-1} inert className="phone-viewport"
-            scrolling="no" />
+          <img
+            src="/images/held-payment-app.jpg"
+            alt="Avaran app verification and held payment interface"
+            className="phone-img"
+            loading="lazy"
+          />
         </div>
       </div>
     </div>
@@ -377,15 +375,17 @@ function Header() {
       </nav>
       <a href="#" className="cta-pill" onClick={go(0.565)}>
         See a held payment
-        <span className="live-dot" aria-hidden />
       </a>
     </header>
   )
 }
 
 function ProgressRail({ scroll }: { scroll: number }) {
+  // Hidden on the opening frame, easing in over the first beat. The hero is
+  // the one screen that has to be completely clean.
+  const shown = Math.max(0, Math.min(1, (scroll - 0.012) / 0.045))
   return (
-    <div className="progress-rail" aria-hidden>
+    <div className="progress-rail" aria-hidden style={{ opacity: shown }}>
       {ORDER.map((key, i) => {
         const [a, b] = S[key]
         const p = Math.max(0, Math.min(1, (scroll - a) / (b - a)))
@@ -422,7 +422,6 @@ export function Narrative() {
         {/* 01 ─ HERO */}
         <Section id="top" range={S.hero} scroll={scroll}>
           <p className="eyebrow">
-            <span className="live-dot" aria-hidden />
             Real-time · before the payment completes
           </p>
           <WordReveal as="h1" className="display display--hero"

@@ -4,6 +4,7 @@ import * as React from "react"
 import * as THREE from "three"
 
 import { COIN_RADIUS, createCoin } from "@/components/cinematic/coin"
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
 
 /**
  * The cinematic stage: one ₹1 coin on a black field, orbited by a
@@ -136,7 +137,7 @@ function createStudioEnvironment(renderer: THREE.WebGLRenderer) {
 
   // Overhead softbox — the coin's principal highlight.
   const box = ctx.createRadialGradient(150, 40, 4, 150, 40, 170)
-  box.addColorStop(0, "#ffffff")
+  box.addColorStop(0, "#fff6e8")
   box.addColorStop(0.4, "#cfcbc4")
   box.addColorStop(1, "rgba(0,0,0,0)")
   ctx.fillStyle = box
@@ -221,7 +222,7 @@ export function CinematicScene() {
 
     const scene = new THREE.Scene()
     scene.background = new THREE.Color("#000000")
-    scene.fog = new THREE.FogExp2("#000000", 0.055)
+    scene.fog = new THREE.FogExp2("#000000", 0.035)
 
     const camera = new THREE.PerspectiveCamera(
       42,
@@ -296,21 +297,104 @@ export function CinematicScene() {
     fillLight.position.set(-1.8, -2.4, 1.6)
     scene.add(fillLight)
 
-    /* -- the coin --------------------------------------------------------- */
+    // THE BOUNCE CARD. The coin's faces point at the camera, so the key light
+    // — high and to one side — only grazes them; the face rendered as a dark
+    // disc with a bright rim, nothing like the reference. This rides just off
+    // the camera's shoulder and is repositioned every frame, so whichever face
+    // is turned toward the viewer is always the lit one.
+    const bounce = new THREE.DirectionalLight("#fff1dd", 3.4)
+    scene.add(bounce)
+
+    // Grounding pool: a soft warm ellipse of light on the floor beneath the
+    // coin. Without it the coin floats in a void — the reference sits on a
+    // surface, and that contact is most of what makes it feel physical.
+    const poolCanvas = document.createElement("canvas")
+    poolCanvas.width = poolCanvas.height = 256
+    const pctx = poolCanvas.getContext("2d")!
+    const pool = pctx.createRadialGradient(128, 128, 0, 128, 128, 128)
+    pool.addColorStop(0, "rgba(255,226,186,0.85)")
+    pool.addColorStop(0.35, "rgba(210,175,132,0.34)")
+    pool.addColorStop(1, "rgba(0,0,0,0)")
+    pctx.fillStyle = pool
+    pctx.fillRect(0, 0, 256, 256)
+    const poolTex = new THREE.CanvasTexture(poolCanvas)
+    const poolMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(5.2, 5.2),
+      new THREE.MeshBasicMaterial({
+        map: poolTex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    )
+    poolMesh.rotation.x = -Math.PI / 2
+    poolMesh.position.y = -1.02
+    poolMesh.renderOrder = -5
+    scene.add(poolMesh)
+
+    /* -- the 3D Indian Rupee coin model (.glb) -------------------------- */
     const coinPivot = new THREE.Group()
     scene.add(coinPivot)
     let coinDispose: (() => void) | null = null
 
-    // Fonts must be resolved before the emblem is rasterised, or the legend
-    // renders in a fallback face and the coin stops reading as Indian.
-    const fontsReady = document.fonts?.ready ?? Promise.resolve()
-    fontsReady.then(() => {
-      if (disposed) return
-      const coin = createCoin()
-      coinDispose = coin.dispose
-      coinPivot.add(coin.mesh)
-      setReady(true)
-    })
+    const gltfLoader = new GLTFLoader()
+    gltfLoader.load(
+      "/models/indian_10_rupee_coin.glb",
+      (gltf) => {
+        if (disposed) return
+        const model = gltf.scene
+
+        // 1. Normalize scale to diameter 2.0 (radius 1.0)
+        const initialBox = new THREE.Box3().setFromObject(model)
+        const initialSize = new THREE.Vector3()
+        initialBox.getSize(initialSize)
+        const maxDim = Math.max(initialSize.x, initialSize.y, initialSize.z)
+        const targetScale = 2.0 / (maxDim || 1)
+        model.scale.setScalar(targetScale)
+
+        // 2. Center geometry at origin (0, 0, 0)
+        const scaledBox = new THREE.Box3().setFromObject(model)
+        const center = new THREE.Vector3()
+        scaledBox.getCenter(center)
+        model.position.sub(center)
+
+        // 3. Connect studio environment reflections to all materials
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh
+            mesh.castShadow = true
+            mesh.receiveShadow = true
+
+            if (mesh.material) {
+              const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+              mats.forEach((m: any) => {
+                m.envMap = envMap
+                m.envMapIntensity = 2.6
+                m.roughness = Math.min(m.roughness ?? 0.3, 0.25)
+                m.metalness = Math.max(m.metalness ?? 0.8, 0.9)
+                m.needsUpdate = true
+              })
+            }
+          }
+        })
+
+        coinPivot.add(model)
+        setReady(true)
+      },
+      undefined,
+      (err) => {
+        console.warn("GLTF load fallback:", err)
+        if (disposed) return
+        const fontsReady = document.fonts?.ready ?? Promise.resolve()
+        fontsReady.then(() => {
+          if (disposed) return
+          const coin = createCoin()
+          coinDispose = coin.dispose
+          coinPivot.add(coin.mesh)
+          setReady(true)
+        })
+      }
+    )
 
     /* -- grounding shadow --------------------------------------------------
        A coin lit this hard with nothing beneath it reads as floating. This is
@@ -521,23 +605,25 @@ export function CinematicScene() {
       camera.position.lerp(targetPos, reduced ? 1 : 0.03)
       camera.lookAt(lookAt)
 
-      /* the coin barely moves — the camera does the work. A slow drift plus a
-         little pointer tilt is enough to prove it is a physical object. */
+      /* the coin rests at an elegant 3/4 angle with pointer parallax */
       if (coinPivot) {
-        // A small resting tilt so the coin is standing at three-quarters
-        // rather than pinned flat to the camera, plus the pointer parallax.
-        coinPivot.rotation.y = -0.16 + mouseX * 0.18 + Math.sin(elapsed * 0.12) * 0.05
-        coinPivot.rotation.x = 0.06 + mouseY * 0.12 + Math.cos(elapsed * 0.1) * 0.03
-        coinPivot.rotation.z = -0.05
+        coinPivot.rotation.y = -0.42 + mouseX * 0.18 + Math.sin(elapsed * 0.12) * 0.05
+        coinPivot.rotation.x = 0.09 + mouseY * 0.12 + Math.cos(elapsed * 0.1) * 0.03
+        coinPivot.rotation.z = -0.06
         coinPivot.position.y = Math.sin(elapsed * 0.35) * 0.02
       }
 
-      /* the key light tracks the camera a little, so the coin's relief always
-         catches light no matter which side you are looking at */
+      /* lights track camera */
       keyLight.position.set(
         targetPos.x * 0.55 + 2.2,
         4.4,
         targetPos.z * 0.55 + 1.8
+      )
+      // The bounce sits just off the camera's shoulder
+      bounce.position.set(
+        targetPos.x * 0.85 - camRight.x * 1.4,
+        targetPos.y * 0.6 + 0.8,
+        targetPos.z * 0.85 - camRight.z * 1.4
       )
 
       uniforms.uTime.value = elapsed
@@ -563,6 +649,9 @@ export function CinematicScene() {
       particleTexture.dispose()
       bgGeometry.dispose()
       bgMaterial.dispose()
+      poolMesh.geometry.dispose()
+      ;(poolMesh.material as THREE.Material).dispose()
+      poolTex.dispose()
       envMap.dispose()
       renderer.dispose()
     }

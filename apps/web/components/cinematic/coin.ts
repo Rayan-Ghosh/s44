@@ -1,89 +1,89 @@
 import * as THREE from "three"
 
 /**
- * A procedural Indian ₹1 coin.
+ * A photorealistic procedural Indian ₹1 circulation coin with PBR Normal Mapping.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * WHY PROCEDURAL, AND WHY A HEIGHT MAP
+ * ARCHITECTURE & REALISM:
  *
- * A coin is not a printed disc — it is a *struck* disc. Everything you read on
- * a real coin you read because light rakes across relief: raised metal catches
- * the key light, recessed field stays dark. So the designs below are drawn in
- * GREYSCALE as height fields (mid-grey = the flat field, lighter = raised
- * relief) and fed to `bumpMap`, not to `map`. The coin's colour comes from one
- * uniform nickel-steel base; the imagery comes entirely from light.
+ * Struck metal is defined by 3 things:
+ * 1. Die-struck 3D Relief — Rounded, stamped bevels that catch raking key light.
+ * 2. Sobel Normal Mapping — Converts heightfields into tangent-space RGB normal
+ *    vectors so Three.js renders razor-sharp specular glints and physical depth.
+ * 3. Radial Brushed Lathe Grain — Real mint dies leave microscopic concentric
+ *    polishing tracks, giving the coin its signature "cartwheel luster".
  *
- * Painting the emblem as a colour texture would have produced a sticker on a
- * cylinder, which is exactly the "generic gold token" failure mode this has to
- * avoid.
- *
- * WHAT IS DEPICTED
- * The current (2011– ) Indian one-rupee circulation coin:
- *   obverse — Lion Capital of Ashoka, सत्यमेव जयते beneath, भारत / INDIA flanking
- *   reverse — the ₹ symbol, the numeral 1, and the mint year
- * It is a stylised rendering, not a scan: enough to read unmistakably as an
- * Indian one-rupee coin, drawn from primitives rather than traced from a
- * photograph of legal tender.
- *
- * Physical proportions follow the real coin: 21.93mm diameter, 1.45mm thick —
- * a ratio of about 15:1, which is what makes it read as a coin rather than a
- * medallion or a crypto token.
+ * Physical proportions follow the authentic ₹1 circulation coin:
+ * 21.93mm diameter, 1.45mm thickness (~15:1 aspect ratio).
  * ─────────────────────────────────────────────────────────────────────────
  */
 
-const TEXTURE_SIZE = 1024
-/** Real ₹1: 21.93mm across, 1.45mm thick. Kept as a ratio, not a scale. */
+const TEXTURE_SIZE = 2048
 export const COIN_RADIUS = 1.0
 export const COIN_THICKNESS = (1.45 / 21.93) * 2 * COIN_RADIUS
 
-/** Height-field convention. Mid-grey is the untouched field of the coin. */
+/** Height-field convention: #808080 = flat ground; lighter = raised; darker = recessed */
 const FIELD = "#808080"
-const RAISED = "#f2f2f2"
-const RAISED_SOFT = "#c8c8c8"
-const RECESSED = "#4a4a4a"
+const RAISED = "#ffffff"
+const RAISED_MID = "#d8d8d8"
+const RAISED_SOFT = "#b4b4b4"
+const RECESSED = "#3a3a3a"
 
-function newCanvas() {
+function newCanvas(w = TEXTURE_SIZE, h = TEXTURE_SIZE) {
   const c = document.createElement("canvas")
-  c.width = TEXTURE_SIZE
-  c.height = TEXTURE_SIZE
+  c.width = w
+  c.height = h
   return c
 }
 
-/** Sprinkle micro-imperfections: a circulated coin is never optically clean. */
-function addWear(ctx: CanvasRenderingContext2D) {
+/** Microscopic radial lathe grain and die-polish marks */
+function addBrushedSteelGrain(ctx: CanvasRenderingContext2D) {
   const n = TEXTURE_SIZE
+  const c = n / 2
 
-  // Fine radial die-polish lines.
+  // Concentric lathe grooves (mint polishing)
   ctx.save()
-  ctx.globalAlpha = 0.05
-  ctx.strokeStyle = "#ffffff"
-  ctx.lineWidth = 1
-  for (let i = 0; i < 220; i++) {
-    const a = Math.random() * Math.PI * 2
-    const r0 = n * (0.1 + Math.random() * 0.2)
-    const r1 = r0 + n * (0.04 + Math.random() * 0.14)
+  ctx.globalAlpha = 0.04
+  for (let r = n * 0.05; r < n * 0.48; r += 2.5) {
+    ctx.strokeStyle = Math.random() > 0.5 ? "#ffffff" : "#000000"
+    ctx.lineWidth = 1 + Math.random() * 1.2
     ctx.beginPath()
-    ctx.moveTo(n / 2 + Math.cos(a) * r0, n / 2 + Math.sin(a) * r0)
-    ctx.lineTo(n / 2 + Math.cos(a) * r1, n / 2 + Math.sin(a) * r1)
+    ctx.arc(c, c, r, 0, Math.PI * 2)
     ctx.stroke()
   }
   ctx.restore()
 
-  // Scattered nicks and contact marks.
+  // Radial die-stress luster lines
   ctx.save()
-  ctx.globalAlpha = 0.07
-  for (let i = 0; i < 90; i++) {
+  ctx.globalAlpha = 0.035
+  ctx.strokeStyle = "#ffffff"
+  ctx.lineWidth = 1
+  for (let i = 0; i < 360; i++) {
+    const a = (i / 360) * Math.PI * 2 + (Math.random() - 0.5) * 0.02
+    const r0 = n * (0.08 + Math.random() * 0.12)
+    const r1 = n * 0.465
+    ctx.beginPath()
+    ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0)
+    ctx.lineTo(c + Math.cos(a) * r1, c + Math.sin(a) * r1)
+    ctx.stroke()
+  }
+  ctx.restore()
+
+  // Authentic micro-nicks and contact marks from circulation
+  ctx.save()
+  ctx.globalAlpha = 0.06
+  for (let i = 0; i < 110; i++) {
     const a = Math.random() * Math.PI * 2
     const r = Math.random() * n * 0.44
-    const x = n / 2 + Math.cos(a) * r
-    const y = n / 2 + Math.sin(a) * r
+    const x = c + Math.cos(a) * r
+    const y = c + Math.sin(a) * r
     ctx.fillStyle = Math.random() > 0.5 ? "#ffffff" : "#000000"
     ctx.beginPath()
     ctx.ellipse(
       x,
       y,
-      1 + Math.random() * 3,
-      1 + Math.random() * 1.5,
+      1.5 + Math.random() * 3,
+      1 + Math.random() * 2,
       Math.random() * Math.PI,
       0,
       Math.PI * 2
@@ -93,7 +93,7 @@ function addWear(ctx: CanvasRenderingContext2D) {
   ctx.restore()
 }
 
-/** The raised rim every struck coin carries, plus a denticled inner ring. */
+/** The raised protective outer rim & inner bevel step */
 function drawRim(ctx: CanvasRenderingContext2D) {
   const n = TEXTURE_SIZE
   const c = n / 2
@@ -101,35 +101,38 @@ function drawRim(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = FIELD
   ctx.fillRect(0, 0, n, n)
 
-  // Outside the coin's circle is pure black so the bump never bleeds past it.
+  // Pure black mask outside coin circumference
   ctx.save()
   ctx.beginPath()
-  ctx.arc(c, c, n * 0.5, 0, Math.PI * 2)
+  ctx.arc(c, c, n * 0.495, 0, Math.PI * 2)
   ctx.closePath()
   ctx.rect(n, 0, -n, n)
   ctx.fillStyle = "#000000"
   ctx.fill("evenodd")
   ctx.restore()
 
-  // Raised outer rim.
-  ctx.strokeStyle = RAISED
-  ctx.lineWidth = n * 0.035
+  // Raised outer rim with soft bevel gradient
+  ctx.strokeStyle = RAISED_SOFT
+  ctx.lineWidth = n * 0.042
   ctx.beginPath()
   ctx.arc(c, c, n * 0.472, 0, Math.PI * 2)
   ctx.stroke()
 
-  // Shallow trough just inside the rim.
+  ctx.strokeStyle = RAISED
+  ctx.lineWidth = n * 0.026
+  ctx.beginPath()
+  ctx.arc(c, c, n * 0.474, 0, Math.PI * 2)
+  ctx.stroke()
+
+  // Shallow inner trough step
   ctx.strokeStyle = RECESSED
   ctx.lineWidth = n * 0.012
   ctx.beginPath()
-  ctx.arc(c, c, n * 0.446, 0, Math.PI * 2)
+  ctx.arc(c, c, n * 0.448, 0, Math.PI * 2)
   ctx.stroke()
 }
 
-/**
- * The Lion Capital of Ashoka, stylised: three visible lions (one facing, two in
- * profile) standing on the abacus, with the Dharma Chakra centred beneath them.
- */
+/** Stamped Lion Capital of Ashoka with 3D embossed lion manes and abacus */
 function drawLionCapital(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -138,127 +141,179 @@ function drawLionCapital(
 ) {
   ctx.save()
   ctx.translate(cx, cy)
-  ctx.fillStyle = RAISED
-  ctx.strokeStyle = RAISED
   ctx.lineJoin = "round"
   ctx.lineCap = "round"
+  ctx.fillStyle = RAISED
+  ctx.strokeStyle = RAISED
 
-  /* -- abacus: the band the lions stand on ------------------------------- */
+  /* ── Inverted Bell/Lotus Base ── */
+  ctx.fillStyle = RAISED_SOFT
   ctx.beginPath()
-  ctx.moveTo(-s * 0.62, s * 0.30)
-  ctx.lineTo(s * 0.62, s * 0.30)
-  ctx.lineTo(s * 0.55, s * 0.46)
-  ctx.lineTo(-s * 0.55, s * 0.46)
+  ctx.moveTo(-s * 0.46, s * 0.52)
+  ctx.bezierCurveTo(-s * 0.34, s * 0.74, -s * 0.26, s * 0.86, -s * 0.22, s * 0.94)
+  ctx.lineTo(s * 0.22, s * 0.94)
+  ctx.bezierCurveTo(s * 0.26, s * 0.86, s * 0.34, s * 0.74, s * 0.46, s * 0.52)
   ctx.closePath()
   ctx.fill()
 
-  /* -- Dharma Chakra on the abacus --------------------------------------- */
+  // Lotus petal fluting
+  ctx.strokeStyle = RECESSED
+  ctx.lineWidth = s * 0.018
+  for (let i = -3; i <= 3; i++) {
+    ctx.beginPath()
+    ctx.moveTo(i * s * 0.115, s * 0.56)
+    ctx.lineTo(i * s * 0.062, s * 0.92)
+    ctx.stroke()
+  }
+
+  /* ── Abacus ── */
+  ctx.fillStyle = RAISED
+  ctx.beginPath()
+  ctx.moveTo(-s * 0.58, s * 0.26)
+  ctx.lineTo(s * 0.58, s * 0.26)
+  ctx.lineTo(s * 0.50, s * 0.52)
+  ctx.lineTo(-s * 0.50, s * 0.52)
+  ctx.closePath()
+  ctx.fill()
+
+  /* ── Dharma Chakra (24 Spokes) ── */
   ctx.save()
-  ctx.translate(0, s * 0.38)
+  ctx.translate(0, s * 0.39)
   ctx.strokeStyle = RECESSED
   ctx.lineWidth = s * 0.022
   ctx.beginPath()
-  ctx.arc(0, 0, s * 0.115, 0, Math.PI * 2)
+  ctx.arc(0, 0, s * 0.105, 0, Math.PI * 2)
   ctx.stroke()
   ctx.lineWidth = s * 0.012
   for (let i = 0; i < 24; i++) {
     const a = (i / 24) * Math.PI * 2
     ctx.beginPath()
-    ctx.moveTo(Math.cos(a) * s * 0.028, Math.sin(a) * s * 0.028)
-    ctx.lineTo(Math.cos(a) * s * 0.105, Math.sin(a) * s * 0.105)
+    ctx.moveTo(Math.cos(a) * s * 0.026, Math.sin(a) * s * 0.026)
+    ctx.lineTo(Math.cos(a) * s * 0.096, Math.sin(a) * s * 0.096)
     ctx.stroke()
   }
-  ctx.beginPath()
-  ctx.arc(0, 0, s * 0.026, 0, Math.PI * 2)
   ctx.fillStyle = RECESSED
+  ctx.beginPath()
+  ctx.arc(0, 0, s * 0.025, 0, Math.PI * 2)
   ctx.fill()
   ctx.restore()
 
-  /* -- bell/lotus base beneath the abacus -------------------------------- */
-  ctx.fillStyle = RAISED_SOFT
-  ctx.beginPath()
-  ctx.moveTo(-s * 0.5, s * 0.46)
-  ctx.quadraticCurveTo(-s * 0.30, s * 0.70, -s * 0.20, s * 0.78)
-  ctx.lineTo(s * 0.20, s * 0.78)
-  ctx.quadraticCurveTo(s * 0.30, s * 0.70, s * 0.5, s * 0.46)
-  ctx.closePath()
-  ctx.fill()
-
-  /* -- lion bodies -------------------------------------------------------- */
-  ctx.fillStyle = RAISED
-
-  // Side lions, in profile, facing outward.
-  const sideLion = (dir: number) => {
+  /* ── Profile Lions (Left & Right) ── */
+  const drawProfile = (dir: number) => {
     ctx.save()
     ctx.scale(dir, 1)
-    // haunch and back
+    ctx.fillStyle = RAISED
+
+    // Body & Musculature
     ctx.beginPath()
-    ctx.moveTo(s * 0.14, s * 0.30)
-    ctx.quadraticCurveTo(s * 0.52, s * 0.26, s * 0.56, s * 0.02)
-    ctx.quadraticCurveTo(s * 0.58, -s * 0.18, s * 0.44, -s * 0.26)
-    ctx.quadraticCurveTo(s * 0.30, -s * 0.32, s * 0.20, -s * 0.20)
-    ctx.quadraticCurveTo(s * 0.16, s * 0.02, s * 0.14, s * 0.30)
+    ctx.moveTo(s * 0.15, s * 0.26)
+    ctx.lineTo(s * 0.15, -s * 0.10)
+    ctx.quadraticCurveTo(s * 0.20, -s * 0.30, s * 0.36, -s * 0.34)
+    ctx.quadraticCurveTo(s * 0.54, -s * 0.36, s * 0.58, -s * 0.16)
+    ctx.quadraticCurveTo(s * 0.61, s * 0.06, s * 0.55, s * 0.26)
     ctx.closePath()
     ctx.fill()
-    // foreleg
+
+    // Foreleg
     ctx.lineWidth = s * 0.075
     ctx.beginPath()
-    ctx.moveTo(s * 0.46, -s * 0.06)
-    ctx.lineTo(s * 0.50, s * 0.28)
+    ctx.moveTo(s * 0.50, -s * 0.06)
+    ctx.lineTo(s * 0.52, s * 0.24)
     ctx.stroke()
-    // muzzle
+
+    // Mane (die-struck notched curls)
     ctx.beginPath()
-    ctx.moveTo(s * 0.50, -s * 0.24)
-    ctx.quadraticCurveTo(s * 0.62, -s * 0.26, s * 0.60, -s * 0.14)
-    ctx.quadraticCurveTo(s * 0.54, -s * 0.12, s * 0.50, -s * 0.16)
+    ctx.ellipse(s * 0.44, -s * 0.30, s * 0.19, s * 0.17, 0.12, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.lineWidth = s * 0.028
+    for (let i = 0; i < 9; i++) {
+      const a = -Math.PI * 0.15 + (i / 8) * Math.PI * 1.25
+      ctx.beginPath()
+      ctx.moveTo(s * 0.44 + Math.cos(a) * s * 0.15, -s * 0.30 + Math.sin(a) * s * 0.14)
+      ctx.lineTo(s * 0.44 + Math.cos(a) * s * 0.235, -s * 0.30 + Math.sin(a) * s * 0.215)
+      ctx.stroke()
+    }
+
+    // Muzzle & Facial Contour
+    ctx.beginPath()
+    ctx.moveTo(s * 0.52, -s * 0.36)
+    ctx.quadraticCurveTo(s * 0.68, -s * 0.34, s * 0.66, -s * 0.21)
+    ctx.quadraticCurveTo(s * 0.58, -s * 0.17, s * 0.51, -s * 0.22)
     ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = RECESSED
+    ctx.beginPath()
+    ctx.ellipse(s * 0.61, -s * 0.30, s * 0.02, s * 0.015, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
   }
-  sideLion(1)
-  sideLion(-1)
+  drawProfile(1)
+  drawProfile(-1)
 
-  // Centre lion, facing the viewer.
+  /* ── Facing Centre Lion ── */
+  ctx.fillStyle = RAISED
   ctx.beginPath()
-  ctx.moveTo(-s * 0.19, s * 0.30)
-  ctx.quadraticCurveTo(-s * 0.23, -s * 0.06, -s * 0.15, -s * 0.20)
-  ctx.lineTo(s * 0.15, -s * 0.20)
-  ctx.quadraticCurveTo(s * 0.23, -s * 0.06, s * 0.19, s * 0.30)
+  ctx.moveTo(-s * 0.21, s * 0.26)
+  ctx.quadraticCurveTo(-s * 0.25, -s * 0.02, -s * 0.17, -s * 0.16)
+  ctx.lineTo(s * 0.17, -s * 0.16)
+  ctx.quadraticCurveTo(s * 0.25, -s * 0.02, s * 0.21, s * 0.26)
   ctx.closePath()
   ctx.fill()
 
-  // Mane — a ring of short radiating strokes around the centre head.
-  ctx.strokeStyle = RAISED
-  ctx.lineWidth = s * 0.030
-  for (let i = 0; i < 22; i++) {
-    const a = Math.PI + (i / 21) * Math.PI
-    const r0 = s * 0.145
-    const r1 = s * 0.215
+  ctx.lineWidth = s * 0.064
+  ctx.beginPath()
+  ctx.moveTo(-s * 0.11, s * 0.02)
+  ctx.lineTo(-s * 0.13, s * 0.24)
+  ctx.moveTo(s * 0.11, s * 0.02)
+  ctx.lineTo(s * 0.13, s * 0.24)
+  ctx.stroke()
+
+  // Full Center Mane
+  ctx.beginPath()
+  ctx.ellipse(0, -s * 0.30, s * 0.235, s * 0.205, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.lineWidth = s * 0.032
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 19) * Math.PI * 2
+    const r0x = s * 0.20, r0y = s * 0.175
+    const r1x = s * 0.295, r1y = s * 0.265
     ctx.beginPath()
-    ctx.moveTo(Math.cos(a) * r0, -s * 0.30 + Math.sin(a) * r0 * 0.9)
-    ctx.lineTo(Math.cos(a) * r1, -s * 0.30 + Math.sin(a) * r1 * 0.9)
+    ctx.moveTo(Math.cos(a) * r0x, -s * 0.30 + Math.sin(a) * r0y)
+    ctx.lineTo(Math.cos(a) * r1x, -s * 0.30 + Math.sin(a) * r1y)
     ctx.stroke()
   }
 
-  // Centre head + face.
-  ctx.fillStyle = RAISED
+  // Facial Features
   ctx.beginPath()
-  ctx.ellipse(0, -s * 0.30, s * 0.145, s * 0.135, 0, 0, Math.PI * 2)
+  ctx.ellipse(0, -s * 0.26, s * 0.115, s * 0.098, 0, 0, Math.PI * 2)
   ctx.fill()
   ctx.fillStyle = RECESSED
   ctx.beginPath()
-  ctx.ellipse(-s * 0.052, -s * 0.325, s * 0.020, s * 0.014, 0, 0, Math.PI * 2)
+  ctx.ellipse(-s * 0.062, -s * 0.345, s * 0.022, s * 0.016, 0, 0, Math.PI * 2)
   ctx.fill()
   ctx.beginPath()
-  ctx.ellipse(s * 0.052, -s * 0.325, s * 0.020, s * 0.014, 0, 0, Math.PI * 2)
+  ctx.ellipse(s * 0.062, -s * 0.345, s * 0.022, s * 0.016, 0, 0, Math.PI * 2)
   ctx.fill()
   ctx.beginPath()
-  ctx.ellipse(0, -s * 0.255, s * 0.030, s * 0.020, 0, 0, Math.PI * 2)
+  ctx.moveTo(-s * 0.030, -s * 0.275)
+  ctx.lineTo(s * 0.030, -s * 0.275)
+  ctx.lineTo(0, -s * 0.232)
+  ctx.closePath()
   ctx.fill()
+
+  ctx.strokeStyle = RECESSED
+  ctx.lineWidth = s * 0.015
+  ctx.beginPath()
+  ctx.moveTo(0, -s * 0.232)
+  ctx.lineTo(0, -s * 0.205)
+  ctx.moveTo(-s * 0.048, -s * 0.196)
+  ctx.quadraticCurveTo(0, -s * 0.172, s * 0.048, -s * 0.196)
+  ctx.stroke()
 
   ctx.restore()
 }
 
+/** Render State Emblem on Obverse Face */
 function drawEmblem(ctx: CanvasRenderingContext2D) {
   const n = TEXTURE_SIZE
   const c = n / 2
@@ -271,30 +326,23 @@ function drawEmblem(ctx: CanvasRenderingContext2D) {
   ctx.textBaseline = "middle"
   ctx.fillStyle = RAISED
 
-  // सत्यमेव जयते, beneath the capital, as on the emblem.
-  ctx.font = `600 ${Math.round(n * 0.062)}px "Noto Sans Devanagari", serif`
+  // सत्यमेव जयते
+  ctx.font = `700 ${Math.round(n * 0.062)}px "Noto Sans Devanagari", serif`
   ctx.fillText("सत्यमेव जयते", c, c + n * 0.205)
 
-  // भारत left, INDIA right, curving with the rim.
-  ctx.font = `600 ${Math.round(n * 0.058)}px "Noto Sans Devanagari", serif`
+  // भारत left, INDIA right
+  ctx.font = `700 ${Math.round(n * 0.058)}px "Noto Sans Devanagari", serif`
   ctx.fillText("भारत", c - n * 0.245, c + n * 0.325)
-  ctx.font = `600 ${Math.round(n * 0.052)}px Outfit, sans-serif`
-  ctx.letterSpacing = `${n * 0.006}px`
+  ctx.font = `700 ${Math.round(n * 0.054)}px "Outfit", sans-serif`
+  ctx.letterSpacing = `${n * 0.008}px`
   ctx.fillText("INDIA", c + n * 0.245, c + n * 0.325)
   ctx.letterSpacing = "0px"
   ctx.restore()
 
-  addWear(ctx)
+  addBrushedSteelGrain(ctx)
 }
 
-/**
- * Text set along an arc, letters upright and radiating from the centre.
- *
- * The legend on the real coin curves with the rim; setting it on a straight
- * baseline is the single clearest tell that a coin face was drawn rather than
- * struck. Each glyph is measured, the run is centred on `centerAngle`, and
- * every letter is rotated to stand normal to the circle.
- */
+/** Curve text along circumference normal */
 function arcText(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -304,10 +352,14 @@ function arcText(
   centerAngle: number,
   spacing = 1
 ) {
-  const chars = [...text]
+  const chars =
+    typeof Intl !== "undefined" && "Segmenter" in Intl
+      ? [...new Intl.Segmenter("hi", { granularity: "grapheme" }).segment(text)].map(
+          (g) => g.segment
+        )
+      : [...text]
   const widths = chars.map((ch) => ctx.measureText(ch).width * spacing)
   const total = widths.reduce((t, w) => t + w, 0)
-  // Arc length -> angle.
   let angle = centerAngle - total / radius / 2
 
   ctx.save()
@@ -326,37 +378,26 @@ function arcText(
   ctx.restore()
 }
 
-/**
- * The numeral, drawn as a path rather than set in a typeface.
- *
- * The struck 1 on this coin has a long angled flag off the top-left, a stem of
- * near-constant width, and a wide flat foot — a shape no UI sans has. Setting
- * it in Outfit gave a thin geometric 1 that read as a label, not as minted
- * relief.
- */
+/** Die-struck Stamped Numeral 1 */
 function drawNumeralOne(
   ctx: CanvasRenderingContext2D,
   cx: number,
   cy: number,
   h: number
 ) {
-  const w = h * 0.075 // stem half-width
+  const w = h * 0.076
   ctx.save()
   ctx.translate(cx, cy)
   ctx.fillStyle = RAISED
   ctx.beginPath()
-  // foot, left edge
   ctx.moveTo(-h * 0.30, h * 0.5)
   ctx.lineTo(-h * 0.30, h * 0.5 - h * 0.055)
   ctx.lineTo(-w, h * 0.5 - h * 0.055)
-  // up the left of the stem
   ctx.lineTo(-w, -h * 0.30)
-  // the flag, angled down-left
   ctx.lineTo(-h * 0.235, -h * 0.175)
   ctx.lineTo(-h * 0.285, -h * 0.275)
   ctx.lineTo(-w * 0.2, -h * 0.5)
   ctx.lineTo(w, -h * 0.5)
-  // down the right of the stem to the foot
   ctx.lineTo(w, h * 0.5 - h * 0.055)
   ctx.lineTo(h * 0.30, h * 0.5 - h * 0.055)
   ctx.lineTo(h * 0.30, h * 0.5)
@@ -365,16 +406,7 @@ function drawNumeralOne(
   ctx.restore()
 }
 
-/**
- * One side of the wheat motif: two long tapering leaves on the outside and a
- * chevron-grained ear between them.
- *
- * This is the detail that carries the coin's identity, and the first two
- * attempts under-drew it — a bare stem with ellipses stuck to it, which read
- * as a laurel sprig or a fern. On the coin the leaves are broad blades that
- * sweep nearly the full height of the numeral, and the grains are stacked
- * chevrons, not beads.
- */
+/** Stamped Wheat Ear Motifs */
 function drawWheat(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -385,12 +417,11 @@ function drawWheat(
   ctx.save()
   ctx.translate(cx, cy)
   ctx.scale(dir, 1)
-  ctx.strokeStyle = RAISED
   ctx.fillStyle = RAISED
+  ctx.strokeStyle = RAISED
   ctx.lineCap = "round"
   ctx.lineJoin = "round"
 
-  // Two long outer blades, the outer one broader and reaching higher.
   const blade = (
     x0: number, y0: number, x1: number, y1: number,
     bow: number, width: number
@@ -402,47 +433,44 @@ function drawWheat(
     ctx.closePath()
     ctx.fill()
   }
-  blade(s * 0.10, s * 0.52, s * 0.42, -s * 0.34, s * 0.34, s * 0.085)
-  blade(s * 0.05, s * 0.54, s * 0.20, -s * 0.10, s * 0.30, s * 0.062)
+  blade(s * 0.06, s * 0.56, s * 0.52, -s * 0.40, s * 0.44, s * 0.10)
+  blade(s * 0.02, s * 0.58, s * 0.30, -s * 0.06, s * 0.40, s * 0.075)
 
-  // The ear: a slim stem with chevron grains stepping up it.
-  ctx.lineWidth = s * 0.030
+  ctx.lineWidth = s * 0.038
   ctx.beginPath()
-  ctx.moveTo(s * 0.02, s * 0.50)
-  ctx.quadraticCurveTo(s * 0.10, s * 0.10, s * 0.13, -s * 0.42)
+  ctx.moveTo(-s * 0.02, s * 0.56)
+  ctx.quadraticCurveTo(s * 0.06, s * 0.12, s * 0.10, -s * 0.44)
   ctx.stroke()
 
-  const grains = 7
-  ctx.lineWidth = s * 0.034
-  for (let i = 0; i < grains; i++) {
-    const t = i / (grains - 1)
-    const x = s * 0.02 + (s * 0.08) * (2 * t * (1 - t)) + (s * 0.11) * t * t
-    const y = s * 0.50 - t * s * 0.92
-    const k = 1 - t * 0.4
-    // A chevron opening downward, one arm either side of the stem.
-    ctx.beginPath()
-    ctx.moveTo(x - s * 0.17 * k, y + s * 0.10 * k)
-    ctx.lineTo(x, y - s * 0.03 * k)
-    ctx.lineTo(x + s * 0.17 * k, y + s * 0.10 * k)
-    ctx.stroke()
+  const rows = 6
+  for (let i = 0; i < rows; i++) {
+    const t = i / (rows - 1)
+    const x = -s * 0.02 + s * 0.12 * t
+    const y = s * 0.44 - t * s * 0.80
+    const k = 0.55 + 0.45 * Math.sin(Math.PI * (0.18 + t * 0.72))
+    for (const side of [-1, 1]) {
+      ctx.save()
+      ctx.translate(x + side * s * 0.075 * k, y)
+      ctx.rotate(side * -0.62)
+      ctx.beginPath()
+      ctx.ellipse(0, 0, s * 0.115 * k, s * 0.056 * k, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
   }
-  // Terminal grain closing the ear.
+
+  ctx.save()
+  ctx.translate(s * 0.10, -s * 0.44)
+  ctx.rotate(-0.16)
   ctx.beginPath()
-  ctx.ellipse(s * 0.13, -s * 0.47, s * 0.035, s * 0.075, -0.08, 0, Math.PI * 2)
+  ctx.ellipse(0, 0, s * 0.048, s * 0.098, 0, 0, Math.PI * 2)
   ctx.fill()
+  ctx.restore()
 
   ctx.restore()
 }
 
-/**
- * The denomination face — the side the hero shows, drawn against the
- * reference model's own render.
- *
- * रुपया arcs with the rim, an outlined numeral 1 fills the field, wheat
- * flanks it either side, then RUPEE, the mint year, and the small Noida mint
- * mark beneath. Set in a serif, because the coin is: a geometric sans reads
- * as a label printed on a disc rather than as metal struck in a die.
- */
+/** Denomination Hero Face */
 function drawDenomination(ctx: CanvasRenderingContext2D) {
   const n = TEXTURE_SIZE
   const c = n / 2
@@ -455,26 +483,25 @@ function drawDenomination(ctx: CanvasRenderingContext2D) {
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
 
-  // रुपया, arced along the top inside the rim.
-  ctx.font = `600 ${Math.round(n * 0.082)}px "Noto Sans Devanagari", serif`
-  arcText(ctx, "रुपया", c, c, n * 0.355, -Math.PI / 2, 1.06)
+  // रुपया
+  ctx.font = `700 ${Math.round(n * 0.098)}px "Noto Sans Devanagari", serif`
+  arcText(ctx, "रुपया", c, c, n * 0.335, -Math.PI / 2, 1.04)
 
-  // RUPEE and the year, on straight baselines low in the field.
-  ctx.font = `400 ${Math.round(n * 0.092)}px ${SERIF}`
+  // RUPEE and 2000 year
+  ctx.font = `700 ${Math.round(n * 0.092)}px ${SERIF}`
   ctx.letterSpacing = `${n * 0.014}px`
   ctx.fillText("RUPEE", c, c + n * 0.205)
-  ctx.font = `400 ${Math.round(n * 0.082)}px ${SERIF}`
+  ctx.font = `700 ${Math.round(n * 0.082)}px ${SERIF}`
   ctx.letterSpacing = `${n * 0.006}px`
-  ctx.fillText("1998", c, c + n * 0.315)
+  ctx.fillText("2000", c, c + n * 0.315)
   ctx.letterSpacing = "0px"
   ctx.restore()
 
-  // Numeral and wheat.
   drawNumeralOne(ctx, c, c - n * 0.045, n * 0.38)
   drawWheat(ctx, c - n * 0.145, c - n * 0.02, n * 0.30, -1)
   drawWheat(ctx, c + n * 0.145, c - n * 0.02, n * 0.30, 1)
 
-  // Noida mint mark: a small solid dot inside a ring, under the year.
+  // Noida Mint Mark
   ctx.save()
   ctx.strokeStyle = RAISED
   ctx.fillStyle = RAISED
@@ -487,13 +514,13 @@ function drawDenomination(ctx: CanvasRenderingContext2D) {
   ctx.fill()
   ctx.restore()
 
-  addWear(ctx)
+  addBrushedSteelGrain(ctx)
 }
 
-/** Reeded (milled) edge — fine vertical flutes around the cylinder wall. */
+/** 132-reed Milled Edge Cylinder Fluting */
 function drawEdge(ctx: CanvasRenderingContext2D) {
   const w = TEXTURE_SIZE
-  const h = 128
+  const h = 256
   ctx.canvas.width = w
   ctx.canvas.height = h
   ctx.fillStyle = FIELD
@@ -510,19 +537,76 @@ function drawEdge(ctx: CanvasRenderingContext2D) {
     ctx.fillRect(x, 0, w / reeds, h)
   }
 
-  // Bevel the two lips so the edge does not read as a razor-sharp extrusion.
+  // Edge bevel lips
   const bevel = ctx.createLinearGradient(0, 0, 0, h)
-  bevel.addColorStop(0, "rgba(0,0,0,0.55)")
-  bevel.addColorStop(0.16, "rgba(0,0,0,0)")
-  bevel.addColorStop(0.84, "rgba(0,0,0,0)")
-  bevel.addColorStop(1, "rgba(0,0,0,0.55)")
+  bevel.addColorStop(0, "rgba(0,0,0,0.6)")
+  bevel.addColorStop(0.15, "rgba(0,0,0,0)")
+  bevel.addColorStop(0.85, "rgba(0,0,0,0)")
+  bevel.addColorStop(1, "rgba(0,0,0,0.6)")
   ctx.fillStyle = bevel
   ctx.fillRect(0, 0, w, h)
 }
 
+/**
+ * High-performance Sobel Normal Map Generator.
+ * Converts 2D stamped heightfields into tangent-space RGB normal maps.
+ */
+function generateNormalMap(canvas: HTMLCanvasElement, strength = 4.2): HTMLCanvasElement {
+  const w = canvas.width
+  const h = canvas.height
+  const ctx = canvas.getContext("2d")!
+  const src = ctx.getImageData(0, 0, w, h)
+  const srcData = src.data
+
+  const outCanvas = document.createElement("canvas")
+  outCanvas.width = w
+  outCanvas.height = h
+  const outCtx = outCanvas.getContext("2d")!
+  const out = outCtx.createImageData(w, h)
+  const outData = out.data
+
+  const getIntensity = (x: number, y: number) => {
+    const px = Math.min(Math.max(x, 0), w - 1)
+    const py = Math.min(Math.max(y, 0), h - 1)
+    const idx = (py * w + px) * 4
+    return (srcData[idx] * 0.299 + srcData[idx + 1] * 0.587 + srcData[idx + 2] * 0.114) / 255
+  }
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const tl = getIntensity(x - 1, y - 1)
+      const t = getIntensity(x, y - 1)
+      const tr = getIntensity(x + 1, y - 1)
+      const l = getIntensity(x - 1, y)
+      const r = getIntensity(x + 1, y)
+      const bl = getIntensity(x - 1, y + 1)
+      const b = getIntensity(x, y + 1)
+      const br = getIntensity(x + 1, y + 1)
+
+      const dx = tr + 2 * r + br - (tl + 2 * l + bl)
+      const dy = bl + 2 * b + br - (tl + 2 * t + tr)
+      const dz = 1.0 / strength
+
+      const len = Math.sqrt(dx * dx + dy * dy + dz * dz)
+      const nx = (dx / len) * 0.5 + 0.5
+      const ny = (-dy / len) * 0.5 + 0.5
+      const nz = (dz / len) * 0.5 + 0.5
+
+      const i = (y * w + x) * 4
+      outData[i] = Math.round(nx * 255)
+      outData[i + 1] = Math.round(ny * 255)
+      outData[i + 2] = Math.round(nz * 255)
+      outData[i + 3] = 255
+    }
+  }
+
+  outCtx.putImageData(out, 0, 0)
+  return outCanvas
+}
+
 function toTexture(canvas: HTMLCanvasElement, repeatX = 1) {
   const t = new THREE.CanvasTexture(canvas)
-  t.anisotropy = 8
+  t.anisotropy = 16
   t.wrapS = THREE.RepeatWrapping
   t.wrapT = THREE.ClampToEdgeWrapping
   t.repeat.set(repeatX, 1)
@@ -530,28 +614,10 @@ function toTexture(canvas: HTMLCanvasElement, repeatX = 1) {
   return t
 }
 
-/**
- * A cap texture, turned upright.
- *
- * A CylinderGeometry lays its cap UVs out in the XZ plane, so once the coin is
- * stood up to face the camera the artwork arrives rotated a quarter turn. The
- * two caps also disagree about handedness — the bottom cap is seen from behind
- * — so they need opposite corrections. Doing this per-texture keeps the
- * geometry untouched and the mesh's own rotation free for the pointer tilt.
- */
 function faceTexture(canvas: HTMLCanvasElement, face: "obverse" | "reverse") {
   const t = toTexture(canvas)
   t.center.set(0.5, 0.5)
-  // Determined by rendering rather than by reasoning about UV handedness,
-  // over two passes: the quarter-turn alone left both faces mirrored and
-  // inverted; repeat.y = -1 fixed the inversion and left a pure horizontal
-  // mirror, which repeat.x = -1 clears. The two caps are seen from opposite
-  // sides, hence the opposite quarter-turns.
   t.rotation = face === "obverse" ? -Math.PI / 2 : Math.PI / 2
-  // The caps are viewed from opposite sides, so their corrections differ on
-  // BOTH axes, not just one. Obverse (-1,-1) and reverse (1,1) are the pair
-  // that renders each legend upright and the right way round; anything else
-  // left "2024" reading backwards or upside down.
   t.repeat.set(face === "obverse" ? -1 : 1, face === "obverse" ? -1 : 1)
   t.needsUpdate = true
   return t
@@ -563,79 +629,69 @@ export type CoinBundle = {
 }
 
 /**
- * Build the coin. Call after `document.fonts.ready` so the Devanagari and
- * Outfit faces are available to the 2D canvas — otherwise the emblem legend
- * silently renders in a fallback face.
+ * Creates the complete Photorealistic PBR Indian Rupee Coin.
  */
 export function createCoin(): CoinBundle {
-  // FRONT is the denomination face. The hero frames the coin from the +Z
-  // side, and the side worth showing there is the one that says what the coin
-  // is worth — the numeral, the wheat, RUPEE. The state emblem is the back.
   const frontCanvas = newCanvas()
   drawDenomination(frontCanvas.getContext("2d")!)
   const backCanvas = newCanvas()
   drawEmblem(backCanvas.getContext("2d")!)
-  const edgeCanvas = newCanvas()
+  const edgeCanvas = newCanvas(TEXTURE_SIZE, 256)
   drawEdge(edgeCanvas.getContext("2d")!)
+
+  // Generate Tangent-Space Sobel Normal Maps
+  const frontNormalCanvas = generateNormalMap(frontCanvas, 4.0)
+  const backNormalCanvas = generateNormalMap(backCanvas, 4.0)
+  const edgeNormalCanvas = generateNormalMap(edgeCanvas, 3.2)
 
   const frontBump = faceTexture(frontCanvas, "obverse")
   const backBump = faceTexture(backCanvas, "reverse")
   const edgeBump = toTexture(edgeCanvas, 1)
 
-  /**
-   * One nickel-steel base for all three surfaces. Real ₹1 coins are
-   * ferritic stainless — bright but not yellow, and closer to matte than to a
-   * mirror. `metalness` stays at 1 (it is metal) and the character comes from
-   * roughness, which is deliberately high enough to keep it out of
-   * chrome-ball territory.
-   */
+  const frontNormal = faceTexture(frontNormalCanvas, "obverse")
+  const backNormal = faceTexture(backNormalCanvas, "reverse")
+  const edgeNormal = toTexture(edgeNormalCanvas, 1)
+
+  /** Authentic Ferritic Stainless Steel PBR material */
   const base = {
-    // Ferritic stainless, not silver and emphatically not gold. A touch warm
-    // so it never reads as chrome, but desaturated enough to stay currency.
-    color: new THREE.Color("#c8c5bf"),
+    color: new THREE.Color("#ebe6dc"),
     metalness: 1.0,
-    // Slightly under 1 keeps a little diffuse response, which is what stops
-    // the coin going to a black silhouette in a room this dark.
-    roughness: 0.3,
-    envMapIntensity: 2.6,
+    roughness: 0.22,
+    envMapIntensity: 3.2,
   }
 
-  const faceMaterial = (bump: THREE.Texture) =>
+  const faceMaterial = (bump: THREE.Texture, normal: THREE.Texture) =>
     new THREE.MeshStandardMaterial({
       ...base,
       bumpMap: bump,
-      bumpScale: 0.009,
+      bumpScale: 0.012,
+      normalMap: normal,
+      normalScale: new THREE.Vector2(1.8, 1.8),
       roughnessMap: bump,
-      // Raised relief polishes with handling; the field stays duller.
-      roughness: 0.36,
+      roughness: 0.22,
     })
 
   const materials = [
     new THREE.MeshStandardMaterial({
       ...base,
       bumpMap: edgeBump,
-      bumpScale: 0.004,
-      // The reeded edge catches the key light across its whole length; at the
-      // faces' roughness it flared into a chrome band brighter than the coin.
-      roughness: 0.58,
+      bumpScale: 0.015,
+      normalMap: edgeNormal,
+      normalScale: new THREE.Vector2(1.5, 1.5),
+      roughness: 0.28,
     }),
-    faceMaterial(frontBump),
-    faceMaterial(backBump),
+    faceMaterial(frontBump, frontNormal),
+    faceMaterial(backBump, backNormal),
   ]
 
   const geometry = new THREE.CylinderGeometry(
     COIN_RADIUS,
     COIN_RADIUS,
     COIN_THICKNESS,
-    160,
+    180,
     1
   )
 
-  // Stand the coin up. The cap textures are oriented separately, on the
-  // textures themselves — see `faceTexture`. Rotating the geometry to fix the
-  // legend seemed simpler and was wrong: spinning about the cylinder's own
-  // axis mirrors one cap relative to the other, which rendered INDIA
-  // backwards. A texture rotation turns each face independently.
   geometry.rotateX(Math.PI / 2)
 
   const mesh = new THREE.Mesh(geometry, materials)
@@ -650,6 +706,9 @@ export function createCoin(): CoinBundle {
       frontBump.dispose()
       backBump.dispose()
       edgeBump.dispose()
+      frontNormal.dispose()
+      backNormal.dispose()
+      edgeNormal.dispose()
     },
   }
 }
