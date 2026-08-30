@@ -1,0 +1,12 @@
+{
+  "weights": {
+    "transaction_fraud": 0.35,
+    "behaviour_anomaly": 0.25,
+    "device_risk": 0.20,
+    "voice_risk": 0.20
+  },
+  "thresholds": {
+    "low_max": 30,
+    "medium_max": 60
+  }
+}

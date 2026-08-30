@@ -54,6 +54,36 @@ CREDENTIAL_KEYWORDS = [
     r"\bscreen share\b", r"\bdownload application\b", r"\bshare code\b"
 ]
 
+# Found via live testing: a caller genuinely warning the user — "please
+# don't share your OTP or PIN with anyone" — matched the exact same
+# \botp\b / \bpin\b patterns as a caller *demanding* them, since plain
+# keyword matching has no concept of negation. A legitimate anti-fraud
+# warning is the opposite of a credential-harvesting attempt, so a keyword
+# match preceded closely by one of these negation markers is excluded
+# rather than counted.
+#
+# Kept as whole-word/short-phrase regex patterns rather than a fixed list
+# of exact multi-word phrases: a first pass using fixed phrases like
+# "don't"/"never share" missed the equally natural "not to share" ("a
+# message not to share the OTP") — real gap found live, not theoretical.
+# Matching the standalone words "not"/"never"/"cannot" (word-boundaried,
+# so this doesn't fire on "note"/"notice"/"notify") alongside the
+# contractions covers "not to", "should not", "asked not to", "told not
+# to", "never share", "cannot share", etc. in one pass instead of trying
+# to enumerate every phrasing.
+NEGATION_MARKER_PATTERNS = [
+    r"\bdon't\b", r"\bdo not\b", r"\bdoesn't\b", r"\bdoes not\b",
+    r"\bwon't\b", r"\bwill not\b", r"\bshouldn't\b", r"\bshould not\b",
+    r"\bcan't\b", r"\bcannot\b", r"\bavoid\b",
+    r"\bnot\b", r"\bnever\b",
+]
+NEGATION_WINDOW_CHARS = 40
+
+
+def _is_negated(lower_text: str, match_start: int) -> bool:
+    """True if a negation marker appears shortly before a keyword match."""
+    preceding = lower_text[max(0, match_start - NEGATION_WINDOW_CHARS):match_start]
+    return any(re.search(pattern, preceding) for pattern in NEGATION_MARKER_PATTERNS)
 
 
 class VoiceFeatureExtractor:
@@ -88,7 +118,8 @@ class VoiceFeatureExtractor:
         def compute_lexicon_density(lexicon: List[str]) -> float:
             matches = 0
             for pattern in lexicon:
-                if re.search(pattern, lower_text):
+                match = re.search(pattern, lower_text)
+                if match and not _is_negated(lower_text, match.start()):
                     matches += 1
             if not lexicon:
                 return 0.0
