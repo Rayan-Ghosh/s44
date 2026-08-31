@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../theme/colors";
 import { typography } from "../../theme/typography";
 import { spacing, radii } from "../../theme/layout";
+import { AvaranLogo } from "./AvaranLogo";
 
 interface HeaderProps {
   title?: string;
@@ -14,6 +15,9 @@ interface HeaderProps {
     icon: keyof typeof Ionicons.glyphMap;
     label?: string;
     onPress: () => void;
+    color?: string;
+    backgroundColor?: string;
+    isActive?: boolean;
   };
 }
 
@@ -47,9 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
             </TouchableOpacity>
           ) : (
             <View style={styles.brandContainer}>
-              <View style={styles.shieldIcon}>
-                <Ionicons name="shield-checkmark" size={15} color={colors.brand} />
-              </View>
+              <AvaranLogo size="sm" showText={false} style={{ marginRight: spacing.sm }} />
               <Text style={styles.brandTitle}>AVARAN</Text>
             </View>
           )}
@@ -65,11 +67,36 @@ export const Header: React.FC<HeaderProps> = ({
           {rightAction ? (
             <TouchableOpacity
               onPress={rightAction.onPress}
-              style={styles.actionButton}
+              style={[
+                styles.actionButton,
+                rightAction.backgroundColor ? { backgroundColor: rightAction.backgroundColor } : null,
+                rightAction.isActive !== undefined
+                  ? {
+                      backgroundColor: rightAction.isActive
+                        ? colors.brandSurface
+                        : colors.surfaceSecondary,
+                      borderColor: rightAction.isActive
+                        ? colors.brandBorder
+                        : colors.borderLight,
+                      borderWidth: 1,
+                    }
+                  : null,
+              ]}
               accessibilityRole="button"
               accessibilityLabel={rightAction.label || "Action"}
             >
-              <Ionicons name={rightAction.icon} size={18} color={colors.textSecondary} />
+              <Ionicons
+                name={rightAction.icon}
+                size={18}
+                color={
+                  rightAction.color ||
+                  (rightAction.isActive !== undefined
+                    ? rightAction.isActive
+                      ? colors.brand
+                      : colors.textMuted
+                    : colors.textSecondary)
+                }
+              />
             </TouchableOpacity>
           ) : (
             <View style={styles.rightPlaceholder} />

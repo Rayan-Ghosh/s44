@@ -1,0 +1,15 @@
+<resources>
+  <string name="app_name">AVARAN</string>
+  <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
+
+  <string name="accessibility_service_label">AVARAN Payment Guard (Demo)</string>
+  <string name="call_guard_notification_channel">AVARAN Call Protection</string>
+  <string name="call_guard_notification_title">AVARAN is protecting this call</string>
+  <string name="call_guard_notification_text">Listening for live scam patterns. Tap to open AVARAN.</string>
+
+  <string name="fraud_overlay_title">⚠ High-Risk Payment Detected</string>
+  <string name="fraud_overlay_body">AVARAN flagged this transfer as very likely fraud. Do not enter your UPI PIN.</string>
+  <string name="fraud_overlay_end_call">End Call &amp; Abort Transfer</string>
+  <string name="fraud_overlay_dismiss">I understand, continue anyway</string>
+  <string name="fraud_overlay_countdown_format">Please wait %1$ds</string>
+</resources>

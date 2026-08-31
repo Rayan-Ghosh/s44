@@ -60,7 +60,7 @@ export const TransactionCard: React.FC<TransactionCardProps> = ({
         </View>
 
         <View style={styles.amountCol}>
-          <Text style={styles.amountText}>₹{item.amount.toLocaleString("en-IN")}</Text>
+          <Text style={styles.amountText}>₹{(item?.amount ?? 0).toLocaleString("en-IN")}</Text>
           <Text style={styles.statusLabel}>{item.status}</Text>
         </View>
       </View>

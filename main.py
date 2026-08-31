@@ -26,6 +26,21 @@ app = FastAPI(
 )
 
 
+@app.get("/")
+async def root():
+    """Root endpoint providing system welcome message and endpoint index."""
+    return {
+        "status": "online",
+        "service": "S40 Real-Time Fraud Shield API Engine",
+        "documentation": "/docs",
+        "health_check": "/health",
+        "endpoints": {
+            "evaluate_risk": "/api/v1/risk/evaluate",
+            "websocket_stream": "/ws/call-stream/{session_id}"
+        }
+    }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint returning active session count."""
@@ -38,6 +53,21 @@ async def health_check():
             "pipeline": "Bhashini Streaming ASR + Stateful Leaky Bucket Fraud Detector",
         },
     )
+
+
+@app.post("/api/v1/risk/evaluate")
+async def evaluate_risk(payload: dict):
+    """
+    Evaluates real-time transaction fraud risk across ML models, rules, and voice signals.
+    """
+    try:
+        from ml.inference.predict import MLPredictor
+        predictor = MLPredictor()
+        result = predictor.predict(payload)
+        return JSONResponse(status_code=200, content=result)
+    except Exception as e:
+        logger.error(f"Error evaluating risk: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.websocket("/ws/call-stream/{session_id}")

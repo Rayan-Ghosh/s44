@@ -25,6 +25,8 @@ class TransactionCreate(BaseModel):
     device_identifier: str = Field(
         ..., min_length=1, max_length=255, description="Raw device fingerprint — hashed before storage."
     )
+    device_name: Optional[str] = Field(default=None, max_length=120, description="Human-readable device label reported by the client, e.g. via expo-device.")
+    device_type: Optional[str] = Field(default=None, max_length=120)
     amount: Decimal = Field(..., gt=0, description="Transaction amount, must be positive.")
     location: Optional[str] = Field(default=None, max_length=255)
     payment_method: Optional[str] = Field(default=None, max_length=50)

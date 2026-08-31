@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,6 +12,7 @@ import { FraudWarningBanner } from "../components/voice/FraudWarningBanner";
 import { RiskScoreBadge } from "../components/risk/RiskScoreBadge";
 import { Button } from "../components/common/Button";
 import { useSecurity } from "../context/SecurityContext";
+import { isCallGuardAvailable, startCallDetection, stopCallDetection } from "../native/call-guard";
 
 export const VoiceScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -27,6 +28,22 @@ export const VoiceScreen: React.FC = () => {
 
   const isDisconnected = activeCall.status === "disconnected";
 
+  const [isRealDetectionActive, setIsRealDetectionActive] = useState(false);
+  const [realDetectionError, setRealDetectionError] = useState<string | null>(null);
+  const [isTogglingDetection, setIsTogglingDetection] = useState(false);
+
+  const handleToggleRealDetection = async () => {
+    setIsTogglingDetection(true);
+    setRealDetectionError(null);
+    const result = isRealDetectionActive ? await stopCallDetection() : await startCallDetection();
+    if (result.success) {
+      setIsRealDetectionActive((prev) => !prev);
+    } else {
+      setRealDetectionError(result.error || "Something went wrong.");
+    }
+    setIsTogglingDetection(false);
+  };
+
   return (
     <View style={styles.screen}>
       <Header
@@ -40,6 +57,47 @@ export const VoiceScreen: React.FC = () => {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Real live call detection — genuine mic + on-device speech
+            recognition + the real backend classifier. Keep this app open
+            on screen while a call plays nearby for this to work; see
+            docs/SECURITY.md and telemetry/LiveCallAudioService.kt for why
+            it must be foregrounded rather than fully automatic. */}
+        <View style={styles.realDetectionCard}>
+          <View style={styles.realDetectionHeader}>
+            <Ionicons
+              name={isRealDetectionActive ? "radio" : "mic-outline"}
+              size={20}
+              color={isRealDetectionActive ? colors.threat : colors.textPrimary}
+            />
+            <Text style={styles.realDetectionTitle}>Real Live Call Detection</Text>
+          </View>
+          <Text style={styles.realDetectionDesc}>
+            {isCallGuardAvailable()
+              ? "Uses your phone's real microphone, on-device speech recognition, and the real fraud classifier — not a script. Keep this screen open while a call plays nearby."
+              : "Only available on Android — this build can't access the microphone this way."}
+          </Text>
+          {realDetectionError && (
+            <Text style={styles.realDetectionErrorText}>{realDetectionError}</Text>
+          )}
+          {isCallGuardAvailable() && (
+            <Button
+              label={
+                isTogglingDetection
+                  ? "Please wait…"
+                  : isRealDetectionActive
+                  ? "Hang Up"
+                  : "Detect Current Call"
+              }
+              onPress={handleToggleRealDetection}
+              variant={isRealDetectionActive ? "destructive" : "primary"}
+              size="md"
+              icon={isRealDetectionActive ? "call-outline" : "mic"}
+              disabled={isTogglingDetection}
+              style={{ marginTop: spacing.sm, width: "100%" }}
+            />
+          )}
+        </View>
+
         {/* Call Status Indicator */}
         <CallStatusIndicator
           status={activeCall.status}
@@ -174,6 +232,36 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: spacing.lg,
     paddingBottom: spacing.xxxl * 2,
+  },
+  realDetectionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    ...shadows.sm,
+  },
+  realDetectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  realDetectionTitle: {
+    ...typography.bodySemibold,
+    color: colors.textPrimary,
+    fontSize: 15,
+  },
+  realDetectionDesc: {
+    ...typography.small,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+    lineHeight: 19,
+  },
+  realDetectionErrorText: {
+    ...typography.small,
+    color: colors.threat,
+    marginTop: spacing.xs,
   },
   standbyCard: {
     backgroundColor: colors.surface,

@@ -69,12 +69,24 @@ if (shouldSeed) {
 }
 
 console.log("[server.js] Starting FastAPI dev server (apps/api) via uvicorn...");
+const env = {
+  ...process.env,
+  PYTHONPATH: [
+    path.join(REPO_ROOT, "apps", "api"),
+    REPO_ROOT,
+    process.env.PYTHONPATH || "",
+  ]
+    .filter(Boolean)
+    .join(path.delimiter),
+};
+
 const api = spawn(
   VENV_PYTHON,
   ["-m", "uvicorn", "app.main:app", "--reload", "--app-dir", "apps/api"],
-  { cwd: REPO_ROOT, stdio: "inherit" }
+  { cwd: REPO_ROOT, stdio: "inherit", env }
 );
 
 api.on("exit", (code) => {
   process.exit(code ?? 0);
 });
+

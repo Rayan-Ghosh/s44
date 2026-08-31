@@ -17,19 +17,36 @@ import { Header } from "../components/common/Header";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { RiskGauge } from "../components/common/RiskGauge";
 import { useAuth } from "../context/AuthContext";
+import { useGuardian } from "../context/GuardianContext";
+import { useAlertBadge } from "../context/AlertBadgeContext";
+import { useSecurity } from "../context/SecurityContext";
 import {
   PaymentService,
   UserPaymentOverview,
   UserTransaction,
-  SEED_PAYMENT_OVERVIEW,
+  EMPTY_PAYMENT_OVERVIEW,
 } from "../services/payment-service";
 import { AlertService, SecurityAlert } from "../services/alert-service";
+import { NotificationDropdown } from "../components/guardian/NotificationDropdown";
+import { GuardianApprovalCard } from "../components/guardian/GuardianApprovalCard";
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { session } = useAuth();
+  const { alerts: securityAlerts } = useSecurity();
+  const {
+    pendingRequests,
+    notificationBadge,
+    openApprovalCard,
+    closeApprovalCard,
+    approvalCard,
+    respondToRequest,
+    clearNotificationBadge,
+  } = useGuardian();
 
-  const [overview, setOverview] = useState<UserPaymentOverview>(SEED_PAYMENT_OVERVIEW);
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
+
+  const [overview, setOverview] = useState<UserPaymentOverview>(EMPTY_PAYMENT_OVERVIEW);
   const [recentTxns, setRecentTxns] = useState<UserTransaction[]>([]);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -58,6 +75,14 @@ export const HomeScreen: React.FC = () => {
 
   useEffect(() => {
     loadData();
+
+    // Real-time synchronization subscription with PaymentService
+    const unsubscribe = PaymentService.subscribe((updatedOverview, updatedTxns) => {
+      setOverview(updatedOverview);
+      setRecentTxns(updatedTxns.slice(0, 5));
+    });
+
+    return unsubscribe;
   }, [loadData]);
 
   const onRefresh = () => {
@@ -66,7 +91,8 @@ export const HomeScreen: React.FC = () => {
   };
 
   const userName = session?.name ? session.name.split(" ")[0] : "Rahul";
-  const unreadAlerts = alerts.filter((a) => !a.isRead);
+  const activeAlertsList = securityAlerts && securityAlerts.length > 0 ? securityAlerts : alerts;
+  const unreadAlerts = activeAlertsList.filter((a: any) => !a.isRead);
   const suspiciousTx = recentTxns.find((t) => t.status === "Risk detected" || t.status === "Held");
 
   const getGreeting = () => {
@@ -79,6 +105,17 @@ export const HomeScreen: React.FC = () => {
   return (
     <View style={styles.screen}>
       <Header />
+
+      {/* Notification dropdown (modal overlay, positioned near bell) */}
+      <NotificationDropdown
+        visible={notifDropdownOpen}
+        requests={pendingRequests}
+        onSelectRequest={(req) => {
+          openApprovalCard(req);
+          setNotifDropdownOpen(false);
+        }}
+        onDismiss={() => setNotifDropdownOpen(false)}
+      />
 
       {isLoading ? (
         <View style={styles.centerContainer}>
@@ -110,9 +147,42 @@ export const HomeScreen: React.FC = () => {
           ) : null}
 
           {/* Greeting */}
-          <Text style={styles.greetingTitle}>
-            {getGreeting()}, {userName}
-          </Text>
+          <View style={styles.greetingRow}>
+            <Text style={styles.greetingTitle}>
+              {getGreeting()}, {userName}
+            </Text>
+            <TouchableOpacity
+              style={styles.notificationBtn}
+              activeOpacity={0.7}
+              accessibilityLabel="Notifications"
+              accessibilityRole="button"
+              onPress={() => {
+                clearNotificationBadge();
+                setNotifDropdownOpen((v) => !v);
+              }}
+            >
+              <Ionicons
+                name="notifications-outline"
+                size={22}
+                color={notificationBadge > 0 ? colors.threat : colors.textSecondary}
+              />
+              {notificationBadge > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{notificationBadge}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {/* Guardian approval card (shown when guardian taps a notification) */}
+          {approvalCard && (
+            <GuardianApprovalCard
+              request={approvalCard}
+              onConfirm={() => respondToRequest(approvalCard.id, "APPROVED")}
+              onReject={() => respondToRequest(approvalCard.id, "REJECTED")}
+              onDismiss={closeApprovalCard}
+            />
+          )}
 
           {/* Protection Status Banner */}
           <View
@@ -150,21 +220,21 @@ export const HomeScreen: React.FC = () => {
             <View style={styles.overviewCard}>
               <Text style={styles.overviewLabel}>Total this month</Text>
               <Text style={styles.totalAmount}>
-                ₹{overview.totalAmountThisMonth.toLocaleString("en-IN")}
+                ₹{(overview?.totalAmountThisMonth ?? 0).toLocaleString("en-IN")}
               </Text>
               <View style={styles.statsRow}>
                 <View style={styles.statItem}>
-                  <Text style={styles.statNumber}>{overview.transactionCount}</Text>
+                  <Text style={styles.statNumber}>{overview?.transactionCount ?? 0}</Text>
                   <Text style={styles.statLabel}>Total</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statNumber, { color: colors.safe }]}>{overview.safeCount}</Text>
+                  <Text style={[styles.statNumber, { color: colors.safe }]}>{overview?.safeCount ?? 0}</Text>
                   <Text style={styles.statLabel}>Safe</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statNumber, { color: colors.threat }]}>{overview.needsReviewCount}</Text>
+                  <Text style={[styles.statNumber, { color: colors.threat }]}>{overview?.needsReviewCount ?? 0}</Text>
                   <Text style={styles.statLabel}>Needs attention</Text>
                 </View>
               </View>
@@ -176,8 +246,8 @@ export const HomeScreen: React.FC = () => {
             <Text style={styles.sectionHeading}>CURRENT RISK STATUS</Text>
             <View style={styles.riskCard}>
               <RiskGauge
-                score={Math.round(overview.currentRiskScore)}
-                riskLevel={overview.currentRiskLevel}
+                score={Math.round(overview?.currentRiskScore ?? 0)}
+                riskLevel={overview?.currentRiskLevel || "LOW"}
                 size="md"
               />
             </View>
@@ -190,7 +260,7 @@ export const HomeScreen: React.FC = () => {
 
               <TouchableOpacity
                 style={styles.attentionCard}
-                onPress={() => navigation.navigate("Payments")}
+                onPress={() => navigation.navigate("Payments", { selectedTxId: suspiciousTx.id })}
                 activeOpacity={0.85}
               >
                 <View style={styles.attentionTop}>
@@ -200,7 +270,7 @@ export const HomeScreen: React.FC = () => {
                   <View style={styles.attentionTextCol}>
                     <Text style={styles.attentionMerchant}>{suspiciousTx.merchant}</Text>
                     <Text style={styles.attentionAmount}>
-                      ₹{suspiciousTx.amount.toLocaleString("en-IN")}
+                      ₹{(suspiciousTx?.amount ?? 0).toLocaleString("en-IN")}
                     </Text>
                   </View>
                   <StatusBadge label="HIGH RISK" status="high" dot={false} />
@@ -208,7 +278,7 @@ export const HomeScreen: React.FC = () => {
 
                 <View style={styles.attentionBottom}>
                   <Text style={styles.riskScoreText}>
-                    Risk score: {suspiciousTx.riskScore || 87}/100
+                    Risk score: {suspiciousTx.riskScore ?? "—"}/100
                   </Text>
                   <View style={styles.reviewBtn}>
                     <Text style={styles.reviewBtnText}>Review Payment →</Text>
@@ -240,7 +310,7 @@ export const HomeScreen: React.FC = () => {
                         styles.paymentItem,
                         idx === recentTxns.length - 1 && styles.paymentItemNoBorder,
                       ]}
-                      onPress={() => navigation.navigate("Payments")}
+                      onPress={() => navigation.navigate("Payments", { selectedTxId: item.id })}
                       activeOpacity={0.8}
                     >
                       <View style={styles.paymentItemLeft}>
@@ -254,7 +324,7 @@ export const HomeScreen: React.FC = () => {
                             isRisk && { color: colors.threatText },
                           ]}
                         >
-                          ₹{item.amount.toLocaleString("en-IN")}
+                          ₹{(item?.amount ?? 0).toLocaleString("en-IN")}
                         </Text>
                         <StatusBadge
                           label={
@@ -364,13 +434,30 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.brand,
   },
+  greetingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.md,
+    marginTop: spacing.xs,
+  },
   greetingTitle: {
     ...typography.h2,
     color: colors.textPrimary,
     fontSize: 24,
     fontWeight: "700",
-    marginBottom: spacing.md,
-    marginTop: spacing.xs,
+    flex: 1,
+  },
+  notificationBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: spacing.sm,
   },
   protectionBanner: {
     flexDirection: "row",
@@ -628,5 +715,25 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontWeight: "700",
     fontSize: 10,
+  },
+  bellBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: colors.threat,
+    borderRadius: radii.full,
+    minWidth: 16,
+    height: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: colors.surface,
+  },
+  bellBadgeText: {
+    color: colors.textInverse,
+    fontSize: 9,
+    fontWeight: "800",
+    lineHeight: 11,
   },
 });

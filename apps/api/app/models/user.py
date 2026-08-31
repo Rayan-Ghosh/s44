@@ -41,5 +41,8 @@ class User(Base):
     trusted_contacts: Mapped[list["TrustedContact"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    contact_info: Mapped[Optional["UserContactInfo"]] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
 

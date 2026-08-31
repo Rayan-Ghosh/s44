@@ -98,8 +98,8 @@ export const HistoryScreen: React.FC = () => {
                   <View style={styles.infoCol}>
                     <Text style={styles.primaryText}>
                       {isPayment
-                        ? `₹${payment?.amount.toLocaleString("en-IN")}`
-                        : call?.callerName}
+                        ? `₹${(payment?.amount ?? 0).toLocaleString("en-IN")}`
+                        : call?.callerName || "Unknown Caller"}
                     </Text>
                     <Text style={styles.secondaryText}>
                       {isPayment

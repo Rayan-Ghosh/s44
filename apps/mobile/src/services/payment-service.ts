@@ -1,4 +1,5 @@
 import { ApiClient } from "./api-client";
+import { AlertService } from "./alert-service";
 
 export interface UserPaymentOverview {
   totalAmountThisMonth: number;
@@ -12,11 +13,31 @@ export interface UserPaymentOverview {
   protectionStatus: "PROTECTED" | "ATTENTION REQUIRED";
 }
 
+export const EMPTY_PAYMENT_OVERVIEW: UserPaymentOverview = {
+  totalAmountThisMonth: 0,
+  transactionCount: 0,
+  safeCount: 0,
+  needsReviewCount: 0,
+  blockedCount: 0,
+  reportedCount: 0,
+  currentRiskLevel: "LOW",
+  currentRiskScore: 0,
+  protectionStatus: "PROTECTED",
+};
+
 export interface RiskFactorItem {
   factor_type: string;
   factor_name: string;
   contribution: number;
   explanation: string;
+}
+
+export interface TrustedApprovalAudit {
+  required: boolean;
+  contactName?: string;
+  decision?: "Approved" | "Rejected" | "Expired";
+  decisionTime?: string;
+  notes?: string;
 }
 
 export interface UserTransaction {
@@ -27,210 +48,231 @@ export interface UserTransaction {
   date: string;
   timestamp: string;
   paymentMethod: string;
-  status: "Safe" | "Risk detected" | "Approved by you" | "Reported" | "Blocked" | "Held";
+  status: "Safe" | "Risk detected" | "Approved by you" | "Reported" | "Blocked" | "Held" | "Completed";
   riskLevel?: "LOW" | "MEDIUM" | "HIGH";
   riskScore?: number; // 0 - 100
   riskFactors: RiskFactorItem[];
   reasons: string[];
+  isCompleted?: boolean;
+  paymentAppUsed?: string;
+  completionTimestamp?: string;
+  trustedApproval?: TrustedApprovalAudit;
 }
 
-export const SEED_PAYMENT_OVERVIEW: UserPaymentOverview = {
-  totalAmountThisMonth: 48250,
-  transactionCount: 24,
-  safeCount: 23,
-  needsReviewCount: 1,
-  blockedCount: 0,
-  reportedCount: 0,
-  currentRiskLevel: "MEDIUM",
-  currentRiskScore: 38.5,
-  protectionStatus: "ATTENTION REQUIRED",
+const STATUS_MAP: Record<string, UserTransaction["status"]> = {
+  PENDING: "Held",
+  AWAITING_CONFIRMATION: "Held",
+  PENDING_GUARDIAN_APPROVAL: "Held",
+  ALLOWED: "Safe",
+  CONFIRMED: "Approved by you",
+  GUARDIAN_APPROVED: "Approved by you",
+  GUARDIAN_TIMEOUT_USER_OVERRODE: "Approved by you",
+  CANCELLED: "Blocked",
+  GUARDIAN_REJECTED: "Blocked",
+  REPORTED: "Reported",
 };
 
-export const SEED_USER_TRANSACTIONS: UserTransaction[] = [
-  {
-    id: "txn-1",
-    title: "Unknown Merchant",
-    merchant: "Unknown Merchant",
-    amount: 14200,
-    date: "Today · 10 min ago",
-    timestamp: new Date().toISOString(),
-    paymentMethod: "UPI FastPay",
-    status: "Risk detected",
-    riskLevel: "HIGH",
-    riskScore: 78.4,
-    riskFactors: [
-      {
-        factor_type: "transaction",
-        factor_name: "amount_deviation",
-        contribution: 45.0,
-        explanation: "Unusual amount compared to past 30 days history",
-      },
-      {
-        factor_type: "transaction",
-        factor_name: "new_recipient",
-        contribution: 30.0,
-        explanation: "First time sending money to this recipient identifier",
-      },
-      {
-        factor_type: "device",
-        factor_name: "new_device",
-        contribution: 25.0,
-        explanation: "Unusual transaction velocity and device activity",
-      },
-    ],
-    reasons: ["Unusual amount", "New merchant", "Unusual activity"],
-  },
-  {
-    id: "txn-2",
-    title: "Amazon India",
-    merchant: "Amazon India",
-    amount: 2499,
-    date: "Today",
-    timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
-    paymentMethod: "Google Pay UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 8.2,
-    riskFactors: [],
-    reasons: ["Recognized merchant", "Normal spending range"],
-  },
-  {
-    id: "txn-3",
-    title: "UPI Transfer",
-    merchant: "Rohit Verma",
-    amount: 8500,
-    date: "Yesterday",
-    timestamp: new Date(Date.now() - 86400000).toISOString(),
-    paymentMethod: "PhonePe",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 12.0,
-    riskFactors: [],
-    reasons: ["Frequent contact", "Verified device"],
-  },
-  {
-    id: "txn-4",
-    title: "Swiggy Food",
-    merchant: "Swiggy",
-    amount: 480,
-    date: "2 days ago",
-    timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
-    paymentMethod: "Paytm UPI",
-    status: "Safe",
-    riskLevel: "LOW",
-    riskScore: 4.5,
-    riskFactors: [],
-    reasons: ["Standard recurring merchant"],
-  },
-];
+const mapBackendTransaction = (t: any): UserTransaction => {
+  const status = STATUS_MAP[String(t.status).toUpperCase()] || "Held";
+  const isRisky = (t.risk_level === "HIGH" || t.risk_level === "MEDIUM") && status === "Held";
+  return {
+    id: String(t.id),
+    title: t.merchant || "UPI Payment",
+    merchant: t.merchant || "UPI Payment",
+    amount: Number(t.amount) || 0,
+    date: t.timestamp ? new Date(t.timestamp).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "",
+    timestamp: t.timestamp || new Date().toISOString(),
+    paymentMethod: t.payment_method || "UPI",
+    status: isRisky ? "Risk detected" : status,
+    riskLevel: t.risk_level,
+    riskScore: typeof t.risk_score === "number" ? t.risk_score : undefined,
+    riskFactors: Array.isArray(t.risk_factors) ? t.risk_factors : [],
+    reasons: Array.isArray(t.risk_factors) ? t.risk_factors.map((f: any) => f.explanation).filter(Boolean) : [],
+    isCompleted: status === "Approved by you" || status === "Safe",
+    completionTimestamp: status !== "Held" ? t.timestamp : undefined,
+  };
+};
 
-export class PaymentService {
-  static async getOverview(userId: number = 1): Promise<UserPaymentOverview> {
+type PaymentSubscriber = (overview: UserPaymentOverview, transactions: UserTransaction[]) => void;
+
+class CentralPaymentManager {
+  private transactions: UserTransaction[] = [];
+  private overview: UserPaymentOverview = EMPTY_PAYMENT_OVERVIEW;
+  private subscribers: Set<PaymentSubscriber> = new Set();
+
+  public subscribe(fn: PaymentSubscriber): () => void {
+    this.subscribers.add(fn);
+    return () => {
+      this.subscribers.delete(fn);
+    };
+  }
+
+  private notify() {
+    const txCopy = [...this.transactions];
+    this.subscribers.forEach((fn) => {
+      try {
+        fn(this.overview, txCopy);
+      } catch {
+        // Safe subscriber notification
+      }
+    });
+  }
+
+  /** Real GET /api/v1/users/{id}/overview. */
+  public async getOverview(userId: number): Promise<UserPaymentOverview> {
     const res = await ApiClient.get<any>(`/api/v1/users/${userId}/overview`);
-    if (res.data) {
-      return {
-        totalAmountThisMonth: res.data.total_amount_this_month,
-        transactionCount: res.data.transaction_count,
-        safeCount: res.data.safe_count,
-        needsReviewCount: res.data.needs_review_count,
-        blockedCount: res.data.blocked_count,
-        reportedCount: res.data.reported_count,
-        currentRiskLevel: res.data.current_risk_level as "LOW" | "MEDIUM" | "HIGH",
-        currentRiskScore: res.data.current_risk_score,
-        protectionStatus: res.data.protection_status as "PROTECTED" | "ATTENTION REQUIRED",
-      };
-    }
-    return SEED_PAYMENT_OVERVIEW;
+    if (!res.data) return this.overview;
+    this.overview = {
+      totalAmountThisMonth: res.data.total_amount_this_month ?? 0,
+      transactionCount: res.data.transaction_count ?? 0,
+      safeCount: res.data.safe_count ?? 0,
+      needsReviewCount: res.data.needs_review_count ?? 0,
+      blockedCount: res.data.blocked_count ?? 0,
+      reportedCount: res.data.reported_count ?? 0,
+      currentRiskLevel: res.data.current_risk_level ?? "LOW",
+      currentRiskScore: res.data.current_risk_score ?? 0,
+      protectionStatus: res.data.protection_status ?? "PROTECTED",
+    };
+    return this.overview;
   }
 
-  static async getTransactions(
-    userId: number = 1,
-    statusFilter?: string,
-    limit: number = 20,
-    offset: number = 0
+  /** Real GET /api/v1/users/{id}/transactions. */
+  public async getTransactions(
+    userId: number,
+    filter?: "all" | "review" | "safe" | "completed",
+    limit?: number,
+    offset?: number
   ): Promise<{ items: UserTransaction[]; total: number }> {
-    const url = `/api/v1/users/${userId}/transactions?limit=${limit}&offset=${offset}${
-      statusFilter && statusFilter !== "all" ? `&status=${statusFilter}` : ""
-    }`;
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (offset !== undefined) params.set("offset", String(offset));
+    const qs = params.toString();
+    const res = await ApiClient.get<{ items: any[]; total: number }>(
+      `/api/v1/users/${userId}/transactions${qs ? `?${qs}` : ""}`
+    );
+    if (!res.data) return { items: [], total: 0 };
 
-    const res = await ApiClient.get<{ items: any[]; total: number }>(url);
-    if (res.data && Array.isArray(res.data.items) && res.data.items.length > 0) {
-      const items: UserTransaction[] = res.data.items.map((t: any) => {
-        let displayStatus: UserTransaction["status"] = "Safe";
-        if (t.status === "HELD" || t.status === "PENDING" || t.status === "NEEDS_REVIEW") {
-          displayStatus = "Risk detected";
-        } else if (t.status === "REPORTED" || t.status === "FRAUD") {
-          displayStatus = "Reported";
-        } else if (t.status === "BLOCKED" || t.status === "CANCELLED") {
-          displayStatus = "Blocked";
-        } else if (t.status === "CONFIRMED") {
-          displayStatus = "Approved by you";
-        }
+    let items = res.data.items.map(mapBackendTransaction);
+    if (filter === "review") {
+      items = items.filter((t) => t.status === "Risk detected" || t.status === "Held");
+    } else if (filter === "safe" || filter === "completed") {
+      items = items.filter((t) => t.status === "Safe" || t.status === "Approved by you" || t.status === "Completed");
+    }
 
-        const reasons =
-          t.risk_factors && t.risk_factors.length > 0
-            ? t.risk_factors.map((f: any) => f.explanation || f.factor_name)
-            : ["Standard transaction verification"];
+    this.transactions = res.data.items.map(mapBackendTransaction);
+    this.notify();
+    return { items, total: res.data.total };
+  }
 
+  /** Optimistic local cache update — the backend remains the source of truth. */
+  public addTransaction(newTx: UserTransaction) {
+    this.transactions = [newTx, ...this.transactions];
+    this.notify();
+  }
+
+  public updateTransactionStatus(
+    transactionId: string,
+    status: UserTransaction["status"]
+  ): boolean {
+    let found = false;
+    this.transactions = this.transactions.map((t) => {
+      if (t.id === transactionId) {
+        found = true;
         return {
-          id: String(t.id),
-          title: t.merchant || "Payment",
-          merchant: t.merchant || "Merchant Payment",
-          amount: t.amount,
-          date: new Date(t.timestamp).toLocaleDateString("en-IN", {
-            day: "numeric",
-            month: "short",
-          }),
-          timestamp: t.timestamp,
-          paymentMethod: t.payment_method || "UPI",
-          status: displayStatus,
-          riskLevel: t.risk_level as any,
-          riskScore: t.risk_score,
-          riskFactors: t.risk_factors || [],
-          reasons,
+          ...t,
+          status,
+          isCompleted: status === "Approved by you" || status === "Safe" || status === "Completed",
+          completionTimestamp:
+            status === "Approved by you" || status === "Safe" || status === "Completed"
+              ? new Date().toISOString()
+              : t.completionTimestamp,
         };
+      }
+      return t;
+    });
+
+    if (found) {
+      if (status === "Approved by you" || status === "Safe" || status === "Completed") {
+        AlertService.resolveAlertForTransaction(transactionId);
+      }
+      this.notify();
+    }
+    return found;
+  }
+
+  public completeTransaction(
+    transactionId: string,
+    paymentAppUsed?: string,
+    trustedDetails?: TrustedApprovalAudit
+  ): boolean {
+    let found = false;
+    this.transactions = this.transactions.map((t) => {
+      if (t.id === transactionId) {
+        found = true;
+        return {
+          ...t,
+          status: "Approved by you",
+          isCompleted: true,
+          paymentAppUsed: paymentAppUsed || t.paymentAppUsed,
+          completionTimestamp: new Date().toISOString(),
+          trustedApproval: trustedDetails || t.trustedApproval || { required: false },
+        };
+      }
+      return t;
+    });
+
+    if (found) {
+      AlertService.resolveAlertForTransaction(transactionId);
+      this.notify();
+    }
+    return found;
+  }
+
+  /** Real POST /api/v1/transactions/{id}/confirm. */
+  public async confirmTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
+    const res = await ApiClient.post(`/api/v1/transactions/${transactionId}/confirm`);
+    if (!res.data) return { success: false, error: res.error || "Unable to confirm payment." };
+    this.updateTransactionStatus(transactionId, "Approved by you");
+    return { success: true };
+  }
+
+  /** Real POST /api/v1/transactions/{id}/report. */
+  public async reportTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
+    const res = await ApiClient.post(`/api/v1/transactions/${transactionId}/report`);
+    if (!res.data) return { success: false, error: res.error || "Unable to report transaction." };
+
+    let reportedTx: UserTransaction | undefined;
+    this.transactions = this.transactions.map((t) => {
+      if (t.id === transactionId) {
+        reportedTx = { ...t, status: "Reported", isCompleted: true };
+        return reportedTx;
+      }
+      return t;
+    });
+
+    if (reportedTx) {
+      AlertService.addAlert({
+        id: `alert-fraud-${transactionId}`,
+        title: "Fraud Incident Reported",
+        description: `Payment to ${reportedTx.merchant} (₹${reportedTx.amount.toLocaleString("en-IN")}) marked as fraudulent by user.`,
+        severity: "HIGH",
+        status: "ACTIVE",
+        timestamp: "Just now",
+        transactionId: transactionId,
+        isRead: false,
       });
-
-      return { items, total: res.data.total };
+      this.notify();
     }
-
-    // Filter seed transactions if backend returned empty
-    let filtered = [...SEED_USER_TRANSACTIONS];
-    if (statusFilter === "review") {
-      filtered = filtered.filter((t) => t.status === "Risk detected" || t.status === "Held");
-    } else if (statusFilter === "safe") {
-      filtered = filtered.filter((t) => t.status === "Safe" || t.status === "Approved by you");
-    } else if (statusFilter === "blocked") {
-      filtered = filtered.filter((t) => t.status === "Blocked" || t.status === "Reported");
-    }
-
-    return { items: filtered, total: filtered.length };
+    return { success: true };
   }
 
-  static async confirmTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    const numId = parseInt(transactionId.replace(/\D/g, ""), 10) || 1;
-    const res = await ApiClient.post(`/api/v1/transactions/${numId}/confirm`);
-    if (res.data || res.status === 200) {
-      return { success: true };
-    }
-    return { success: res.isNetworkError ?? false, error: res.error };
-  }
-
-  static async cancelTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    const numId = parseInt(transactionId.replace(/\D/g, ""), 10) || 1;
-    const res = await ApiClient.post(`/api/v1/transactions/${numId}/cancel`);
-    if (res.data || res.status === 200) {
-      return { success: true };
-    }
-    return { success: res.isNetworkError ?? false, error: res.error };
-  }
-
-  static async reportTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    const numId = parseInt(transactionId.replace(/\D/g, ""), 10) || 1;
-    const res = await ApiClient.post(`/api/v1/transactions/${numId}/report`);
-    if (res.data || res.status === 200) {
-      return { success: true };
-    }
-    return { success: res.isNetworkError ?? false, error: res.error };
+  /** Real POST /api/v1/transactions/{id}/cancel. */
+  public async cancelTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
+    const res = await ApiClient.post(`/api/v1/transactions/${transactionId}/cancel`);
+    if (!res.data) return { success: false, error: res.error || "Unable to cancel payment." };
+    this.updateTransactionStatus(transactionId, "Blocked");
+    return { success: true };
   }
 }
+
+export const PaymentService = new CentralPaymentManager();

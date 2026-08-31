@@ -11,6 +11,7 @@ import { colors } from "../../theme/colors";
 import { typography } from "../../theme/typography";
 import { spacing, radii, shadows } from "../../theme/layout";
 import { Button } from "./Button";
+import { AvaranLogo } from "./AvaranLogo";
 
 interface Props {
   children: ReactNode;
@@ -73,9 +74,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <View style={styles.container}>
             {/* Header */}
             <View style={styles.brandRow}>
-              <View style={styles.logoBox}>
-                <Ionicons name="shield-checkmark" size={18} color={colors.brand} />
-              </View>
+              <AvaranLogo size="sm" showText={false} />
               <Text style={styles.brandTitle}>AVARAN</Text>
             </View>
 

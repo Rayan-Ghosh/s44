@@ -15,6 +15,7 @@ import { useBiometrics } from "../../context/BiometricContext";
 import { useAuth } from "../../context/AuthContext";
 import { Button } from "../common/Button";
 import { TextInput } from "../common/TextInput";
+import { AvaranLogo } from "../common/AvaranLogo";
 
 export const BiometricLockOverlay: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -50,9 +51,7 @@ export const BiometricLockOverlay: React.FC = () => {
       <View style={styles.container}>
         {/* Brand Header */}
         <View style={styles.brandRow}>
-          <View style={styles.logoBox}>
-            <Ionicons name="shield-checkmark" size={18} color={colors.brand} />
-          </View>
+          <AvaranLogo size="sm" showText={false} />
           <Text style={styles.brandTitle}>AVARAN</Text>
         </View>
 

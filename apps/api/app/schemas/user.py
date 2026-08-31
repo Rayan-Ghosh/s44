@@ -22,3 +22,10 @@ class UserRead(BaseModel):
     created_at: datetime
     # phone_hash is intentionally NOT exposed here — data minimization
     # applies even to already-hashed identifiers (docs/SECURITY.md).
+
+    # Decrypted from user_contact_info by the router (never populated by
+    # from_attributes off the User ORM object itself — User has no email/
+    # phone columns, by design; see docs/PROFILE_CONTACT_INFO_DECISION.md).
+    # Empty string, not null, when no contact info has been saved yet.
+    email: str = ""
+    phone: str = ""

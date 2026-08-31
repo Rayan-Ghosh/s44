@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
-  Alert,
+  Platform,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,23 +17,158 @@ import { spacing, radii, shadows } from "../theme/layout";
 import { Header } from "../components/common/Header";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { Button } from "../components/common/Button";
+import { FloatingToast, ToastConfig } from "../components/common/FloatingToast";
+import {
+  ProtectionModuleModal,
+  ProtectionFeatureItem,
+} from "../components/protection/ProtectionModuleModal";
+import { AlertDetailsModal } from "../components/protection/AlertDetailsModal";
 import { useAuth } from "../context/AuthContext";
 import {
   PaymentService,
   UserPaymentOverview,
-  SEED_PAYMENT_OVERVIEW,
+  EMPTY_PAYMENT_OVERVIEW,
 } from "../services/payment-service";
 import { AlertService, SecurityAlert } from "../services/alert-service";
+import { useAlertBadge } from "../context/AlertBadgeContext";
+
+interface CallAlertState {
+  id: string;
+  callerName: string;
+  callerNumber: string;
+  timeDetected: string;
+  riskLevel: "HIGH" | "MEDIUM";
+  signals: string[];
+}
+
+const DEFAULT_CALL_ALERT: CallAlertState = {
+  id: "call-scam-1",
+  callerName: "Unknown Caller",
+  callerNumber: "+91 98450 XXXXX",
+  timeDetected: "Detected during active voice stream",
+  riskLevel: "HIGH",
+  signals: [
+    "Requested OTP",
+    "Requested banking information",
+    "Claimed to be bank support",
+    "Urgent financial transfer request",
+    "Coercion & urgency language",
+  ],
+};
+
+const PAYMENT_FEATURES: ProtectionFeatureItem[] = [
+  {
+    icon: "shield-checkmark",
+    title: "Suspicious Payment Detection",
+    desc: "Intercepts anomalous UPI & card payments before funds leave your account.",
+  },
+  {
+    icon: "analytics",
+    title: "Transaction Pattern Analysis",
+    desc: "Compares amounts, frequency, and time-of-day against 90-day baseline.",
+  },
+  {
+    icon: "business",
+    title: "Merchant Verification",
+    desc: "Cross-checks handles against National Payment Safety Registry.",
+  },
+  {
+    icon: "warning",
+    title: "Unusual Amount Detection",
+    desc: "Detects spikes 3× or higher than typical transfer amounts.",
+  },
+  {
+    icon: "speedometer",
+    title: "Fraud Risk Scoring",
+    desc: "Calculates live 0-100 anomaly index using XGBoost multi-signal models.",
+  },
+  {
+    icon: "lock-closed",
+    title: "Payment Blocking Support",
+    desc: "Allows one-tap instant blocking and immediate dispute logging.",
+  },
+];
+
+const RISK_FEATURES: ProtectionFeatureItem[] = [
+  {
+    icon: "pulse",
+    title: "Behavioral Profile Detection",
+    desc: "Analyzes typical app usage velocity and payment interaction dynamics.",
+  },
+  {
+    icon: "hardware-chip",
+    title: "Device Trust Analysis",
+    desc: "Validates secure enclave hardware keys and detects unrecognized devices.",
+  },
+  {
+    icon: "person",
+    title: "Recipient History Profiling",
+    desc: "Flags first-time recipients and unverified UPI virtual payment handles.",
+  },
+  {
+    icon: "trending-up",
+    title: "ML Anomaly Engine",
+    desc: "IsolationForest behavioral model evaluating statistical deviations.",
+  },
+  {
+    icon: "location",
+    title: "Geolocation Geofencing",
+    desc: "Identifies impossible travel speed or unusual regional access points.",
+  },
+];
+
+const CALL_FEATURES: ProtectionFeatureItem[] = [
+  {
+    icon: "mic",
+    title: "Voice Stream Signal Interception",
+    desc: "Heuristic keyword matching for OTP, PIN, and CVV solicitation.",
+  },
+  {
+    icon: "alert",
+    title: "Social Engineering Detection",
+    desc: "Detects urgency, coercion, and impersonation of banking authorities.",
+  },
+  {
+    icon: "call",
+    title: "Instant Scam Call Reporting",
+    desc: "Logs scam numbers directly to telecom anti-fraud intelligence registry.",
+  },
+  {
+    icon: "checkmark-done",
+    title: "Verified Caller Safe-listing",
+    desc: "Whitelist verified bank relationship managers and trusted personal contacts.",
+  },
+];
 
 export const ProtectionScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { session } = useAuth();
+  const { clearProtectionBadge } = useAlertBadge();
 
-  const [overview, setOverview] = useState<UserPaymentOverview>(SEED_PAYMENT_OVERVIEW);
+  const [overview, setOverview] = useState<UserPaymentOverview>(EMPTY_PAYMENT_OVERVIEW);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [callAlertDismissed, setCallAlertDismissed] = useState<boolean>(false);
+  const [isActing, setIsActing] = useState<boolean>(false);
+
+  // Module switches
+  const [paymentProtectionEnabled, setPaymentProtectionEnabled] = useState<boolean>(true);
+  const [riskDetectionEnabled, setRiskDetectionEnabled] = useState<boolean>(true);
+  const [callProtectionEnabled, setCallProtectionEnabled] = useState<boolean>(true);
+
+  // Modals state
+  const [activeModuleModal, setActiveModuleModal] = useState<"payment" | "risk" | "call" | null>(null);
+  const [selectedAlertForModal, setSelectedAlertForModal] = useState<SecurityAlert | null>(null);
+
+  // Active call alert state
+  const [activeCallAlert, setActiveCallAlert] = useState<CallAlertState | null>(DEFAULT_CALL_ALERT);
+
+  // Toast state
+  const [toastConfig, setToastConfig] = useState<ToastConfig | null>(null);
+
+  const showToast = (message: string, type: "info" | "success" | "warning" = "success") => {
+    setToastConfig({ message, type });
+  };
 
   const loadProtection = useCallback(async () => {
     try {
@@ -54,6 +189,21 @@ export const ProtectionScreen: React.FC = () => {
 
   useEffect(() => {
     loadProtection();
+
+    // Subscribe to PaymentService updates
+    const unsubPayment = PaymentService.subscribe((updatedOverview) => {
+      setOverview(updatedOverview);
+    });
+
+    // Subscribe to AlertService updates
+    const unsubAlerts = AlertService.subscribe((updatedAlerts) => {
+      setAlerts(updatedAlerts);
+    });
+
+    return () => {
+      unsubPayment();
+      unsubAlerts();
+    };
   }, [loadProtection]);
 
   const onRefresh = () => {
@@ -61,31 +211,132 @@ export const ProtectionScreen: React.FC = () => {
     loadProtection();
   };
 
+  // Top Shield Banner Status Calculation
+  const protectionStatusDetails = useMemo(() => {
+    const totalEnabled =
+      (paymentProtectionEnabled ? 1 : 0) +
+      (riskDetectionEnabled ? 1 : 0) +
+      (callProtectionEnabled ? 1 : 0);
+
+    const hasActiveThreat =
+      (overview.needsReviewCount > 0) ||
+      alerts.some((a) => a.severity === "HIGH" && a.status === "ACTIVE") ||
+      (activeCallAlert !== null);
+
+    if (totalEnabled === 3) {
+      if (hasActiveThreat) {
+        return {
+          title: "Protection Attention Required",
+          sub: "High-risk security anomalies detected. Action recommended.",
+          icon: "alert-circle" as const,
+          color: colors.threat,
+          statusLabel: "ATTENTION",
+          statusColor: "high" as const,
+        };
+      }
+      return {
+        title: "All Protection Shields Active",
+        sub: "Real-time scoring active across connected payment apps.",
+        icon: "shield-checkmark" as const,
+        color: colors.safe,
+        statusLabel: "ACTIVE",
+        statusColor: "low" as const,
+      };
+    } else if (totalEnabled > 0) {
+      return {
+        title: "Partial Protection Active",
+        sub: "Some security modules are currently disabled.",
+        icon: "warning" as const,
+        color: colors.caution,
+        statusLabel: "PARTIAL",
+        statusColor: "medium" as const,
+      };
+    } else {
+      return {
+        title: "Protection Disabled",
+        sub: "All real-time protection shields are currently offline.",
+        icon: "shield-outline" as const,
+        color: colors.textMuted,
+        statusLabel: "OFFLINE",
+        statusColor: "escalated" as const,
+      };
+    }
+  }, [
+    paymentProtectionEnabled,
+    riskDetectionEnabled,
+    callProtectionEnabled,
+    overview.needsReviewCount,
+    alerts,
+    activeCallAlert,
+  ]);
+
+  const handleTogglePaymentProtection = (val: boolean) => {
+    setPaymentProtectionEnabled(val);
+    showToast(val ? "✓ Payment Protection enabled" : "Payment Protection disabled", val ? "success" : "info");
+  };
+
+  const handleToggleRiskDetection = (val: boolean) => {
+    setRiskDetectionEnabled(val);
+    showToast(val ? "✓ Risk Detection enabled" : "Risk Detection disabled", val ? "success" : "info");
+  };
+
+  const handleToggleCallProtection = (val: boolean) => {
+    setCallProtectionEnabled(val);
+    showToast(val ? "✓ Call Protection enabled" : "Call Protection disabled", val ? "success" : "info");
+  };
+
   const handleReportCall = () => {
-    Alert.alert(
-      "Call Reported",
-      "The suspicious caller has been flagged and reported to security intelligence."
-    );
-    setCallAlertDismissed(true);
+    if (isActing || !activeCallAlert) return;
+    setIsActing(true);
+
+    AlertService.addAlert({
+      id: `alert-call-${Date.now()}`,
+      title: "Suspicious Scam Call Reported",
+      description: `Caller ${activeCallAlert.callerNumber} flagged for impersonation & OTP solicitation.`,
+      severity: "HIGH",
+      status: "ACTIVE",
+      timestamp: "Just now",
+      isRead: false,
+    });
+
+    setActiveCallAlert(null);
+    clearProtectionBadge();
+    setIsActing(false);
+    showToast("⚠ Suspicious call reported successfully", "warning");
   };
 
   const handleMarkCallSafe = () => {
-    Alert.alert(
-      "Marked as Safe",
-      "You marked this caller as safe. Feedback recorded."
-    );
-    setCallAlertDismissed(true);
+    if (isActing || !activeCallAlert) return;
+    setIsActing(true);
+
+    AlertService.addAlert({
+      id: `alert-call-safe-${Date.now()}`,
+      title: "Caller Verified Safe",
+      description: `Caller ${activeCallAlert.callerNumber} marked as legitimate contact.`,
+      severity: "LOW",
+      status: "RESOLVED",
+      timestamp: "Just now",
+      isRead: true,
+    });
+
+    setActiveCallAlert(null);
+    clearProtectionBadge();
+    setIsActing(false);
+    showToast("✓ Call marked as safe", "success");
+  };
+
+  const handleResolveAlert = (alertId: string) => {
+    AlertService.markAsRead(alertId);
+    showToast("✓ Security alert resolved", "success");
+  };
+
+  const handleViewPayment = (transactionId: string | number) => {
+    navigation.navigate("Payments", { selectedTxId: String(transactionId) });
   };
 
   return (
     <View style={styles.screen}>
       <Header />
-
-      {/* Screen Title & Subtitle in body */}
-      <View style={styles.titleSection}>
-        <Text style={styles.screenHeading}>Protection</Text>
-        <Text style={styles.screenSubtitle}>Your Avaran protection is active.</Text>
-      </View>
 
       {isLoading ? (
         <View style={styles.centerContainer}>
@@ -106,80 +357,133 @@ export const ProtectionScreen: React.FC = () => {
             />
           }
         >
-          {/* Active Protection Banner */}
+          {/* 1. Screen Title & Subtitle */}
+          <View style={styles.titleSection}>
+            <Text style={styles.screenHeading}>Protection</Text>
+            <Text style={styles.screenSubtitle}>Your Avaran protection is active.</Text>
+          </View>
+
+          {/* 2. Active Protection Banner */}
           <View style={styles.statusBanner}>
-            <View style={styles.statusIconBox}>
-              <Ionicons name="shield-checkmark" size={22} color={colors.safe} />
+            <View
+              style={[
+                styles.statusIconBox,
+                protectionStatusDetails.color === colors.threat && {
+                  backgroundColor: "rgba(239, 68, 68, 0.15)",
+                },
+              ]}
+            >
+              <Ionicons
+                name={protectionStatusDetails.icon}
+                size={24}
+                color={protectionStatusDetails.color}
+              />
             </View>
             <View style={styles.statusTextCol}>
-              <Text style={styles.statusTitle}>All Protection Shields Active</Text>
-              <Text style={styles.statusSub}>
-                Real-time scoring active across connected payment apps.
-              </Text>
+              <Text style={styles.statusTitle}>{protectionStatusDetails.title}</Text>
+              <Text style={styles.statusSub}>{protectionStatusDetails.sub}</Text>
             </View>
           </View>
 
-          {/* THREE PROTECTION MODULES */}
+          {/* 3. Protection Modules (Same vertical flow as mobile) */}
           <View style={styles.section}>
             <Text style={styles.sectionHeading}>PROTECTION MODULES</Text>
 
-            {/* 1. Payment Protection */}
-            <View style={styles.moduleCard}>
+            {/* Module 1: Payment Protection */}
+            <TouchableOpacity
+              style={styles.moduleCard}
+              onPress={() => setActiveModuleModal("payment")}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open Payment Protection configuration"
+            >
               <View style={styles.moduleTopRow}>
                 <View style={styles.moduleLeft}>
                   <View style={styles.moduleIconCircle}>
                     <Ionicons name="card-outline" size={18} color={colors.textPrimary} />
                   </View>
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.moduleTitle}>Payment Protection</Text>
                     <Text style={styles.moduleDesc}>
                       Detects suspicious payments before completion.
                     </Text>
                   </View>
                 </View>
-                <StatusBadge label="ACTIVE" status="low" />
+                <StatusBadge
+                  label={paymentProtectionEnabled ? "ACTIVE" : "DISABLED"}
+                  status={paymentProtectionEnabled ? "low" : "high"}
+                />
               </View>
-            </View>
+            </TouchableOpacity>
 
-            {/* 2. Risk Detection */}
-            <View style={styles.moduleCard}>
+            {/* Module 2: Risk Detection */}
+            <TouchableOpacity
+              style={styles.moduleCard}
+              onPress={() => setActiveModuleModal("risk")}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open Risk Detection configuration"
+            >
               <View style={styles.moduleTopRow}>
                 <View style={styles.moduleLeft}>
                   <View style={styles.moduleIconCircle}>
                     <Ionicons name="pulse-outline" size={18} color={colors.textPrimary} />
                   </View>
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.moduleTitle}>Risk Detection</Text>
                     <Text style={styles.moduleDesc}>
                       Identifies unusual transaction, device and behavioral activity.
                     </Text>
                   </View>
                 </View>
-                <StatusBadge label="ACTIVE" status="low" />
+                <StatusBadge
+                  label={riskDetectionEnabled ? "ACTIVE" : "DISABLED"}
+                  status={riskDetectionEnabled ? "low" : "high"}
+                />
               </View>
-            </View>
+            </TouchableOpacity>
 
-            {/* 3. Call Protection */}
-            <View style={styles.moduleCard}>
+            {/* Module 3: Call Protection */}
+            <TouchableOpacity
+              style={styles.moduleCard}
+              onPress={() => setActiveModuleModal("call")}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open Call Protection configuration"
+            >
               <View style={styles.moduleTopRow}>
                 <View style={styles.moduleLeft}>
                   <View style={styles.moduleIconCircle}>
                     <Ionicons name="call-outline" size={18} color={colors.textPrimary} />
                   </View>
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.moduleTitle}>Call Protection</Text>
                     <Text style={styles.moduleDesc}>
                       Helps identify potentially fraudulent calls.
                     </Text>
                   </View>
                 </View>
-                <StatusBadge label="ACTIVE" status="low" />
+                <StatusBadge
+                  label={callProtectionEnabled ? "ACTIVE" : "DISABLED"}
+                  status={callProtectionEnabled ? "low" : "high"}
+                />
               </View>
-            </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.tryLiveDemoRow}
+              onPress={() => navigation.navigate("Voice")}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Try the live voice scam call demo"
+            >
+              <Ionicons name="play-circle-outline" size={16} color={colors.brand} />
+              <Text style={styles.tryLiveDemoText}>Try Live Call Demo →</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* CALL / SOCIAL ENGINEERING PROTECTION UI */}
-          {!callAlertDismissed && (
+          {/* 4. Call / Social Engineering Alert */}
+          {activeCallAlert && callProtectionEnabled && (
             <View style={styles.section}>
               <Text style={styles.sectionHeading}>CALL / SOCIAL-ENGINEERING ALERT</Text>
 
@@ -190,49 +494,42 @@ export const ProtectionScreen: React.FC = () => {
                       <Ionicons name="alert-circle" size={16} color={colors.threat} />
                       <Text style={styles.scamTagText}>Potential scam detected</Text>
                     </View>
-                    <Text style={styles.callerName}>Unknown caller</Text>
-                    <Text style={styles.callerTime}>Detected during active voice stream</Text>
+                    <Text style={styles.callerName}>{activeCallAlert.callerName}</Text>
+                    <Text style={styles.callerNumberText}>{activeCallAlert.callerNumber}</Text>
+                    <Text style={styles.callerTime}>{activeCallAlert.timeDetected}</Text>
                   </View>
-                  <StatusBadge label="HIGH RISK" status="high" />
+                  <StatusBadge label={activeCallAlert.riskLevel} status="high" />
                 </View>
 
                 {/* Detected Indicators */}
                 <View style={styles.indicatorsBox}>
                   <Text style={styles.indicatorsHeading}>SIGNAL ANALYSIS</Text>
-                  <View style={styles.indicatorBullet}>
-                    <Ionicons name="close-circle" size={14} color={colors.threat} />
-                    <Text style={styles.indicatorText}>Requested OTP</Text>
-                  </View>
-                  <View style={styles.indicatorBullet}>
-                    <Ionicons name="close-circle" size={14} color={colors.threat} />
-                    <Text style={styles.indicatorText}>Requested banking information</Text>
-                  </View>
-                  <View style={styles.indicatorBullet}>
-                    <Ionicons name="close-circle" size={14} color={colors.threat} />
-                    <Text style={styles.indicatorText}>Claimed to be bank support</Text>
-                  </View>
-                  <View style={styles.indicatorBullet}>
-                    <Ionicons name="close-circle" size={14} color={colors.threat} />
-                    <Text style={styles.indicatorText}>Urgent financial request</Text>
-                  </View>
-                  <View style={styles.indicatorBullet}>
-                    <Ionicons name="close-circle" size={14} color={colors.threat} />
-                    <Text style={styles.indicatorText}>Threat/coercion language</Text>
-                  </View>
+                  {activeCallAlert.signals.map((sig, idx) => (
+                    <View key={idx} style={styles.indicatorBullet}>
+                      <Ionicons name="close-circle" size={14} color={colors.threat} />
+                      <Text style={styles.indicatorText}>{sig}</Text>
+                    </View>
+                  ))}
                 </View>
 
                 {/* Actions */}
                 <View style={styles.scamActionsRow}>
                   <Button
                     label="REPORT CALL"
+                    icon="alert-circle"
                     onPress={handleReportCall}
+                    loading={isActing}
+                    disabled={isActing}
                     variant="destructive"
                     size="md"
                     style={{ flex: 1 }}
                   />
                   <Button
                     label="MARK AS SAFE"
+                    icon="checkmark-circle"
                     onPress={handleMarkCallSafe}
+                    loading={isActing}
+                    disabled={isActing}
                     variant="secondary"
                     size="md"
                     style={{ flex: 1 }}
@@ -242,7 +539,7 @@ export const ProtectionScreen: React.FC = () => {
             </View>
           )}
 
-          {/* RECENT SECURITY ALERTS */}
+          {/* 5. Recent Security Alerts */}
           <View style={styles.section}>
             <Text style={styles.sectionHeading}>RECENT SECURITY ALERTS</Text>
 
@@ -251,12 +548,14 @@ export const ProtectionScreen: React.FC = () => {
                 <Text style={styles.emptyText}>No recent alerts detected.</Text>
               ) : (
                 alerts.map((a, idx) => (
-                  <View
+                  <TouchableOpacity
                     key={a.id}
                     style={[
                       styles.alertItem,
                       idx === alerts.length - 1 && styles.alertItemNoBorder,
                     ]}
+                    onPress={() => setSelectedAlertForModal(a)}
+                    activeOpacity={0.75}
                   >
                     <View style={styles.alertItemTop}>
                       <View style={styles.alertTitleRow}>
@@ -279,19 +578,74 @@ export const ProtectionScreen: React.FC = () => {
                     <Text style={styles.alertDesc}>{a.description}</Text>
                     <View style={styles.alertFooter}>
                       <Text style={styles.alertTimestamp}>{a.timestamp}</Text>
-                      {a.transactionId && (
-                        <TouchableOpacity onPress={() => navigation.navigate("Payments")}>
+                      {a.transactionId ? (
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            handleViewPayment(a.transactionId!);
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
                           <Text style={styles.viewRelatedLink}>View Payment →</Text>
                         </TouchableOpacity>
-                      )}
+                      ) : null}
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 ))
               )}
             </View>
           </View>
         </ScrollView>
       )}
+
+      {/* Module Configuration Modals */}
+      <ProtectionModuleModal
+        visible={activeModuleModal === "payment"}
+        onClose={() => setActiveModuleModal(null)}
+        moduleKey="payment"
+        title="Payment Protection"
+        desc="Pre-transaction anomaly scoring & threat interception"
+        icon="card-outline"
+        isEnabled={paymentProtectionEnabled}
+        onToggle={handleTogglePaymentProtection}
+        features={PAYMENT_FEATURES}
+      />
+
+      <ProtectionModuleModal
+        visible={activeModuleModal === "risk"}
+        onClose={() => setActiveModuleModal(null)}
+        moduleKey="risk"
+        title="Risk Detection Engine"
+        desc="Device keystore, behavioral & transaction delta analysis"
+        icon="pulse-outline"
+        isEnabled={riskDetectionEnabled}
+        onToggle={handleToggleRiskDetection}
+        features={RISK_FEATURES}
+      />
+
+      <ProtectionModuleModal
+        visible={activeModuleModal === "call"}
+        onClose={() => setActiveModuleModal(null)}
+        moduleKey="call"
+        title="Call & Social Engineering Protection"
+        desc="Real-time voice stream heuristics & scam caller detection"
+        icon="call-outline"
+        isEnabled={callProtectionEnabled}
+        onToggle={handleToggleCallProtection}
+        features={CALL_FEATURES}
+      />
+
+      {/* Alert Details Modal */}
+      <AlertDetailsModal
+        alert={selectedAlertForModal}
+        visible={selectedAlertForModal !== null}
+        onClose={() => setSelectedAlertForModal(null)}
+        onResolve={handleResolveAlert}
+        onViewPayment={handleViewPayment}
+      />
+
+      {/* Floating Toast notification */}
+      <FloatingToast config={toastConfig} onDismiss={() => setToastConfig(null)} />
     </View>
   );
 };
@@ -301,11 +655,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  tryLiveDemoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  tryLiveDemoText: {
+    ...typography.bodySemibold,
+    color: colors.brand,
+    fontSize: 13,
+  },
   titleSection: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xs,
-    backgroundColor: colors.surface,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.md,
+    marginBottom: spacing.xs,
   },
   screenHeading: {
     ...typography.h2,
@@ -318,7 +683,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 13,
     marginTop: 2,
-    marginBottom: spacing.xs,
   },
   centerContainer: {
     flex: 1,
@@ -344,36 +708,34 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
     padding: spacing.lg,
     marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     ...shadows.sm,
   },
   statusIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
+    width: 44,
+    height: 44,
+    borderRadius: radii.full,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
     alignItems: "center",
     justifyContent: "center",
   },
   statusTextCol: {
     flex: 1,
-    gap: 2,
   },
   statusTitle: {
-    ...typography.bodySemibold,
+    ...typography.h3,
     color: colors.textPrimary,
+    fontSize: 16,
     fontWeight: "700",
-    fontSize: 15,
   },
   statusSub: {
     ...typography.small,
     color: colors.textSecondary,
     fontSize: 12,
+    marginTop: 2,
   },
   section: {
     marginBottom: spacing.lg,
@@ -391,26 +753,27 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.md,
+    padding: spacing.lg,
     marginBottom: spacing.sm,
     ...shadows.sm,
+    ...(Platform.OS === "web" ? ({ cursor: "pointer" } as any) : {}),
   },
   moduleTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: spacing.sm,
   },
   moduleLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
+    gap: spacing.md,
     flex: 1,
-    paddingRight: spacing.sm,
   },
   moduleIconCircle: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: radii.md,
     backgroundColor: colors.surfaceSecondary,
     borderWidth: 1,
     borderColor: colors.borderLight,
@@ -421,6 +784,7 @@ const styles = StyleSheet.create({
     ...typography.bodySemibold,
     color: colors.textPrimary,
     fontSize: 14,
+    fontWeight: "700",
   },
   moduleDesc: {
     ...typography.small,
@@ -432,8 +796,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderLeftWidth: 3,
+    borderColor: colors.threatBorder,
+    borderLeftWidth: 4,
     borderLeftColor: colors.threat,
     padding: spacing.lg,
     ...shadows.sm,
@@ -442,86 +806,107 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    gap: spacing.sm,
   },
   scamTitleCol: {
     flex: 1,
-    gap: 2,
   },
   scamIconTag: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    marginBottom: 2,
+    marginBottom: 4,
   },
   scamTagText: {
-    ...typography.caption,
+    ...typography.smallSemibold,
     color: colors.threatText,
-    fontWeight: "800",
-    fontSize: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
     letterSpacing: 0.4,
   },
   callerName: {
     ...typography.h3,
     color: colors.textPrimary,
-    fontWeight: "700",
     fontSize: 16,
+    fontWeight: "700",
+  },
+  callerNumberText: {
+    ...typography.smallSemibold,
+    color: colors.textPrimary,
+    fontSize: 13,
+    marginTop: 1,
   },
   callerTime: {
     ...typography.small,
     color: colors.textMuted,
     fontSize: 11,
+    marginTop: 2,
   },
   indicatorsBox: {
     backgroundColor: colors.surfaceSecondary,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
     padding: spacing.md,
     marginVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
   },
   indicatorsHeading: {
     ...typography.caption,
     color: colors.textMuted,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "800",
+    letterSpacing: 0.6,
     marginBottom: spacing.xs,
   },
   indicatorBullet: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.xs,
     marginVertical: 3,
   },
   indicatorText: {
     ...typography.small,
     color: colors.textSecondary,
-    fontSize: 13,
+    fontSize: 12,
   },
   scamActionsRow: {
     flexDirection: "row",
     gap: spacing.sm,
+    marginTop: spacing.xs,
   },
   alertsCard: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
     ...shadows.sm,
+  },
+  emptyText: {
+    ...typography.small,
+    color: colors.textMuted,
+    paddingVertical: spacing.lg,
+    textAlign: "center",
   },
   alertItem: {
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
+    ...(Platform.OS === "web" ? ({ cursor: "pointer" } as any) : {}),
   },
   alertItemNoBorder: {
-    paddingVertical: spacing.md,
+    borderBottomWidth: 0,
   },
   alertItemTop: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 4,
+    gap: spacing.sm,
   },
   alertTitleRow: {
     flexDirection: "row",
@@ -533,34 +918,30 @@ const styles = StyleSheet.create({
     ...typography.bodySemibold,
     color: colors.textPrimary,
     fontSize: 13,
+    fontWeight: "700",
   },
   alertDesc: {
     ...typography.small,
     color: colors.textSecondary,
     fontSize: 12,
-    lineHeight: 17,
+    lineHeight: 18,
+    marginBottom: spacing.xs,
   },
   alertFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: spacing.xs,
+    marginTop: 2,
   },
   alertTimestamp: {
-    ...typography.small,
-    color: colors.textMuted,
-    fontSize: 10,
-  },
-  viewRelatedLink: {
     ...typography.caption,
-    color: colors.textPrimary,
-    fontWeight: "700",
+    color: colors.textMuted,
     fontSize: 11,
   },
-  emptyText: {
-    ...typography.small,
-    color: colors.textMuted,
-    paddingVertical: spacing.lg,
-    textAlign: "center",
+  viewRelatedLink: {
+    ...typography.smallSemibold,
+    color: colors.brand,
+    fontSize: 12,
+    ...(Platform.OS === "web" ? ({ cursor: "pointer" } as any) : {}),
   },
 });

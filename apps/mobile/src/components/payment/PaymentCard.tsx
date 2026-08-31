@@ -23,7 +23,7 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
       </View>
 
       <View style={styles.body}>
-        <Text style={styles.amount}>₹{transaction.amount.toLocaleString("en-IN")}</Text>
+        <Text style={styles.amount}>₹{(transaction?.amount ?? 0).toLocaleString("en-IN")}</Text>
 
         <View style={styles.detailsGrid}>
           <View style={styles.detailRow}>

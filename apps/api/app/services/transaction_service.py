@@ -32,10 +32,16 @@ def create_transaction(db: Session, payload: TransactionCreate) -> Transaction:
     device = device_repository.get_device(db, user_id=payload.user_id, device_hash=device_hash)
     if device is None:
         device = device_repository.create_device(
-            db, user_id=payload.user_id, device_hash=device_hash
+            db,
+            user_id=payload.user_id,
+            device_hash=device_hash,
+            device_name=payload.device_name,
+            device_type=payload.device_type,
         )
     else:
-        device = device_repository.touch_last_seen(db, device)
+        device = device_repository.touch_last_seen(
+            db, device, device_name=payload.device_name, device_type=payload.device_type
+        )
 
     recipient_hash = hash_identifier(payload.recipient_identifier)
     recipient = recipient_repository.get_recipient(

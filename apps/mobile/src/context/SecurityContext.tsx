@@ -1,160 +1,64 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { PaymentRiskEvaluation, FinalOutcome, TransactionInput } from "../types/transaction";
 import { CallSnapshot } from "../types/voice";
 import { SecurityAlert } from "../types/alert";
 import { HistoryItem } from "../types/history";
-import { TransactionService, DEFAULT_HELD_PAYMENT } from "../services/transaction-service";
 import { VoiceService } from "../services/voice-service";
-import { AlertsService, INITIAL_ALERTS } from "../services/alerts-service";
-import { HistoryService, INITIAL_HISTORY } from "../services/history-service";
-import { RiskService } from "../services/risk-service";
+import { AlertsService } from "../services/alerts-service";
+import { INITIAL_HISTORY } from "../services/history-service";
+import { useAuth } from "./AuthContext";
 
 interface SecurityContextType {
   protectionActive: boolean;
   toggleProtection: () => void;
-  heldPayment: PaymentRiskEvaluation;
-  setScenario: (amount: number, isNewRecipient: boolean, isNewDevice: boolean) => Promise<void>;
-  submitPaymentDecision: (outcome: FinalOutcome) => Promise<void>;
   activeCall: CallSnapshot;
   isSimulatingCall: boolean;
   startCallSimulation: () => void;
-  advanceCallSimulation: () => void;
+  advanceCallSimulation: () => Promise<void>;
   dismissCallAlert: () => void;
   endCallSimulation: () => void;
   reportCallScam: () => void;
   alerts: SecurityAlert[];
   markAlertRead: (id: string) => void;
   history: HistoryItem[];
-  runFullProtectionDemo: (onNavigateToPayment?: () => void) => Promise<void>;
   resetDemo: () => void;
-  isDemoRunning: boolean;
-  demoStepIndex: number;
 }
 
 const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
 
 export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { session } = useAuth();
   const [protectionActive, setProtectionActive] = useState<boolean>(true);
-  const [heldPayment, setHeldPayment] = useState<PaymentRiskEvaluation>({
-    transaction: DEFAULT_HELD_PAYMENT,
-    risk: {
-      riskScore: 88,
-      riskLevel: "HIGH",
-      decision: "CONFIRM_OR_CANCEL",
-      detectors: [],
-      reasons: [],
-      contributionsPct: {},
-    },
-    outcome: "pending",
-    evaluatedAt: new Date().toISOString(),
-  });
 
   const [activeCall, setActiveCall] = useState<CallSnapshot>(VoiceService.getInitialSnapshot());
   const [isSimulatingCall, setIsSimulatingCall] = useState<boolean>(false);
   const [callStep, setCallStep] = useState<number>(0);
-  const [alerts, setAlerts] = useState<SecurityAlert[]>(INITIAL_ALERTS);
+  const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
+  // history-service.ts is out of scope for the backend-wiring pass (no
+  // matching backend endpoint exists yet) — it keeps its static seed data.
   const [history, setHistory] = useState<HistoryItem[]>(INITIAL_HISTORY);
-  const [isDemoRunning, setIsDemoRunning] = useState<boolean>(false);
-  const [demoStepIndex, setDemoStepIndex] = useState<number>(0);
 
-  // Initialize payment evaluation on mount
   useEffect(() => {
-    TransactionService.getHeldPayment().then(setHeldPayment);
-  }, []);
+    if (!session?.userId) return;
+    AlertsService.getAlerts(session.userId).then(setAlerts);
+  }, [session?.userId]);
 
   const toggleProtection = useCallback(() => {
     setProtectionActive((prev) => !prev);
   }, []);
 
-  const setScenario = useCallback(async (amount: number, isNewRecipient: boolean, isNewDevice: boolean) => {
-    const tx: TransactionInput = {
-      id: Date.now(),
-      amount,
-      recipientName: isNewRecipient ? "Unknown Merchant" : "Rohit Verma",
-      recipientHandle: isNewRecipient ? "newmerchant@upi" : "rohit.verma@okaxis",
-      isNewRecipient,
-      deviceLabel: isNewDevice ? "OnePlus 11 (Unrecognized)" : "Pixel 8 Pro (Primary)",
-      isNewDevice,
-      location: isNewDevice ? "New Delhi, India" : "Bengaluru, India",
-      paymentMethod: "UPI FastPay",
-      timestamp: new Date().toISOString(),
-    };
-    const risk = await RiskService.evaluateTransactionRisk(tx);
-    setHeldPayment({
-      transaction: tx,
-      risk,
-      outcome: "pending",
-      evaluatedAt: new Date().toISOString(),
-    });
-  }, []);
-
-  const submitPaymentDecision = useCallback(
-    async (outcome: FinalOutcome) => {
-      setHeldPayment((prev) => ({
-        ...prev,
-        outcome,
-      }));
-
-      // Add to History
-      const newHistoryItem: HistoryItem = {
-        id: `payment-${Date.now()}`,
-        type: "payment",
-        amount: heldPayment.transaction.amount,
-        recipientName: heldPayment.transaction.recipientName,
-        recipientHandle: heldPayment.transaction.recipientHandle,
-        timestamp: new Date().toISOString(),
-        formattedTime: "Just now",
-        riskScore: heldPayment.risk.riskScore,
-        riskLevel: heldPayment.risk.riskLevel,
-        status:
-          outcome === "confirmed"
-            ? "Approved by User"
-            : outcome === "cancelled"
-            ? "Cancelled"
-            : outcome === "reported"
-            ? "Reported & Blocked"
-            : "Pending",
-        actionTaken: outcome as any,
-      };
-      setHistory((prev) => [newHistoryItem, ...prev]);
-
-      // If reported or cancelled, generate alert
-      if (outcome === "reported" || outcome === "cancelled") {
-        const newAlert: SecurityAlert = {
-          id: `alert-${Date.now()}`,
-          category: "payment",
-          severity: heldPayment.risk.riskLevel,
-          title: outcome === "reported" ? "Fraudulent payment blocked & reported" : "Suspicious payment cancelled",
-          description: `₹${heldPayment.transaction.amount.toLocaleString("en-IN")} to ${heldPayment.transaction.recipientHandle}`,
-          amount: `₹${heldPayment.transaction.amount.toLocaleString("en-IN")}`,
-          timestamp: "Just now",
-          isRead: false,
-          whatHappened: `You decided to ${outcome} payment to ${heldPayment.transaction.recipientName}.`,
-          whyFlagged: heldPayment.risk.reasons,
-          whatYouShouldDo: [
-            "Your bank's fraud monitoring unit has logged this incident.",
-            "Funds remain secure in your primary account.",
-          ],
-        };
-        setAlerts((prev) => [newAlert, ...prev]);
-      }
-    },
-    [heldPayment]
-  );
-
   const startCallSimulation = useCallback(() => {
     setIsSimulatingCall(true);
     setCallStep(1);
-    setActiveCall(VoiceService.getActiveCallSnapshot(1));
+    VoiceService.resetSession();
+    VoiceService.getActiveCallSnapshot(1).then(setActiveCall);
   }, []);
 
-  const advanceCallSimulation = useCallback(() => {
-    setCallStep((prev) => {
-      const next = Math.min(prev + 1, 4);
-      setActiveCall(VoiceService.getActiveCallSnapshot(next));
-      return next;
-    });
-  }, []);
+  const advanceCallSimulation = useCallback(async () => {
+    const next = Math.min(callStep + 1, 4);
+    setCallStep(next);
+    const snapshot = await VoiceService.getActiveCallSnapshot(next);
+    setActiveCall(snapshot);
+  }, [callStep]);
 
   const dismissCallAlert = useCallback(() => {
     setActiveCall((prev) => ({
@@ -168,6 +72,7 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const endCallSimulation = useCallback(() => {
     setIsSimulatingCall(false);
+    VoiceService.resetSession();
     setActiveCall((prev) => ({
       ...prev,
       status: "disconnected",
@@ -192,6 +97,7 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const reportCallScam = useCallback(() => {
     setIsSimulatingCall(false);
+    VoiceService.resetSession();
     setActiveCall((prev) => ({
       ...prev,
       status: "disconnected",
@@ -205,10 +111,10 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       durationSec: activeCall.durationSec || 45,
       timestamp: new Date().toISOString(),
       formattedTime: "Just now",
-      riskScore: 91,
-      riskLevel: "HIGH",
+      riskScore: activeCall.riskScore,
+      riskLevel: activeCall.riskLevel,
       status: "Scam Intercepted & Reported",
-      detectedPattern: "Authority Impersonation, Remote Access & OTP Solicitation",
+      detectedPattern: activeCall.detectedPatterns.join(", ") || "Social Engineering",
       actionTaken: "reported",
     };
     setHistory((prev) => [newCallHistory, ...prev]);
@@ -222,11 +128,7 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       timestamp: "Just now",
       isRead: false,
       whatHappened: "A voice social engineering call attempted to solicit credentials and remote desktop access.",
-      whyFlagged: [
-        "Matched high-threat police impersonation script",
-        "Demanded AnyDesk installation",
-        "Attempted OTP interception",
-      ],
+      whyFlagged: activeCall.reasons,
       whatYouShouldDo: [
         "Scammer phone number has been blacklisted on Avaran network",
         "No OTP was compromised",
@@ -236,63 +138,26 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [activeCall]);
 
   const markAlertRead = useCallback((id: string) => {
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, isRead: true } : a))
-    );
+    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, isRead: true } : a)));
   }, []);
-
-  const runFullProtectionDemo = useCallback(
-    async (onNavigateToPayment?: () => void) => {
-      setIsDemoRunning(true);
-      setDemoStepIndex(1);
-
-      // Step 1: Start call simulation
-      setIsSimulatingCall(true);
-      setCallStep(1);
-      setActiveCall(VoiceService.getActiveCallSnapshot(1));
-
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      setDemoStepIndex(2);
-      setCallStep(2);
-      setActiveCall(VoiceService.getActiveCallSnapshot(2));
-
-      await new Promise((resolve) => setTimeout(resolve, 2500));
-      setDemoStepIndex(3);
-      setCallStep(4);
-      setActiveCall(VoiceService.getActiveCallSnapshot(4));
-
-      await new Promise((resolve) => setTimeout(resolve, 2500));
-      // Intercept payment
-      setDemoStepIndex(4);
-      await setScenario(49000, true, true);
-      if (onNavigateToPayment) {
-        onNavigateToPayment();
-      }
-      setIsDemoRunning(false);
-    },
-    [setScenario]
-  );
 
   const resetDemo = useCallback(() => {
     setProtectionActive(true);
     setIsSimulatingCall(false);
     setCallStep(0);
+    VoiceService.resetSession();
     setActiveCall(VoiceService.getInitialSnapshot());
-    setAlerts(INITIAL_ALERTS);
     setHistory(INITIAL_HISTORY);
-    setIsDemoRunning(false);
-    setDemoStepIndex(0);
-    TransactionService.getHeldPayment().then(setHeldPayment);
-  }, []);
+    if (session?.userId) {
+      AlertsService.getAlerts(session.userId).then(setAlerts);
+    }
+  }, [session?.userId]);
 
   return (
     <SecurityContext.Provider
       value={{
         protectionActive,
         toggleProtection,
-        heldPayment,
-        setScenario,
-        submitPaymentDecision,
         activeCall,
         isSimulatingCall,
         startCallSimulation,
@@ -303,10 +168,7 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         alerts,
         markAlertRead,
         history,
-        runFullProtectionDemo,
         resetDemo,
-        isDemoRunning,
-        demoStepIndex,
       }}
     >
       {children}
