@@ -38,11 +38,12 @@ from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
 
 from app.core.database import SessionLocal  # noqa: E402
-from app.core.security import hash_identifier  # noqa: E402
+from app.core.security import hash_identifier, hash_password  # noqa: E402
 from app.models.alert import Alert  # noqa: E402
 from app.models.enums import AlertStatus, RiskDecision, RiskLevel  # noqa: E402
 from app.models.risk_factor import RiskFactor  # noqa: E402
 from app.models.risk_score import RiskScore  # noqa: E402
+from app.models.user_credentials import UserCredentials  # noqa: E402
 from app.repositories import risk_repository, user_repository  # noqa: E402
 from app.schemas.transaction import TransactionCreate  # noqa: E402
 from app.schemas.user import UserCreate  # noqa: E402
@@ -91,6 +92,15 @@ def seed_users_and_transactions(db) -> list[tuple]:
             user = user_service.create_user(
                 db, UserCreate(name=demo["name"], phone_number=demo["phone_number"])
             )
+
+        if not user.credentials:
+            creds = UserCredentials(
+                user_id=user.id,
+                password_hash=hash_password("password123"),
+            )
+            db.add(creds)
+            db.commit()
+            db.refresh(user)
 
         if user.transactions:
             transaction = user.transactions[0]

@@ -21,5 +21,8 @@ def get_user(db: Session, user_id: int) -> Optional[User]:
     return db.get(User, user_id)
 
 
+get_user_by_id = get_user
+
+
 def get_user_by_phone_hash(db: Session, phone_hash: str) -> Optional[User]:
     return db.query(User).filter(User.phone_hash == phone_hash).first()

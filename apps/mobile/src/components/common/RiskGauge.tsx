@@ -67,11 +67,10 @@ export const RiskGauge: React.FC<RiskGaugeProps> = ({
               stroke={activeColor}
               strokeWidth={dims.stroke}
               fill="none"
-              strokeDasharray={`${circumference}`}
+              strokeDasharray={`${circumference} ${circumference}`}
               strokeDashoffset={dashOffset}
               strokeLinecap="round"
-              rotation="-90"
-              origin={`${center}, ${center}`}
+              transform={`rotate(-90 ${center} ${center})`}
             />
           </Svg>
           {/* Score text in center */}

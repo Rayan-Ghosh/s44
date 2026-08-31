@@ -110,6 +110,62 @@ def list_pending_requests(trusted_contact_id: int, db: Session = Depends(get_db)
     return results
 
 
+@router.get("/requests/incoming/{user_id}", response_model=list[GuardianRequestRead])
+def list_incoming_requests_for_user(user_id: int, db: Session = Depends(get_db)) -> list[GuardianRequestRead]:
+    """Find all pending guardian requests where this user is enrolled as a trusted contact by phone number."""
+    user = user_repository.get_user(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
+
+    from app.models.trusted_contact import TrustedContact
+    from app.models.guardian_request import GuardianRequest
+    from app.models.enums import GuardianOutcome
+
+    # Find trusted contact records matching this user's phone hash
+    matching_contacts = db.query(TrustedContact).filter(
+        TrustedContact.contact_phone_hash == user.phone_hash
+    ).all()
+    if not matching_contacts:
+        return []
+
+    contact_ids = [c.id for c in matching_contacts]
+    reqs = (
+        db.query(GuardianRequest)
+        .filter(
+            GuardianRequest.trusted_contact_id.in_(contact_ids),
+            GuardianRequest.outcome == GuardianOutcome.PENDING,
+        )
+        .order_by(GuardianRequest.requested_at.desc())
+        .all()
+    )
+
+    now = datetime.now(timezone.utc)
+    results = []
+    for req in reqs:
+        exp = req.expires_at.replace(tzinfo=timezone.utc) if req.expires_at.tzinfo is None else req.expires_at
+        rem = max(0, int((exp - now).total_seconds()))
+        if rem > 0:
+            txn = req.transaction
+            risk = risk_repository.get_latest_risk_score(db, txn.id) if txn else None
+            sender_name = txn.user.name if txn and txn.user else "Family Member"
+            results.append(GuardianRequestRead(
+                id=req.id,
+                transaction_id=req.transaction_id,
+                trusted_contact_id=req.trusted_contact_id,
+                requested_at=req.requested_at,
+                expires_at=req.expires_at,
+                resolved_at=req.resolved_at,
+                outcome=req.outcome,
+                resolution_notes=f"Payment from {sender_name}",
+                resolution_channel=req.resolution_channel,
+                remaining_seconds=rem,
+                transaction_amount=float(txn.amount) if txn else 0.0,
+                risk_score=int(risk.final_score) if risk else 75,
+                risk_reasons=[f.explanation for f in (risk.risk_factors if risk else [])] or ["High Risk transaction detected"],
+            ))
+    return results
+
+
 @router.get("/requests/{request_id}", response_model=GuardianRequestRead)
 def get_guardian_request_detail(request_id: int, db: Session = Depends(get_db)) -> GuardianRequestRead:
     req = guardian_repository.get_guardian_request(db, request_id)

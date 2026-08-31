@@ -17,7 +17,9 @@ from app.models.transaction import Transaction
 from app.models.trusted_contact import TrustedContact
 from app.models.user import User
 from app.models.user_contact_info import UserContactInfo
+from app.models.user_credentials import UserCredentials
 from app.models.user_feedback import UserFeedback
+from app.models.user_session import UserSession
 from app.models.voice_analysis import VoiceAnalysis
 
 __all__ = [
@@ -34,7 +36,9 @@ __all__ = [
     "TrustedContact",
     "User",
     "UserContactInfo",
+    "UserCredentials",
     "UserFeedback",
+    "UserSession",
     "VoiceAnalysis",
 ]
 

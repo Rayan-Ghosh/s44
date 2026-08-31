@@ -44,5 +44,11 @@ class User(Base):
     contact_info: Mapped[Optional["UserContactInfo"]] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    credentials: Mapped[Optional["UserCredentials"]] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    sessions: Mapped[list["UserSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 

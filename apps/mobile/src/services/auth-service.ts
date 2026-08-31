@@ -9,6 +9,8 @@ export interface UserSession {
   phone: string;
   memberSince: string;
   token: string;
+  accessToken?: string;
+  refreshToken?: string;
   isOfflineMode?: boolean;
 }
 
@@ -101,6 +103,8 @@ export class AuthService {
     const response = await ApiClient.post<{
       success: boolean;
       token: string;
+      access_token?: string;
+      refresh_token?: string;
       user: { id: number; name: string; phone: string; email: string };
     }>("/api/v1/auth/login", {
       identifier: id,
@@ -109,6 +113,7 @@ export class AuthService {
 
     if (response.data && response.data.success) {
       const u = response.data.user;
+      const accessToken = response.data.access_token || response.data.token;
       const session: UserSession = {
         isAuthenticated: true,
         userId: u.id,
@@ -116,7 +121,9 @@ export class AuthService {
         email: u.email,
         phone: u.phone,
         memberSince: "Active Member",
-        token: response.data.token,
+        token: accessToken,
+        accessToken: accessToken,
+        refreshToken: response.data.refresh_token,
       };
       setAuthToken(session.token);
       await persistSession(session);
@@ -170,6 +177,8 @@ export class AuthService {
     const response = await ApiClient.post<{
       success: boolean;
       token: string;
+      access_token?: string;
+      refresh_token?: string;
       user: { id: number; name: string; phone: string; email: string };
     }>("/api/v1/auth/signup", {
       fullName: data.fullName.trim(),
@@ -181,6 +190,7 @@ export class AuthService {
 
     if (response.data && response.data.success) {
       const u = response.data.user;
+      const accessToken = response.data.access_token || response.data.token;
       const session: UserSession = {
         isAuthenticated: true,
         userId: u.id,
@@ -188,7 +198,9 @@ export class AuthService {
         email: u.email,
         phone: u.phone,
         memberSince: "Today",
-        token: response.data.token,
+        token: accessToken,
+        accessToken: accessToken,
+        refreshToken: response.data.refresh_token,
       };
       setAuthToken(session.token);
       await persistSession(session);
@@ -249,6 +261,14 @@ export class AuthService {
   }
 
   static async logout(): Promise<void> {
+    try {
+      const current = await loadPersistedSession();
+      if (current?.refreshToken) {
+        await ApiClient.post("/api/v1/auth/logout", { refresh_token: current.refreshToken });
+      }
+    } catch {
+      // best-effort remote revocation
+    }
     setAuthToken(null);
     await clearPersistedSession();
   }
