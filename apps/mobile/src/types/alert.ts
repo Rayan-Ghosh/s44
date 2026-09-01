@@ -16,6 +16,8 @@ export interface SecurityAlert {
     callerNumber?: string;
     device?: string;
     riskScore?: number;
+    transactionId?: string | number;
+    [key: string]: any;
   };
   whatHappened: string;
   whyFlagged: string[];

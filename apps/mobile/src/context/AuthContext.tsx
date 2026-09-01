@@ -4,15 +4,36 @@ import {
   UserSession,
   UserLoginCredentials,
   UserSignupCredentials,
+  SignupResult,
+  LoginResult,
+  DeviceTransferInitResult,
 } from "../services/auth-service";
+import { setOnUnauthorizedCallback } from "../services/api-client";
 
 interface AuthContextType {
   session: UserSession | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   isRestoringSession: boolean;
-  login: (credentials: UserLoginCredentials) => Promise<{ success: boolean; error?: string }>;
-  signup: (data: UserSignupCredentials) => Promise<{ success: boolean; error?: string }>;
+  isPostLoginLoading: boolean;
+  setPostLoginLoading: (loading: boolean) => void;
+  login: (credentials: UserLoginCredentials) => Promise<LoginResult>;
+  signup: (data: UserSignupCredentials) => Promise<SignupResult>;
+  verifyOtp: (userId: number, otp: string) => Promise<{ success: boolean; error?: string }>;
+  resendOtp: (userId: number) => Promise<{ success: boolean; maskedContact?: string; resendCooldownSeconds?: number; isLiveDelivery?: boolean; devTestCode?: string; error?: string }>;
+  requestDeviceTransfer: (userId: number, password?: string) => Promise<DeviceTransferInitResult>;
+  verifyDeviceTransfer: (userId: number, otp: string) => Promise<{ success: boolean; error?: string }>;
+  requestPasswordReset: (identifier: string) => Promise<{
+    success: boolean;
+    maskedContact?: string;
+    resendCooldownSeconds?: number;
+    isLiveDelivery?: boolean;
+    devTestCode?: string;
+    message?: string;
+    error?: string;
+  }>;
+  verifyPasswordResetOtp: (identifier: string, otp: string) => Promise<{ success: boolean; resetToken?: string; error?: string }>;
+  resetPassword: (resetToken: string, newPassword: string) => Promise<{ success: boolean; error?: string; message?: string }>;
   updateProfile: (data: { name: string; email: string; phone: string }) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
 }
@@ -23,6 +44,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<UserSession | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRestoringSession, setIsRestoringSession] = useState<boolean>(true);
+  const [isPostLoginLoading, setIsPostLoginLoading] = useState<boolean>(false);
+
+  // Set up unauthorized interceptor to clear session on 401
+  useEffect(() => {
+    setOnUnauthorizedCallback(() => {
+      setSession(null);
+      setIsPostLoginLoading(false);
+    });
+    return () => {
+      setOnUnauthorizedCallback(null);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,8 +65,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(restored);
       setIsRestoringSession(false);
 
-      // Don't block first paint on this — refresh in the background and
-      // update the session if the server has newer profile data.
       if (restored) {
         AuthService.refreshProfile(restored).then((refreshed) => {
           if (!cancelled) setSession(refreshed);
@@ -45,15 +76,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const login = useCallback(async (credentials: UserLoginCredentials) => {
+  const login = useCallback(async (credentials: UserLoginCredentials): Promise<LoginResult> => {
     setIsLoading(true);
     try {
       const res = await AuthService.login(credentials);
       if (res.success && res.session) {
+        setIsPostLoginLoading(true);
         setSession(res.session);
-        return { success: true };
+        return { success: true, session: res.session };
       }
-      return { success: false, error: res.error || "Login failed. Please check your credentials." };
+      return res;
     } finally {
       setIsLoading(false);
     }
@@ -63,11 +95,91 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       const res = await AuthService.signup(data);
+      return res;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const verifyOtp = useCallback(async (userId: number, otp: string) => {
+    setIsLoading(true);
+    try {
+      const res = await AuthService.verifyOtp({ userId, otp });
       if (res.success && res.session) {
+        setIsPostLoginLoading(true);
         setSession(res.session);
         return { success: true };
       }
-      return { success: false, error: res.error || "Signup failed." };
+      return { success: false, error: res.error || "Verification failed." };
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const resendOtp = useCallback(async (userId: number) => {
+    setIsLoading(true);
+    try {
+      const res = await AuthService.resendOtp({ userId });
+      return res;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const requestDeviceTransfer = useCallback(async (userId: number, password?: string) => {
+    setIsLoading(true);
+    try {
+      const res = await AuthService.requestDeviceTransfer({ userId, password });
+      return res;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const verifyDeviceTransfer = useCallback(async (userId: number, otp: string) => {
+    setIsLoading(true);
+    try {
+      const res = await AuthService.verifyDeviceTransfer({ userId, otp });
+      if (res.success && res.session) {
+        setIsPostLoginLoading(true);
+        setSession(res.session);
+        return { success: true };
+      }
+      return { success: false, error: res.error || "Device transfer verification failed." };
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const requestPasswordReset = useCallback(async (identifier: string) => {
+    setIsLoading(true);
+    try {
+      const res = await AuthService.requestPasswordReset(identifier);
+      return res;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const verifyPasswordResetOtp = useCallback(async (identifier: string, otp: string) => {
+    setIsLoading(true);
+    try {
+      const res = await AuthService.verifyPasswordResetOtp(identifier, otp);
+      return res;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const resetPassword = useCallback(async (resetToken: string, newPassword: string) => {
+    setIsLoading(true);
+    try {
+      const res = await AuthService.resetPassword(resetToken, newPassword);
+      if (res.success) {
+        setSession(null);
+        setIsPostLoginLoading(false);
+      }
+      return res;
     } finally {
       setIsLoading(false);
     }
@@ -94,6 +206,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       await AuthService.logout();
+      setIsPostLoginLoading(false);
       setSession(null);
     } finally {
       setIsLoading(false);
@@ -107,8 +220,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!session?.isAuthenticated,
         isLoading,
         isRestoringSession,
+        isPostLoginLoading,
+        setPostLoginLoading: setIsPostLoginLoading,
         login,
         signup,
+        verifyOtp,
+        resendOtp,
+        requestDeviceTransfer,
+        verifyDeviceTransfer,
+        requestPasswordReset,
+        verifyPasswordResetOtp,
+        resetPassword,
         updateProfile,
         logout,
       }}

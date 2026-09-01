@@ -7,6 +7,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ViewStyle,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../theme/colors";
@@ -32,6 +33,7 @@ export const TextInput: React.FC<TextInputProps> = ({
   containerStyle,
   isPassword,
   secureTextEntry,
+  style,
   ...rest
 }) => {
   const [isFocused, setIsFocused] = useState(false);
@@ -58,13 +60,14 @@ export const TextInput: React.FC<TextInputProps> = ({
           />
         )}
         <RNTextInput
-          style={styles.input}
+          style={[styles.input, style]}
           placeholderTextColor={colors.textTertiary}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           secureTextEntry={isSecure}
           autoCapitalize="none"
           autoCorrect={false}
+          underlineColorAndroid="transparent"
           {...rest}
         />
         {isPassword ? (
@@ -97,7 +100,7 @@ export const TextInput: React.FC<TextInputProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: spacing.xs,
+    marginVertical: spacing.xs + 2,
   },
   label: {
     ...typography.small,
@@ -110,15 +113,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
     borderRadius: radii.md,
     paddingHorizontal: spacing.md,
     minHeight: 48,
   },
   inputWrapperFocused: {
-    borderColor: colors.textPrimary,
-    borderWidth: 1.5,
+    borderColor: colors.brand,
+    backgroundColor: colors.surface,
   },
   inputWrapperError: {
     borderColor: colors.threat,
@@ -130,12 +133,23 @@ const styles = StyleSheet.create({
     flex: 1,
     ...typography.body,
     color: colors.textPrimary,
-    paddingVertical: spacing.sm,
-    fontSize: 15,
+    backgroundColor: "transparent",
+    paddingVertical: spacing.sm + 2,
+    fontSize: 14.5,
+    ...(Platform.OS === "web"
+      ? ({
+          outlineStyle: "none",
+          outlineWidth: 0,
+          backgroundColor: "transparent",
+          boxShadow: "none",
+        } as any)
+      : {}),
   },
   rightIconButton: {
     padding: spacing.xs,
     marginLeft: spacing.xs,
+    alignItems: "center",
+    justifyContent: "center",
   },
   errorText: {
     ...typography.small,

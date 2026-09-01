@@ -81,32 +81,18 @@ export class ErrorBoundary extends Component<Props, State> {
             {/* Error Card */}
             <View style={styles.card}>
               <View style={styles.iconCircle}>
-                <Ionicons name="warning-outline" size={32} color={colors.threat} />
+                <Ionicons name="shield-outline" size={32} color={colors.brand} />
               </View>
 
-              <Text style={styles.title}>Runtime Error Intercepted</Text>
+              <Text style={styles.title}>Something went wrong</Text>
               <Text style={styles.subtitle}>
-                Avaran's resilience boundary prevented an unhandled exception from freezing the application.
+                An unexpected issue occurred while rendering this screen. Your account and security protections remain active.
               </Text>
-
-              {/* Diagnostic Box */}
-              <View style={styles.diagnosticBox}>
-                <Text style={styles.diagnosticHeading}>ERROR TELEMETRY</Text>
-                <Text style={styles.errorText} numberOfLines={3}>
-                  {errorMessage}
-                </Text>
-
-                {stack ? (
-                  <ScrollView style={styles.stackScroll} nestedScrollEnabled>
-                    <Text style={styles.stackText}>{stack}</Text>
-                  </ScrollView>
-                ) : null}
-              </View>
 
               {/* Action Buttons */}
               <View style={styles.actionButtons}>
                 <Button
-                  label="Recover Session & Retry"
+                  label="Try Again"
                   onPress={this.handleReset}
                   variant="primary"
                   size="lg"
@@ -115,7 +101,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 />
 
                 <Button
-                  label="Restart to Safe Baseline"
+                  label="Reload Screen"
                   onPress={() => {
                     this.handleReset();
                   }}
@@ -127,8 +113,8 @@ export class ErrorBoundary extends Component<Props, State> {
             </View>
 
             <View style={styles.footerRow}>
-              <Ionicons name="shield-outline" size={12} color={colors.textMuted} />
-              <Text style={styles.footerText}>Avaran Resilience Architecture</Text>
+              <Ionicons name="shield-checkmark-outline" size={12} color={colors.textMuted} />
+              <Text style={styles.footerText}>Avaran Protection Active</Text>
             </View>
           </View>
         </SafeAreaView>
@@ -168,11 +154,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   brandTitle: {
-    ...typography.h3,
+    fontFamily: typography.brandTitle.fontFamily,
     color: colors.textPrimary,
-    letterSpacing: 1.5,
-    fontWeight: "800",
-    fontSize: 16,
+    letterSpacing: 4.5,
+    fontWeight: "600",
+    fontSize: 16.5,
+    textTransform: "uppercase",
   },
   card: {
     width: "100%",
@@ -180,9 +167,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radii.xl,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.threat,
+    borderColor: colors.threatBorder,
     padding: spacing.xl,
     alignItems: "center",
     ...shadows.md,

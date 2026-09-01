@@ -7,47 +7,8 @@ import { spacing, radii, shadows } from "../../theme/layout";
 import { useAppHealth } from "../../context/AppHealthContext";
 
 export const WatchdogToast: React.FC = () => {
-  const { recentFreezeIncident, dismissFreezeAlert } = useAppHealth();
-
-  useEffect(() => {
-    if (recentFreezeIncident) {
-      const timer = setTimeout(() => {
-        dismissFreezeAlert();
-      }, 6000);
-      return () => clearTimeout(timer);
-    }
-  }, [recentFreezeIncident, dismissFreezeAlert]);
-
-  if (!recentFreezeIncident) {
-    return null;
-  }
-
-  return (
-    <View style={styles.toastContainer}>
-      <View style={styles.card}>
-        <View style={styles.iconBox}>
-          <Ionicons name="pulse" size={16} color={colors.caution} />
-        </View>
-
-        <View style={styles.textCol}>
-          <Text style={styles.title}>
-            UI Thread Lag Detected ({Math.round(recentFreezeIncident.durationMs)}ms)
-          </Text>
-          <Text style={styles.desc}>
-            Watchdog recovered responsiveness gracefully.
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          onPress={dismissFreezeAlert}
-          style={styles.closeBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="close" size={16} color={colors.textSecondary} />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  // Internal developer diagnostics only — never rendered in user-facing UI
+  return null;
 };
 
 const styles = StyleSheet.create({
@@ -65,9 +26,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.caution,
+    borderColor: colors.cautionBorder,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     flexDirection: "row",

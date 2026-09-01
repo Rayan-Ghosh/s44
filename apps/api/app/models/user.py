@@ -10,7 +10,7 @@ docs/SECURITY.md.
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import JSON, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -22,6 +22,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -44,5 +45,20 @@ class User(Base):
     contact_info: Mapped[Optional["UserContactInfo"]] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    otp_verifications: Mapped[list["OtpVerification"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    sessions: Mapped[list["UserSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    trusted_device: Mapped[Optional["TrustedDeviceBinding"]] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    password_reset_authorizations: Mapped[list["PasswordResetAuthorization"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+
 
 

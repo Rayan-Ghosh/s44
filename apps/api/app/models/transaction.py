@@ -19,7 +19,7 @@ spec doesn't enumerate transaction status values itself.
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -49,6 +49,22 @@ class Transaction(Base):
         default=TransactionStatus.PENDING,
         nullable=False,
     )
+    authorization_required: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    authorization_status: Mapped[Optional[str]] = mapped_column(
+        String(32), default="NONE", nullable=True
+    )  # "NONE", "PENDING", "AUTHORIZED", "REJECTED"
+    authorized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    authorization_method: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )  # "BIOMETRIC", "DEVICE_CREDENTIAL"
+    integrity_hash: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )  # Cryptographic hash bound at biometric authorization
+    guardian_integrity_hash: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )  # Cryptographic hash bound at Guardian approval
 
     user: Mapped["User"] = relationship(back_populates="transactions")
     recipient: Mapped["Recipient"] = relationship(back_populates="transactions")

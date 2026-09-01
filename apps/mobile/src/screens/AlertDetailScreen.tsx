@@ -134,10 +134,8 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   heroCardHigh: {
-    borderColor: colors.border,
+    borderColor: colors.threatBorder,
     backgroundColor: colors.surface,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.threat,
   },
   heroCardNormal: {
     borderColor: colors.border,

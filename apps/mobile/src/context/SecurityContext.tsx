@@ -3,7 +3,7 @@ import { CallSnapshot } from "../types/voice";
 import { SecurityAlert } from "../types/alert";
 import { HistoryItem } from "../types/history";
 import { VoiceService } from "../services/voice-service";
-import { AlertsService } from "../services/alerts-service";
+import { AlertService } from "../services/alert-service";
 import { INITIAL_HISTORY } from "../services/history-service";
 import { useAuth } from "./AuthContext";
 
@@ -33,14 +33,49 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isSimulatingCall, setIsSimulatingCall] = useState<boolean>(false);
   const [callStep, setCallStep] = useState<number>(0);
   const [alerts, setAlerts] = useState<SecurityAlert[]>([]);
-  // history-service.ts is out of scope for the backend-wiring pass (no
-  // matching backend endpoint exists yet) — it keeps its static seed data.
   const [history, setHistory] = useState<HistoryItem[]>(INITIAL_HISTORY);
 
   useEffect(() => {
-    if (!session?.userId) return;
-    AlertsService.getAlerts(session.userId).then(setAlerts);
-  }, [session?.userId]);
+    // Initial fetch
+    AlertService.getAlerts().then((raw) => {
+      setAlerts(
+        raw.map((a) => ({
+          id: a.id,
+          category: a.category || "payment",
+          severity: a.severity,
+          title: a.title,
+          description: a.description,
+          timestamp: a.timestamp,
+          isRead: a.isRead || a.status === "RESOLVED",
+          metadata: { transactionId: a.transactionId },
+          whatHappened: a.whatHappened || a.description,
+          whyFlagged: a.whyFlagged || [a.description],
+          whatYouShouldDo: a.whatYouShouldDo || ["Review transaction details"],
+        }))
+      );
+    });
+
+    // Subscribe to changes in AlertService
+    const unsubscribe = AlertService.subscribe((updated) => {
+      setAlerts(
+        updated.map((a) => ({
+          id: a.id,
+          category: a.category || "payment",
+          severity: a.severity,
+          title: a.title,
+          description: a.description,
+          timestamp: a.timestamp,
+          isRead: a.isRead || a.status === "RESOLVED",
+          metadata: { transactionId: a.transactionId },
+          whatHappened: a.whatHappened || a.description,
+          whyFlagged: a.whyFlagged || [a.description],
+          whatYouShouldDo: a.whatYouShouldDo || ["Review transaction details"],
+        }))
+      );
+    });
+
+    return unsubscribe;
+  }, []);
 
   const toggleProtection = useCallback(() => {
     setProtectionActive((prev) => !prev);
@@ -119,26 +154,26 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
     setHistory((prev) => [newCallHistory, ...prev]);
 
-    const newAlert: SecurityAlert = {
+    AlertService.addAlert({
       id: `alert-call-${Date.now()}`,
-      category: "voice",
-      severity: "HIGH",
       title: "Voice Phishing Scam Intercepted",
       description: `Reported scam call from ${activeCall.caller.phoneNumber}`,
+      severity: "HIGH",
+      status: "ACTIVE",
       timestamp: "Just now",
       isRead: false,
+      category: "voice",
       whatHappened: "A voice social engineering call attempted to solicit credentials and remote desktop access.",
       whyFlagged: activeCall.reasons,
       whatYouShouldDo: [
         "Scammer phone number has been blacklisted on Avaran network",
         "No OTP was compromised",
       ],
-    };
-    setAlerts((prev) => [newAlert, ...prev]);
+    });
   }, [activeCall]);
 
   const markAlertRead = useCallback((id: string) => {
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, isRead: true } : a)));
+    AlertService.markAsRead(id);
   }, []);
 
   const resetDemo = useCallback(() => {
@@ -148,10 +183,7 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     VoiceService.resetSession();
     setActiveCall(VoiceService.getInitialSnapshot());
     setHistory(INITIAL_HISTORY);
-    if (session?.userId) {
-      AlertsService.getAlerts(session.userId).then(setAlerts);
-    }
-  }, [session?.userId]);
+  }, []);
 
   return (
     <SecurityContext.Provider

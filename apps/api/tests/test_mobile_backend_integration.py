@@ -13,31 +13,45 @@ client = TestClient(app)
 
 
 def test_auth_signup_and_login():
-    """Test mobile signup and login endpoints."""
+    """Test mobile signup, OTP verification, and login endpoints."""
     # 1. Test Signup
     signup_payload = {
         "fullName": "Test Mobile User",
         "mobileNumber": "+91-99999-88888",
         "email": "mobile.test@example.com",
-        "password": "securepassword123",
+        "password": "StrongPassword123!",
     }
     signup_res = client.post("/api/v1/auth/signup", json=signup_payload)
     assert signup_res.status_code in (200, 201)
     signup_data = signup_res.json()
     assert signup_data["success"] is True
-    assert "token" in signup_data
+    assert signup_data["pendingVerification"] is True
+    user_id = signup_data["userId"]
     assert signup_data["user"]["name"] == "Test Mobile User"
 
-    # 2. Test Login
+    # 2. Test OTP Verification
+    from app.services.otp_service import otp_delivery_provider
+    dispatched_otp = otp_delivery_provider.get_last_otp_for_target("+91-99999-88888")
+    assert dispatched_otp is not None
+    verify_res = client.post(
+        "/api/v1/auth/verify-otp",
+        json={"userId": user_id, "otp": dispatched_otp},
+    )
+    assert verify_res.status_code == 200
+    verify_data = verify_res.json()
+    assert verify_data["success"] is True
+    assert "token" in verify_data
+
+    # 3. Test Login
     login_payload = {
         "identifier": "+91-99999-88888",
-        "password": "securepassword123",
+        "password": "StrongPassword123!",
     }
     login_res = client.post("/api/v1/auth/login", json=login_payload)
     assert login_res.status_code == 200
     login_data = login_res.json()
     assert login_data["success"] is True
-    assert login_data["user"]["id"] == signup_data["user"]["id"]
+    assert login_data["user"]["id"] == user_id
 
 
 def test_user_transactions_list():
@@ -79,6 +93,14 @@ def test_risk_evaluation_and_transaction_actions():
     assert "decision" in risk_data
 
     # 4. Confirm Transaction Action
+    if risk_data.get("risk_level") == "HIGH":
+        # Authoritative security check: un-authorized confirm must return 403
+        unauth_confirm = client.post(f"/api/v1/transactions/{tx_id}/confirm")
+        assert unauth_confirm.status_code == 403
+        # Authorize transaction with biometrics
+        auth_res = client.post(f"/api/v1/transactions/{tx_id}/authorize", json={"method": "BIOMETRIC"})
+        assert auth_res.status_code == 200
+
     confirm_res = client.post(f"/api/v1/transactions/{tx_id}/confirm")
     assert confirm_res.status_code == 200
     assert confirm_res.json()["status"] == "CONFIRMED"

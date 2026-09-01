@@ -1,10 +1,12 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Animated,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -18,63 +20,252 @@ import { AvaranLogo } from "../components/common/AvaranLogo";
 export const LandingScreen: React.FC = () => {
   const navigation = useNavigation<any>();
 
+  // Progressive Entrance Animation States
+  const brandAnim = useRef(new Animated.Value(0)).current;
+  const badgeAnim = useRef(new Animated.Value(0)).current;
+  const titleAnim = useRef(new Animated.Value(0)).current;
+  const descAnim = useRef(new Animated.Value(0)).current;
+  const ctaAnim = useRef(new Animated.Value(0)).current;
+  const loginAnim = useRef(new Animated.Value(0)).current;
+  const sectionHeadingAnim = useRef(new Animated.Value(0)).current;
+  const cardAnim1 = useRef(new Animated.Value(0)).current;
+  const cardAnim2 = useRef(new Animated.Value(0)).current;
+  const cardAnim3 = useRef(new Animated.Value(0)).current;
+
+  const hasAnimatedRef = useRef(false);
+
+  useEffect(() => {
+    if (hasAnimatedRef.current) return;
+    hasAnimatedRef.current = true;
+
+    const createEntranceStep = (
+      anim: Animated.Value,
+      delay: number,
+      duration: number
+    ) => {
+      return Animated.sequence([
+        Animated.delay(delay),
+        Animated.timing(anim, {
+          toValue: 1,
+          duration,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: false,
+        }),
+      ]);
+    };
+
+    Animated.parallel([
+      createEntranceStep(brandAnim, 0, 320),
+      createEntranceStep(badgeAnim, 90, 320),
+      createEntranceStep(titleAnim, 180, 340),
+      createEntranceStep(descAnim, 270, 340),
+      createEntranceStep(ctaAnim, 360, 320),
+      createEntranceStep(loginAnim, 440, 300),
+      createEntranceStep(sectionHeadingAnim, 520, 300),
+      createEntranceStep(cardAnim1, 580, 340),
+      createEntranceStep(cardAnim2, 680, 340),
+      createEntranceStep(cardAnim3, 780, 340),
+    ]).start();
+  }, [
+    brandAnim,
+    badgeAnim,
+    titleAnim,
+    descAnim,
+    ctaAnim,
+    loginAnim,
+    sectionHeadingAnim,
+    cardAnim1,
+    cardAnim2,
+    cardAnim3,
+  ]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Brand Header */}
-        <View style={styles.brandRow}>
+        {/* 1. Brand Header */}
+        <Animated.View
+          style={[
+            styles.brandRow,
+            {
+              opacity: brandAnim,
+              transform: [
+                {
+                  translateY: brandAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [8, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <AvaranLogo size="sm" showText={false} />
           <Text style={styles.brandName}>AVARAN</Text>
-        </View>
+        </Animated.View>
 
         {/* Hero Section */}
         <View style={styles.heroSection}>
-          <View style={styles.pillBadge}>
+          {/* 2. Fraud Shield Badge */}
+          <Animated.View
+            style={[
+              styles.pillBadge,
+              {
+                opacity: badgeAnim,
+                transform: [
+                  {
+                    translateY: badgeAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [8, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <Ionicons name="shield-checkmark" size={12} color={colors.brand} />
             <Text style={styles.pillText}>UPI FRAUD-RISK SHIELD</Text>
-          </View>
+          </Animated.View>
 
-          <Text style={styles.heroTitle}>
-            Protect every payment{"\n"}before it's too late.
-          </Text>
-
-          <Text style={styles.heroDesc}>
-            Avaran evaluates payments in the moment before confirmation — detecting fraud patterns, device anomalies, and social engineering pressure across your connected payment apps.
-          </Text>
-
-          {/* Primary CTA */}
-          <Button
-            label="GET STARTED"
-            onPress={() => navigation.navigate("CreateAccount")}
-            variant="primary"
-            size="lg"
-            icon="arrow-forward"
-            iconPosition="right"
-            style={styles.ctaBtn}
-          />
-
-          {/* Secondary Link */}
-          <TouchableOpacity
-            style={styles.loginLink}
-            onPress={() => navigation.navigate("Login")}
-            activeOpacity={0.7}
+          {/* 3. Main Heading */}
+          <Animated.Text
+            style={[
+              styles.heroTitle,
+              {
+                opacity: titleAnim,
+                transform: [
+                  {
+                    translateY: titleAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [10, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
           >
-            <Text style={styles.loginLinkText}>
-              Already have an account? <Text style={styles.loginLinkBold}>Log In</Text>
-            </Text>
-          </TouchableOpacity>
+            Protect every payment{"\n"}before it's too late.
+          </Animated.Text>
+
+          {/* 4. Description */}
+          <Animated.Text
+            style={[
+              styles.heroDesc,
+              {
+                opacity: descAnim,
+                transform: [
+                  {
+                    translateY: descAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [10, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            Avaran evaluates payments in the moment before confirmation — detecting fraud patterns, device anomalies, and social engineering pressure across your connected payment apps.
+          </Animated.Text>
+
+          {/* 5. Primary CTA */}
+          <Animated.View
+            style={{
+              opacity: ctaAnim,
+              transform: [
+                {
+                  translateY: ctaAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [8, 0],
+                  }),
+                },
+              ],
+            }}
+          >
+            <Button
+              label="GET STARTED"
+              onPress={() => navigation.navigate("CreateAccount")}
+              variant="primary"
+              size="lg"
+              icon="arrow-forward"
+              iconPosition="right"
+              style={styles.ctaBtn}
+            />
+          </Animated.View>
+
+          {/* 6. Secondary Login Link */}
+          <Animated.View
+            style={{
+              opacity: loginAnim,
+              transform: [
+                {
+                  translateY: loginAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [6, 0],
+                  }),
+                },
+              ],
+            }}
+          >
+            <TouchableOpacity
+              style={styles.loginLink}
+              onPress={() => navigation.navigate("Login")}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.loginLinkText}>
+                Already have an account? <Text style={styles.loginLinkBold}>Log In</Text>
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
         </View>
 
-        {/* Comprehensive Protection */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>COMPREHENSIVE PROTECTION</Text>
+        {/* 7. Comprehensive Protection Cards */}
+        <View style={styles.protectionSection}>
+          <Animated.Text
+            style={[
+              styles.sectionHeading,
+              {
+                opacity: sectionHeadingAnim,
+                transform: [
+                  {
+                    translateY: sectionHeadingAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [6, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            COMPREHENSIVE PROTECTION
+          </Animated.Text>
 
-          <View style={styles.capabilityCard}>
+          {/* Card 1: Payment Protection */}
+          <Animated.View
+            style={[
+              styles.capabilityCard,
+              {
+                opacity: cardAnim1,
+                transform: [
+                  {
+                    translateY: cardAnim1.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [12, 0],
+                    }),
+                  },
+                  {
+                    scale: cardAnim1.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.98, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View style={styles.iconCircle}>
-              <Ionicons name="shield-checkmark-outline" size={20} color={colors.textPrimary} />
+              <Ionicons name="shield-checkmark-outline" size={18} color={colors.textPrimary} />
             </View>
             <View style={styles.cardTextCol}>
               <Text style={styles.cardTitle}>Payment Protection</Text>
@@ -82,11 +273,33 @@ export const LandingScreen: React.FC = () => {
                 Detects and holds suspicious payments before funds leave your account.
               </Text>
             </View>
-          </View>
+          </Animated.View>
 
-          <View style={styles.capabilityCard}>
+          {/* Card 2: Risk Detection */}
+          <Animated.View
+            style={[
+              styles.capabilityCard,
+              {
+                opacity: cardAnim2,
+                transform: [
+                  {
+                    translateY: cardAnim2.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [12, 0],
+                    }),
+                  },
+                  {
+                    scale: cardAnim2.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.98, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View style={styles.iconCircle}>
-              <Ionicons name="pulse-outline" size={20} color={colors.textPrimary} />
+              <Ionicons name="pulse-outline" size={18} color={colors.textPrimary} />
             </View>
             <View style={styles.cardTextCol}>
               <Text style={styles.cardTitle}>Risk Detection</Text>
@@ -94,11 +307,33 @@ export const LandingScreen: React.FC = () => {
                 4-signal fusion analyzing transaction, device, behavioral, and voice factors.
               </Text>
             </View>
-          </View>
+          </Animated.View>
 
-          <View style={styles.capabilityCard}>
+          {/* Card 3: Call Protection */}
+          <Animated.View
+            style={[
+              styles.capabilityCard,
+              {
+                opacity: cardAnim3,
+                transform: [
+                  {
+                    translateY: cardAnim3.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [12, 0],
+                    }),
+                  },
+                  {
+                    scale: cardAnim3.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.98, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <View style={styles.iconCircle}>
-              <Ionicons name="call-outline" size={20} color={colors.textPrimary} />
+              <Ionicons name="call-outline" size={18} color={colors.textPrimary} />
             </View>
             <View style={styles.cardTextCol}>
               <Text style={styles.cardTitle}>Call Protection</Text>
@@ -106,7 +341,7 @@ export const LandingScreen: React.FC = () => {
                 Warns against urgency, impersonation, and coercion during active calls.
               </Text>
             </View>
-          </View>
+          </Animated.View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -119,23 +354,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   scrollContent: {
-    padding: spacing.xl,
-    paddingBottom: spacing.xxxl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
   },
   brandRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.lg,
     gap: spacing.sm,
   },
   brandName: {
-    fontSize: 16,
-    fontWeight: "700",
+    fontFamily: typography.brandTitle.fontFamily,
+    fontSize: 15,
+    fontWeight: "600",
     color: colors.textPrimary,
-    letterSpacing: 1.2,
+    letterSpacing: 4,
+    textTransform: "uppercase",
   },
   heroSection: {
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.lg,
   },
   pillBadge: {
     flexDirection: "row",
@@ -144,11 +382,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderLight,
     borderRadius: radii.full,
-    paddingVertical: 6,
+    paddingVertical: 5,
     paddingHorizontal: spacing.md,
     alignSelf: "flex-start",
     gap: 6,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   pillText: {
     ...typography.caption,
@@ -160,20 +398,20 @@ const styles = StyleSheet.create({
   heroTitle: {
     ...typography.h1,
     color: colors.textPrimary,
-    fontSize: 30,
-    lineHeight: 38,
-    marginBottom: spacing.md,
+    fontSize: 27,
+    lineHeight: 35,
+    marginBottom: spacing.sm,
   },
   heroDesc: {
     ...typography.body,
     color: colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: spacing.xl,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.lg,
   },
   ctaBtn: {
     width: "100%",
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   loginLink: {
     alignItems: "center",
@@ -182,14 +420,14 @@ const styles = StyleSheet.create({
   loginLinkText: {
     ...typography.body,
     color: colors.textSecondary,
-    fontSize: 14,
+    fontSize: 13.5,
   },
   loginLinkBold: {
     color: colors.textPrimary,
     fontWeight: "700",
   },
-  section: {
-    marginBottom: spacing.lg,
+  protectionSection: {
+    marginTop: spacing.xs,
   },
   sectionHeading: {
     ...typography.caption,
@@ -197,7 +435,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0.6,
     fontSize: 11,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   capabilityCard: {
     flexDirection: "row",
@@ -206,14 +444,15 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.lg,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
     ...shadows.sm,
   },
   iconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: colors.surfaceSecondary,
     borderWidth: 1,
     borderColor: colors.borderLight,
@@ -227,13 +466,14 @@ const styles = StyleSheet.create({
   cardTitle: {
     ...typography.bodySemibold,
     color: colors.textPrimary,
-    fontSize: 15,
+    fontSize: 14,
+    lineHeight: 18,
   },
   cardDesc: {
     ...typography.small,
     color: colors.textSecondary,
-    fontSize: 13,
-    marginTop: 3,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
   },
 });

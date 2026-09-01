@@ -27,27 +27,27 @@ export const Badge: React.FC<BadgeProps> = ({
     switch (resolvedVariant) {
       case "threat":
         return {
-          bg: colors.threatSurface,
-          border: colors.threatBorder,
-          text: colors.threatText,
+          bg: colors.threat,
+          border: colors.threat,
+          text: colors.textInverse,
         };
       case "caution":
         return {
-          bg: colors.cautionSurface,
-          border: colors.cautionBorder,
-          text: colors.cautionText,
+          bg: colors.caution,
+          border: colors.caution,
+          text: colors.textInverse,
         };
       case "safe":
         return {
-          bg: colors.safeSurface,
-          border: colors.safeBorder,
-          text: colors.safeText,
+          bg: colors.safe,
+          border: colors.safeDark,
+          text: colors.textInverse,
         };
       case "brand":
         return {
-          bg: colors.brandSurface,
-          border: colors.brandBorder,
-          text: colors.brand,
+          bg: colors.brand,
+          border: colors.brandDark,
+          text: colors.textInverse,
         };
       default:
         return {

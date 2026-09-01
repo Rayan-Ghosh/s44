@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import { getDevicePayload } from "./device-info-service";
 
 declare const process: any;
 
@@ -63,6 +64,7 @@ export const IS_DEMO_MODE =
   typeof process !== "undefined" && process?.env?.EXPO_PUBLIC_DEMO_MODE === "true";
 
 let _authToken: string | null = null;
+let _onUnauthorizedCallback: (() => void) | null = null;
 
 export const setAuthToken = (token: string | null) => {
   _authToken = token;
@@ -70,6 +72,10 @@ export const setAuthToken = (token: string | null) => {
 
 export const getAuthToken = (): string | null => {
   return _authToken;
+};
+
+export const setOnUnauthorizedCallback = (cb: (() => void) | null) => {
+  _onUnauthorizedCallback = cb;
 };
 
 export interface ApiResponse<T> {
@@ -87,9 +93,24 @@ export class ApiClient {
     const baseUrl = getApiBaseUrl();
     const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
     const url = `${baseUrl}${cleanEndpoint}`;
+
+    let devInfo: { deviceId: string; deviceName: string; deviceType: string } | null = null;
+    try {
+      devInfo = await getDevicePayload();
+    } catch {
+      // best-effort
+    }
+
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...(devInfo
+        ? {
+            "X-Device-Id": devInfo.deviceId,
+            "X-Device-Name": devInfo.deviceName,
+            "X-Device-Type": devInfo.deviceType,
+          }
+        : {}),
       ...(options.headers as Record<string, string>),
     };
 
@@ -120,10 +141,25 @@ export class ApiClient {
         let errorMsg = "An unexpected error occurred.";
         if (data && typeof data.detail === "string") {
           errorMsg = data.detail;
+        } else if (data && data.detail && typeof data.detail === "object" && data.detail.message) {
+          errorMsg = data.detail.message;
         } else if (data && typeof data.message === "string") {
           errorMsg = data.message;
         } else if (response.status === 401) {
           errorMsg = "Unauthorized. Please log in again.";
+          if (_onUnauthorizedCallback) {
+            _onUnauthorizedCallback();
+          }
+        } else if (response.status === 429) {
+          const retryAfter = response.headers.get("Retry-After");
+          if (retryAfter) {
+            const minutes = Math.ceil(parseInt(retryAfter, 10) / 60);
+            errorMsg = `Too many attempts. Please wait ${minutes > 1 ? `${minutes} minutes` : "a few moments"} before trying again.`;
+          } else if (data && typeof data.detail === "string") {
+            errorMsg = data.detail;
+          } else {
+            errorMsg = "Too many attempts. Please wait a few minutes before trying again.";
+          }
         } else if (response.status === 404) {
           errorMsg = "Resource not found.";
         } else if (response.status >= 500) {

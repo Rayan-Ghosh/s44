@@ -150,7 +150,9 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const poll = async () => {
       const dtos = await GuardianService.getPendingRequests(contactId);
-      const mapped = dtos.map((d) => toGuardianRequest(d));
+      const mapped = dtos
+        .map((d) => toGuardianRequest(d))
+        .filter((r) => r.status === "PENDING" && r.expiresAt > Date.now());
       const newOnes = mapped.filter((r) => !seenPendingIdsRef.current.has(r.id));
       if (newOnes.length > 0) {
         Vibration.vibrate([0, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200]);
@@ -351,14 +353,20 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
             ? { ...prev, status: decision, resolvedAt: Date.now() }
             : prev
         );
-        if (activeRequest?.id === requestId) {
-          PaymentService.updateTransactionStatus(
-            activeRequest.transactionId,
-            decision === "APPROVED" ? "Approved by you" : "Blocked"
-          );
-          setPaymentOutcome(decision);
-        }
       }
+
+      // Always update central payment state for the target transaction
+      const targetReq =
+        activeRequest?.id === requestId
+          ? activeRequest
+          : pendingRequests.find((r) => r.id === requestId);
+      if (targetReq && targetReq.transactionId) {
+        PaymentService.updateTransactionStatus(
+          String(targetReq.transactionId),
+          decision === "APPROVED" ? "Approved by you" : "Blocked"
+        );
+      }
+      setPaymentOutcome(decision);
 
       setPendingRequests((prev) =>
         prev.map((r) => (r.id === requestId ? { ...r, status: decision, resolvedAt: Date.now() } : r))
@@ -366,7 +374,7 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       setNotificationBadge(0);
       setApprovalCard(null);
     },
-    [activeRequest, clearTimers]
+    [activeRequest, clearTimers, pendingRequests]
   );
 
   const clearPaymentOutcome = useCallback(() => {

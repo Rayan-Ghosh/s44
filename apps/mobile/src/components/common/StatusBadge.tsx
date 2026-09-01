@@ -1,5 +1,5 @@
-import React from "react";
-import { View, Text, StyleSheet, ViewStyle } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { View, Text, StyleSheet, ViewStyle, Animated, Easing } from "react-native";
 import { colors } from "../../theme/colors";
 import { typography } from "../../theme/typography";
 import { spacing, radii } from "../../theme/layout";
@@ -23,26 +23,26 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
       case "low":
       case "resolved":
         return {
-          bg: colors.safeSurface,
-          border: colors.safeBorder,
-          text: colors.safeText,
-          dotColor: colors.safe,
+          bg: colors.safe,
+          border: colors.safeDark,
+          text: colors.textInverse,
+          dotColor: colors.textInverse,
         };
       case "pending":
       case "medium":
         return {
-          bg: colors.cautionSurface,
-          border: colors.cautionBorder,
-          text: colors.cautionText,
-          dotColor: colors.caution,
+          bg: colors.caution,
+          border: colors.caution,
+          text: colors.textInverse,
+          dotColor: colors.textInverse,
         };
       case "high":
       case "escalated":
         return {
-          bg: colors.threatSurface,
-          border: colors.threatBorder,
-          text: colors.threatText,
-          dotColor: colors.threat,
+          bg: colors.threat,
+          border: colors.threat,
+          text: colors.textInverse,
+          dotColor: colors.textInverse,
         };
       case "neutral":
       default:
@@ -56,18 +56,49 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   };
 
   const theme = getTheme();
+  const transitionAnim = useRef(new Animated.Value(1)).current;
+  const prevStatusRef = useRef(status);
+  const prevLabelRef = useRef(label);
+
+  useEffect(() => {
+    if (prevStatusRef.current !== status || prevLabelRef.current !== label) {
+      prevStatusRef.current = status;
+      prevLabelRef.current = label;
+
+      // Subtle smooth cross-fade & scale transition on status change
+      transitionAnim.setValue(0.4);
+      Animated.timing(transitionAnim, {
+        toValue: 1,
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [status, label, transitionAnim]);
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.badge,
-        { backgroundColor: theme.bg, borderColor: theme.border },
+        {
+          backgroundColor: theme.bg,
+          borderColor: theme.border,
+          opacity: transitionAnim,
+          transform: [
+            {
+              scale: transitionAnim.interpolate({
+                inputRange: [0.4, 1],
+                outputRange: [0.94, 1],
+              }),
+            },
+          ],
+        },
         style,
       ]}
     >
       {dot && <View style={[styles.dot, { backgroundColor: theme.dotColor }]} />}
       <Text style={[styles.text, { color: theme.text }]}>{label}</Text>
-    </View>
+    </Animated.View>
   );
 };
 

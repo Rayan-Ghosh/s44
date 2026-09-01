@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Platform,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useIsFocused } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../theme/colors";
 import { typography } from "../theme/typography";
@@ -18,6 +18,7 @@ import { Header } from "../components/common/Header";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { Button } from "../components/common/Button";
 import { FloatingToast, ToastConfig } from "../components/common/FloatingToast";
+import { StaggerRevealCard } from "../components/common/StaggerRevealCard";
 import {
   ProtectionModuleModal,
   ProtectionFeatureItem,
@@ -150,6 +151,17 @@ export const ProtectionScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isActing, setIsActing] = useState<boolean>(false);
+  const isFocused = useIsFocused();
+  const hasPlayedProtectionStaggerRef = useRef(false);
+
+  useEffect(() => {
+    if (isFocused && !isLoading && !hasPlayedProtectionStaggerRef.current) {
+      const timer = setTimeout(() => {
+        hasPlayedProtectionStaggerRef.current = true;
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, isLoading]);
 
   // Module switches
   const [paymentProtectionEnabled, setPaymentProtectionEnabled] = useState<boolean>(true);
@@ -364,29 +376,40 @@ export const ProtectionScreen: React.FC = () => {
           </View>
 
           {/* 2. Active Protection Banner */}
-          <View style={styles.statusBanner}>
-            <View
-              style={[
-                styles.statusIconBox,
-                protectionStatusDetails.color === colors.threat && {
-                  backgroundColor: "rgba(239, 68, 68, 0.15)",
-                },
-              ]}
-            >
-              <Ionicons
-                name={protectionStatusDetails.icon}
-                size={24}
-                color={protectionStatusDetails.color}
-              />
+          <StaggerRevealCard
+            index={0}
+            baseDelay={60}
+            hasPlayed={hasPlayedProtectionStaggerRef.current}
+          >
+            <View style={styles.statusBanner}>
+              <View
+                style={[
+                  styles.statusIconBox,
+                  protectionStatusDetails.color === colors.threat && {
+                    backgroundColor: "rgba(239, 68, 68, 0.15)",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={protectionStatusDetails.icon}
+                  size={24}
+                  color={protectionStatusDetails.color}
+                />
+              </View>
+              <View style={styles.statusTextCol}>
+                <Text style={styles.statusTitle}>{protectionStatusDetails.title}</Text>
+                <Text style={styles.statusSub}>{protectionStatusDetails.sub}</Text>
+              </View>
             </View>
-            <View style={styles.statusTextCol}>
-              <Text style={styles.statusTitle}>{protectionStatusDetails.title}</Text>
-              <Text style={styles.statusSub}>{protectionStatusDetails.sub}</Text>
-            </View>
-          </View>
+          </StaggerRevealCard>
 
           {/* 3. Protection Modules (Same vertical flow as mobile) */}
-          <View style={styles.section}>
+          <StaggerRevealCard
+            index={1}
+            baseDelay={60}
+            hasPlayed={hasPlayedProtectionStaggerRef.current}
+            style={styles.section}
+          >
             <Text style={styles.sectionHeading}>PROTECTION MODULES</Text>
 
             {/* Module 1: Payment Protection */}
@@ -480,7 +503,7 @@ export const ProtectionScreen: React.FC = () => {
               <Ionicons name="play-circle-outline" size={16} color={colors.brand} />
               <Text style={styles.tryLiveDemoText}>Try Live Call Demo →</Text>
             </TouchableOpacity>
-          </View>
+          </StaggerRevealCard>
 
           {/* 4. Call / Social Engineering Alert */}
           {activeCallAlert && callProtectionEnabled && (
@@ -540,7 +563,12 @@ export const ProtectionScreen: React.FC = () => {
           )}
 
           {/* 5. Recent Security Alerts */}
-          <View style={styles.section}>
+          <StaggerRevealCard
+            index={2}
+            baseDelay={60}
+            hasPlayed={hasPlayedProtectionStaggerRef.current}
+            style={styles.section}
+          >
             <Text style={styles.sectionHeading}>RECENT SECURITY ALERTS</Text>
 
             <View style={styles.alertsCard}>
@@ -594,7 +622,7 @@ export const ProtectionScreen: React.FC = () => {
                 ))
               )}
             </View>
-          </View>
+          </StaggerRevealCard>
         </ScrollView>
       )}
 
@@ -707,18 +735,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.md,
     backgroundColor: colors.surface,
-    borderRadius: radii.lg,
+    borderRadius: radii.xl,
     padding: spacing.lg,
     marginBottom: spacing.lg,
-    borderWidth: 1,
+    borderWidth: 1.2,
     borderColor: colors.border,
-    ...shadows.sm,
+    ...shadows.lg,
   },
   statusIconBox: {
     width: 44,
     height: 44,
     borderRadius: radii.full,
-    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    backgroundColor: "rgba(23, 107, 91, 0.15)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -752,7 +780,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderLight,
     padding: spacing.lg,
     marginBottom: spacing.sm,
     ...shadows.sm,
@@ -794,13 +822,11 @@ const styles = StyleSheet.create({
   },
   scamCard: {
     backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
+    borderRadius: radii.xl,
+    borderWidth: 1.2,
     borderColor: colors.threatBorder,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.threat,
     padding: spacing.lg,
-    ...shadows.sm,
+    ...shadows.lg,
   },
   scamHeaderRow: {
     flexDirection: "row",

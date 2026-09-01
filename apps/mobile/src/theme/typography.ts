@@ -95,6 +95,19 @@ export const typography: Record<string, TextStyle> = {
     letterSpacing: 0.4,
     textTransform: "uppercase" as const,
   },
+  // Brand title — Cinzel Roman serif typography
+  brandTitle: {
+    fontFamily: Platform.select({
+      web: "Cinzel, 'Cinzel Decorative', Georgia, 'Times New Roman', serif",
+      ios: "Cinzel",
+      android: "Cinzel",
+      default: "Cinzel",
+    }),
+    fontSize: 17,
+    fontWeight: "600",
+    letterSpacing: 4.5,
+    textTransform: "uppercase" as const,
+  },
 };
 
 export type Typography = typeof typography;

@@ -12,11 +12,11 @@ from app.schemas.user import UserCreate
 from app.services.exceptions import UserAlreadyExistsError, UserNotFoundError
 
 
-def create_user(db: Session, payload: UserCreate) -> User:
+def create_user(db: Session, payload: UserCreate, is_verified: bool = True) -> User:
     phone_hash = hash_identifier(payload.phone_number)
     if user_repository.get_user_by_phone_hash(db, phone_hash) is not None:
         raise UserAlreadyExistsError("A user with this phone number already exists.")
-    return user_repository.create_user(db, name=payload.name, phone_hash=phone_hash)
+    return user_repository.create_user(db, name=payload.name, phone_hash=phone_hash, is_verified=is_verified)
 
 
 def get_user(db: Session, user_id: int) -> User:

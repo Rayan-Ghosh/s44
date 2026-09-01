@@ -1,18 +1,22 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Platform,
+  Animated,
+  Easing,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { createBottomTabNavigator, BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../theme/colors";
-import { radii, spacing } from "../theme/layout";
+import { radii, spacing, shadows } from "../theme/layout";
+import { typography } from "../theme/typography";
 import { AlertBadgeProvider, useAlertBadge } from "../context/AlertBadgeContext";
 import { GuardianProvider } from "../context/GuardianContext";
+import { TabTransitionWrapper } from "../components/common/TabTransitionWrapper";
 import { HomeScreen } from "../screens/HomeScreen";
 import { PaymentsScreen } from "../screens/PaymentsScreen";
 import { ProtectionScreen } from "../screens/ProtectionScreen";
@@ -20,6 +24,34 @@ import { TrustedScreen } from "../screens/TrustedScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 
 const Tab = createBottomTabNavigator();
+
+// Thin wrapper components — each wraps the real screen in TabTransitionWrapper
+// so the blur-to-sharp entrance plays on every tab switch.
+const HomeTab = () => (
+  <TabTransitionWrapper>
+    <HomeScreen />
+  </TabTransitionWrapper>
+);
+const PaymentsTab = () => (
+  <TabTransitionWrapper>
+    <PaymentsScreen />
+  </TabTransitionWrapper>
+);
+const ProtectionTab = () => (
+  <TabTransitionWrapper>
+    <ProtectionScreen />
+  </TabTransitionWrapper>
+);
+const TrustedTab = () => (
+  <TabTransitionWrapper>
+    <TrustedScreen />
+  </TabTransitionWrapper>
+);
+const ProfileTab = () => (
+  <TabTransitionWrapper>
+    <ProfileScreen />
+  </TabTransitionWrapper>
+);
 
 interface TabConfig {
   name: string;
@@ -62,17 +94,127 @@ const TAB_CONFIGS: TabConfig[] = [
   },
 ];
 
+interface TabItemProps {
+  route: any;
+  isFocused: boolean;
+  config: TabConfig;
+  badgeCount: number;
+  onPress: () => void;
+  onLongPress: () => void;
+}
+
+const TabItemButton: React.FC<TabItemProps> = ({
+  route,
+  isFocused,
+  config,
+  badgeCount,
+  onPress,
+  onLongPress,
+}) => {
+  const animValue = useRef(new Animated.Value(isFocused ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(animValue, {
+      toValue: isFocused ? 1 : 0,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [isFocused, animValue]);
+
+  const pillOpacity = animValue;
+  const pillScale = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.9, 1],
+  });
+
+  const iconScale = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.08],
+  });
+
+  const iconTranslateY = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -1],
+  });
+
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityState={isFocused ? { selected: true } : {}}
+      accessibilityLabel={config.label}
+      testID={`tab-${route.name.toLowerCase()}`}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      style={styles.tabButton}
+      activeOpacity={0.75}
+    >
+      <View style={styles.pillContainer}>
+        {/* Animated Active Pill Background */}
+        <Animated.View
+          style={[
+            styles.activePillBackground,
+            {
+              opacity: pillOpacity,
+              transform: [{ scale: pillScale }],
+            },
+          ]}
+        />
+
+        <Animated.View
+          style={[
+            styles.iconContainer,
+            {
+              transform: [
+                { scale: iconScale },
+                { translateY: iconTranslateY },
+              ],
+            },
+          ]}
+        >
+          <Ionicons
+            name={isFocused ? config.iconName : config.outlineIconName}
+            size={20}
+            color={isFocused ? colors.brand : colors.textSecondary}
+          />
+          {badgeCount > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{badgeCount}</Text>
+            </View>
+          )}
+        </Animated.View>
+
+        <Text
+          numberOfLines={1}
+          ellipsizeMode="clip"
+          style={[
+            styles.tabText,
+            isFocused ? styles.tabTextFocused : styles.tabTextInactive,
+          ]}
+        >
+          {config.label}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 const CustomBottomTabBar: React.FC<BottomTabBarProps> = ({
   state,
-  descriptors,
   navigation,
 }) => {
   const insets = useSafeAreaInsets();
-  const bottomPadding = Math.max(insets.bottom, Platform.OS === "android" ? 8 : 16);
+  const bottomPadding = Math.max(insets.bottom, Platform.OS === "android" ? 6 : 14);
   const { protectionBadge } = useAlertBadge();
 
   return (
-    <View style={[styles.tabBarContainer, { paddingBottom: bottomPadding }]}>
+    <View
+      style={[
+        styles.tabBarContainer,
+        { paddingBottom: bottomPadding },
+        Platform.OS === "web" ? ({ backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" } as any) : {},
+      ]}
+    >
       <View style={styles.tabBarRow}>
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;
@@ -105,42 +247,15 @@ const CustomBottomTabBar: React.FC<BottomTabBarProps> = ({
           };
 
           return (
-            <TouchableOpacity
+            <TabItemButton
               key={route.key}
-              accessibilityRole="button"
-              accessibilityState={isFocused ? { selected: true } : {}}
-              accessibilityLabel={config.label}
-              testID={`tab-${route.name.toLowerCase()}`}
+              route={route}
+              isFocused={isFocused}
+              config={config}
+              badgeCount={badgeCount}
               onPress={onPress}
               onLongPress={onLongPress}
-              style={styles.tabButton}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.pill, isFocused && styles.pillFocused]}>
-                <View style={styles.iconContainer}>
-                  <Ionicons
-                    name={isFocused ? config.iconName : config.outlineIconName}
-                    size={20}
-                    color={isFocused ? colors.navTextActive : colors.navText}
-                  />
-                  {badgeCount > 0 ? (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{badgeCount}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                <Text
-                  numberOfLines={1}
-                  ellipsizeMode="clip"
-                  style={[
-                    styles.tabText,
-                    isFocused ? styles.tabTextFocused : styles.tabTextInactive,
-                  ]}
-                >
-                  {config.label}
-                </Text>
-              </View>
-            </TouchableOpacity>
+            />
           );
         })}
       </View>
@@ -158,11 +273,11 @@ export const TabNavigator: React.FC = () => {
             headerShown: false,
           }}
         >
-          <Tab.Screen name="Home" component={HomeScreen} />
-          <Tab.Screen name="Payments" component={PaymentsScreen} />
-          <Tab.Screen name="Protection" component={ProtectionScreen} />
-          <Tab.Screen name="Trusted" component={TrustedScreen} />
-          <Tab.Screen name="Profile" component={ProfileScreen} />
+          <Tab.Screen name="Home" component={HomeTab} />
+          <Tab.Screen name="Payments" component={PaymentsTab} />
+          <Tab.Screen name="Protection" component={ProtectionTab} />
+          <Tab.Screen name="Trusted" component={TrustedTab} />
+          <Tab.Screen name="Profile" component={ProfileTab} />
         </Tab.Navigator>
       </AlertBadgeProvider>
     </GuardianProvider>
@@ -171,43 +286,55 @@ export const TabNavigator: React.FC = () => {
 
 const styles = StyleSheet.create({
   tabBarContainer: {
-    backgroundColor: colors.navBackground,
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(243, 242, 239, 0.78)",
     borderTopWidth: 1,
-    borderTopColor: colors.navBorder,
+    borderTopColor: "rgba(217, 216, 211, 0.65)",
     paddingTop: 6,
-    elevation: 4,
+    elevation: 10,
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: -1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    zIndex: 100,
   },
   tabBarRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
     width: "100%",
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
   },
   tabButton: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 2,
-    minHeight: 48,
+    minHeight: 50,
   },
-  pill: {
+  pillContainer: {
+    position: "relative",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 6,
+    paddingVertical: 5,
     paddingHorizontal: 12,
-    borderRadius: radii.md,
-    minWidth: 72,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
+    borderRadius: radii.full,
+    minWidth: 64,
   },
-  pillFocused: {
-    backgroundColor: colors.navActiveSurface,
-    borderBottomColor: colors.navIndicator,
+  activePillBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#FFFFFF",
+    borderRadius: radii.full,
+    borderWidth: 1,
+    borderColor: "rgba(23, 107, 91, 0.16)",
+    ...shadows.sm,
   },
   iconContainer: {
     position: "relative",
@@ -216,18 +343,20 @@ const styles = StyleSheet.create({
     height: 22,
   },
   tabText: {
-    fontSize: 11,
-    fontWeight: "700",
+    ...typography.caption,
+    fontSize: 10,
     marginTop: 2,
-    letterSpacing: 0.1,
+    letterSpacing: 0.2,
     textAlign: "center",
     includeFontPadding: false,
   },
   tabTextFocused: {
-    color: colors.navTextActive,
+    color: colors.textPrimary,
+    fontWeight: "800",
   },
   tabTextInactive: {
-    color: colors.navText,
+    color: colors.textSecondary,
+    fontWeight: "500",
   },
   badge: {
     position: "absolute",

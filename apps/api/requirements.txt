@@ -1,9 +1,11 @@
-# S40 backend — minimal development scaffold dependencies.
+# S40 backend — core FastAPI/DB dependencies.
 #
-# Deliberately minimal (see docs/DEVELOPMENT_PLAN.md Phase 1/2). No ML,
-# voice, or auth libraries here — those belong to later phases per
-# CLAUDE.md. Versions below are the ones actually installed and verified
-# for this scaffold (see README.md "Verified" note).
+# The risk API (app/api/routers/risk.py) imports ml.inference.predict at
+# module load time, so a fresh install also REQUIRES ml/requirements.txt —
+# see README.md "Getting started". Not merged into this file to keep the
+# backend/ML dependency boundary explicit (per CLAUDE.md's layering rule).
+# Versions below are the ones actually installed and verified for this
+# scaffold (see README.md "Verified" note).
 
 fastapi==0.141.1
 uvicorn[standard]==0.52.3

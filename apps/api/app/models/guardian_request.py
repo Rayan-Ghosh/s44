@@ -36,6 +36,7 @@ class GuardianRequest(Base):
     )
     resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     resolution_channel: Mapped[str] = mapped_column(String(50), nullable=False, default="WEB_CONSOLE")
+    integrity_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     transaction: Mapped["Transaction"] = relationship(back_populates="guardian_requests")
     trusted_contact: Mapped["TrustedContact"] = relationship(back_populates="guardian_requests")

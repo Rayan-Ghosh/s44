@@ -198,8 +198,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.threatBorder,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.threat,
     padding: spacing.lg,
     marginBottom: spacing.lg,
     ...shadows.md,

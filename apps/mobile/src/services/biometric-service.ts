@@ -1,4 +1,5 @@
 import * as LocalAuthentication from "expo-local-authentication";
+import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
 export type BiometricAuthType = "face" | "fingerprint" | "iris" | "passcode" | "unknown";
@@ -19,9 +20,44 @@ export interface BiometricAuthResult {
   isFallback?: boolean;
 }
 
+// Configurable background inactivity threshold: 2 minutes
+export const BIOMETRIC_INACTIVITY_THRESHOLD_MS = 2 * 60 * 1000;
+
+const BIOMETRIC_STORAGE_KEY = "avaran_biometrics_app_lock_enabled";
+
+/**
+ * Storage helpers for Biometric Lock preference.
+ * Persists only the boolean setting. Never stores biometric credentials.
+ */
+export const getStoredBiometricPreference = async (): Promise<boolean> => {
+  try {
+    const val = await SecureStore.getItemAsync(BIOMETRIC_STORAGE_KEY);
+    if (val !== null) {
+      return val === "true";
+    }
+  } catch {
+    if (typeof localStorage !== "undefined") {
+      const val = localStorage.getItem(BIOMETRIC_STORAGE_KEY);
+      if (val !== null) return val === "true";
+    }
+  }
+  return true; // Default enabled
+};
+
+export const setStoredBiometricPreference = async (enabled: boolean): Promise<void> => {
+  try {
+    await SecureStore.setItemAsync(BIOMETRIC_STORAGE_KEY, enabled ? "true" : "false");
+  } catch {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(BIOMETRIC_STORAGE_KEY, enabled ? "true" : "false");
+    }
+  }
+};
+
 export class BiometricService {
   /**
-   * Evaluates the device's biometric capabilities and enrollment status.
+   * Evaluates the device's native biometric capabilities and enrollment status.
+   * Avaran never processes or accesses raw biometric templates.
    */
   static async checkStatus(): Promise<BiometricStatus> {
     try {
@@ -69,7 +105,7 @@ export class BiometricService {
         displayName = "Iris Scanner";
         iconName = "eye-outline";
       } else if (primaryType === "passcode") {
-        displayName = "Device PIN / Passcode";
+        displayName = "Device Passcode";
         iconName = "keypad-outline";
       }
 
@@ -81,7 +117,7 @@ export class BiometricService {
         displayName,
         iconName,
       };
-    } catch (err) {
+    } catch {
       return {
         hasHardware: false,
         isEnrolled: false,
@@ -94,7 +130,8 @@ export class BiometricService {
   }
 
   /**
-   * Prompts user for biometric authentication to unlock Avaran.
+   * Prompts user for native biometric authentication.
+   * Operating system returns only the success/failure result.
    */
   static async authenticate(
     promptMessage: string = "Authenticate with Biometrics to unlock Avaran Fraud Shield"
@@ -102,19 +139,19 @@ export class BiometricService {
     try {
       const status = await this.checkStatus();
 
-      // On Web or environments without native enrollment, provide deterministic local verification
+      // On Web or environments without native biometric hardware, provide deterministic local verification
       if (Platform.OS === "web" || !status.hasHardware || !status.isEnrolled) {
         return {
           success: true,
           isFallback: true,
-          warning: "Verified using local device security context.",
+          warning: "Verified using device security context.",
         };
       }
 
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage,
         cancelLabel: "Cancel",
-        fallbackLabel: "Use Passcode",
+        fallbackLabel: "Use Device Passcode",
         disableDeviceFallback: false,
       });
 
@@ -122,14 +159,23 @@ export class BiometricService {
         return { success: true };
       }
 
+      let errorMsg = "Authentication failed. Please try again.";
+      if (result.error === "user_cancel" || result.error === "app_cancel") {
+        errorMsg = "Authentication cancelled.";
+      } else if (result.error === "not_enrolled") {
+        errorMsg = "No biometric credentials enrolled on this device.";
+      } else if (result.error === "lockout") {
+        errorMsg = "Too many failed attempts. Please unlock with device passcode.";
+      }
+
       return {
         success: false,
-        error: result.error === "user_cancel" ? "Authentication cancelled by user." : result.error || "Authentication failed.",
+        error: errorMsg,
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error?.message || "Biometric authentication failed.",
+        error: error?.message || "Biometric authentication unavailable.",
       };
     }
   }

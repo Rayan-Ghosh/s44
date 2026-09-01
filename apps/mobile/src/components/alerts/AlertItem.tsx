@@ -85,10 +85,8 @@ const styles = StyleSheet.create({
     marginVertical: spacing.xs,
   },
   highContainer: {
-    borderColor: colors.border,
+    borderColor: colors.threatBorder,
     backgroundColor: colors.surface,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.threat,
   },
   topRow: {
     flexDirection: "row",

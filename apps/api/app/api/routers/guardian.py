@@ -90,6 +90,8 @@ def list_pending_requests(trusted_contact_id: int, db: Session = Depends(get_db)
     now = datetime.now(timezone.utc)
     for req in reqs:
         rem = max(0, int((req.expires_at.replace(tzinfo=timezone.utc) - now).total_seconds())) if req.expires_at.tzinfo is None else max(0, int((req.expires_at - now).total_seconds()))
+        if rem <= 0:
+            continue
         txn = req.transaction
         risk = risk_repository.get_latest_risk_score(db, txn.id) if txn else None
         results.append(GuardianRequestRead(
@@ -147,6 +149,22 @@ def approve_guardian_request(request_id: int, payload: Optional[GuardianActionRe
 
     notes = payload.notes if payload else "Approved by trusted contact"
     guardian_repository.resolve_guardian_request(db, request_id, GuardianOutcome.APPROVED, notes)
+
+    # Compute and bind transaction integrity hash at moment of Guardian approval
+    from app.services.security_audit_service import SecurityAuditService
+    from app.services.transaction_integrity_service import TransactionIntegrityService
+    if req.transaction:
+        g_hash = TransactionIntegrityService.compute_integrity_hash(req.transaction)
+        req.integrity_hash = g_hash
+        req.transaction.guardian_integrity_hash = g_hash
+        db.commit()
+
+    SecurityAuditService.log_event(
+        "GUARDIAN_APPROVED",
+        transaction_id=req.transaction_id,
+        details={"trusted_contact_id": req.trusted_contact_id},
+    )
+
     transaction_repository.update_transaction_status(db, req.transaction_id, TransactionStatus.GUARDIAN_APPROVED)
     return {"request_id": request_id, "outcome": GuardianOutcome.APPROVED.value, "message": "Transaction approved by family guardian."}
 
@@ -159,6 +177,14 @@ def reject_guardian_request(request_id: int, payload: Optional[GuardianActionReq
 
     notes = payload.notes if payload else "Rejected by trusted contact due to fraud risk"
     guardian_repository.resolve_guardian_request(db, request_id, GuardianOutcome.REJECTED, notes)
+
+    from app.services.security_audit_service import SecurityAuditService
+    SecurityAuditService.log_event(
+        "GUARDIAN_REJECTED",
+        transaction_id=req.transaction_id,
+        details={"trusted_contact_id": req.trusted_contact_id},
+    )
+
     transaction_repository.update_transaction_status(db, req.transaction_id, TransactionStatus.GUARDIAN_REJECTED)
     return {"request_id": request_id, "outcome": GuardianOutcome.REJECTED.value, "message": "Transaction blocked and cancelled by guardian."}
 

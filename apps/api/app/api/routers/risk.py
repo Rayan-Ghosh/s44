@@ -2,6 +2,7 @@
 /api/v1/risk — Authoritative real-time risk scoring endpoint powered by MLPredictor.
 """
 
+import logging
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from app.models.enums import AlertStatus, RiskDecision, RiskLevel, TransactionSt
 from app.repositories import risk_repository, transaction_repository
 from app.schemas.risk import RiskEvaluationRequest, RiskScoreRead
 from ml.inference.predict import get_predictor
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/risk", tags=["risk"])
 
@@ -59,7 +62,16 @@ def evaluate_risk(payload: dict, db: Session = Depends(get_db)) -> dict:
         # Direct raw transaction inference
         inference_input = payload if "transaction" in payload else {"transaction": payload, "user_profile": payload.get("user_profile", {})}
 
-    decision_package = predictor.predict(inference_input)
+    try:
+        decision_package = predictor.predict(inference_input)
+    except Exception:
+        logger.exception(
+            "ML risk scoring failed for transaction_id=%s", txn.id if txn else txn_id
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Risk scoring is temporarily unavailable. Please try again.",
+        )
 
     # Map decision package to DB enums
     level_map = {"LOW": RiskLevel.LOW, "MEDIUM": RiskLevel.MEDIUM, "HIGH": RiskLevel.HIGH}
@@ -95,6 +107,20 @@ def evaluate_risk(payload: dict, db: Session = Depends(get_db)) -> dict:
             risk_factors=factors_to_save,
         )
 
+        # Update transaction status and authorization flags based on risk level
+        if r_level == RiskLevel.HIGH:
+            txn.authorization_required = True
+            txn.authorization_status = "PENDING"
+            txn.status = TransactionStatus.PENDING_AUTHORIZATION
+        elif r_level == RiskLevel.LOW and txn.status == TransactionStatus.PENDING:
+            txn.authorization_required = False
+            txn.authorization_status = "NONE"
+            txn.status = TransactionStatus.ALLOWED
+        elif r_level == RiskLevel.MEDIUM and txn.status == TransactionStatus.PENDING:
+            txn.authorization_required = False
+            txn.authorization_status = "NONE"
+            txn.status = TransactionStatus.AWAITING_CONFIRMATION
+
         # If HIGH or MEDIUM, create an Alert for analyst console
         if r_level in (RiskLevel.HIGH, RiskLevel.MEDIUM):
             alert = Alert(
@@ -105,7 +131,7 @@ def evaluate_risk(payload: dict, db: Session = Depends(get_db)) -> dict:
                 status=AlertStatus.OPEN,
             )
             db.add(alert)
-            db.commit()
+        db.commit()
 
     return decision_package
 

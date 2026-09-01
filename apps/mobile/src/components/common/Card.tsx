@@ -32,33 +32,25 @@ export const Card: React.FC<CardProps> = ({
       case "threat":
         return {
           backgroundColor: colors.surface,
-          borderColor: colors.border,
-          borderLeftWidth: 3,
-          borderLeftColor: colors.threat,
+          borderColor: colors.threatBorder,
           ...shadows.sm,
         };
       case "caution":
         return {
           backgroundColor: colors.surface,
-          borderColor: colors.border,
-          borderLeftWidth: 3,
-          borderLeftColor: colors.caution,
+          borderColor: colors.cautionBorder,
           ...shadows.sm,
         };
       case "safe":
         return {
           backgroundColor: colors.surface,
-          borderColor: colors.border,
-          borderLeftWidth: 3,
-          borderLeftColor: colors.safe,
+          borderColor: colors.safeBorder,
           ...shadows.sm,
         };
       case "brand":
         return {
           backgroundColor: colors.surface,
-          borderColor: colors.border,
-          borderLeftWidth: 3,
-          borderLeftColor: colors.brand,
+          borderColor: colors.brandBorder,
           ...shadows.sm,
         };
       case "default":

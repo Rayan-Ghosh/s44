@@ -8,7 +8,7 @@ controlled phases per CLAUDE.md. Schema is owned by Alembic
 (apps/api/alembic/) — this module does not create tables itself.
 """
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -18,6 +18,32 @@ from app.core.config import settings
 from app.core.database import get_db
 
 app = FastAPI(title=settings.app_name)
+
+@app.middleware("http")
+async def security_headers_and_https_middleware(request: Request, call_next):
+    # Enforce HTTPS when enabled
+    if settings.enforce_https:
+        client_host = request.client.host if request.client else ""
+        is_trusted_proxy = client_host in settings.trusted_proxy_ips
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme) if is_trusted_proxy else request.url.scheme
+        
+        # In production, if request is insecure and not health check, enforce secure transport
+        if proto.lower() != "https" and request.url.path not in ("/health", "/api/v1/health"):
+            return Response(
+                content="HTTPS connection required for secure production API access.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                media_type="text/plain",
+            )
+
+    response = await call_next(request)
+    
+    # Inject enterprise security headers
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 app.add_middleware(
     CORSMiddleware,

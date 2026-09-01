@@ -34,6 +34,11 @@ EXPECTED_TABLES = {
     "trusted_contacts",
     "guardian_requests",
     "user_contact_info",
+    "otp_verifications",
+    "user_sessions",
+    "trusted_device_bindings",
+    "auth_rate_limits",
+    "password_reset_authorizations",
 }
 
 

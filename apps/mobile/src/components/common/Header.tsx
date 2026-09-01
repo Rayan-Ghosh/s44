@@ -141,10 +141,12 @@ const styles = StyleSheet.create({
     borderColor: colors.borderLight,
   },
   brandTitle: {
-    fontSize: 16,
-    fontWeight: "800",
+    fontFamily: typography.brandTitle.fontFamily,
+    fontSize: 16.5,
+    fontWeight: "600",
     color: colors.textPrimary,
-    letterSpacing: 1.5,
+    letterSpacing: 4.5,
+    textTransform: "uppercase",
   },
   screenTitle: {
     fontSize: 15,

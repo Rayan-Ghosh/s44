@@ -71,10 +71,8 @@ const styles = StyleSheet.create({
     marginVertical: spacing.xs,
   },
   highCard: {
-    borderColor: colors.border,
+    borderColor: colors.threatBorder,
     backgroundColor: colors.surface,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.threat,
   },
   topRow: {
     flexDirection: "row",

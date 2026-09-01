@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 
 
-def create_user(db: Session, *, name: str, phone_hash: str) -> User:
-    user = User(name=name, phone_hash=phone_hash)
+def create_user(db: Session, *, name: str, phone_hash: str, is_verified: bool = True) -> User:
+    user = User(name=name, phone_hash=phone_hash, is_verified=is_verified)
     db.add(user)
     db.commit()
     db.refresh(user)

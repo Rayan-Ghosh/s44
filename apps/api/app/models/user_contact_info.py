@@ -31,6 +31,7 @@ class UserContactInfo(Base):
     )
     email_encrypted: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     phone_encrypted: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),

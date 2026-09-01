@@ -1,9 +1,9 @@
 import React from "react";
-import { View, Image, Text, StyleSheet, ViewStyle } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { View, Text, StyleSheet, ViewStyle } from "react-native";
 import { colors } from "../../theme/colors";
 import { typography } from "../../theme/typography";
-import { spacing, radii } from "../../theme/layout";
+import { spacing } from "../../theme/layout";
+import { AvaranSvgIcon } from "./AvaranSvgIcon";
 
 interface AvaranLogoProps {
   size?: "sm" | "md" | "lg" | "hero";
@@ -21,26 +21,18 @@ export const AvaranLogo: React.FC<AvaranLogoProps> = ({
   const getDims = () => {
     switch (size) {
       case "sm":
-        return { box: 32, iconSize: 18, titleSize: 14, subSize: 9 };
+        return { box: 34, iconSize: 22, titleSize: 14, subSize: 9 };
       case "lg":
-        return { box: 56, iconSize: 28, titleSize: 20, subSize: 11 };
+        return { box: 56, iconSize: 36, titleSize: 20, subSize: 11 };
       case "hero":
-        return { box: 72, iconSize: 36, titleSize: 26, subSize: 12 };
+        return { box: 72, iconSize: 48, titleSize: 26, subSize: 12 };
       case "md":
       default:
-        return { box: 44, iconSize: 22, titleSize: 17, subSize: 10 };
+        return { box: 44, iconSize: 28, titleSize: 17, subSize: 10 };
     }
   };
 
   const dims = getDims();
-  let hasImage = false;
-
-  try {
-    require("../../../assets/icon.png");
-    hasImage = true;
-  } catch {
-    hasImage = false;
-  }
 
   return (
     <View style={[styles.container, style]}>
@@ -54,15 +46,7 @@ export const AvaranLogo: React.FC<AvaranLogoProps> = ({
           },
         ]}
       >
-        {hasImage ? (
-          <Image
-            source={require("../../../assets/icon.png")}
-            style={styles.logoImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <Ionicons name="shield-checkmark" size={dims.iconSize} color={colors.brand} />
-        )}
+        <AvaranSvgIcon size={dims.iconSize} color={colors.textPrimary} />
       </View>
 
       {showText && (
@@ -92,18 +76,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  logoImage: {
-    width: "100%",
-    height: "100%",
-  },
   textCol: {
     marginLeft: spacing.sm,
     justifyContent: "center",
   },
   brandTitle: {
-    fontWeight: "800",
+    fontFamily: typography.brandTitle.fontFamily,
+    fontWeight: "600",
     color: colors.textPrimary,
-    letterSpacing: 1.2,
+    letterSpacing: 4.5,
+    textTransform: "uppercase",
   },
   brandTagline: {
     ...typography.caption,

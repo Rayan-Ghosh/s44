@@ -78,6 +78,40 @@ function useSmoothScroll() {
 
 const within = (v: number, [a, b]: Range) => v >= a && v <= b
 
+/**
+ * Scrolls to a fraction `t` of the page's scrollable height, driven by our
+ * own rAF loop rather than the native `scrollTo({ behavior: "smooth" })` /
+ * CSS `scroll-behavior: smooth`. Native smooth-scroll depends on the
+ * browser's compositor actually ticking frames for this document, which is
+ * not guaranteed in every environment (e.g. a backgrounded or automated
+ * tab) — when it doesn't, `scrollTo({ behavior: "smooth" })` silently never
+ * moves the page at all, not just without animation. A self-driven
+ * interpolation over `window.scrollTo(x, y)` (no behavior option, always
+ * synchronous) works everywhere `useSmoothScroll` already does, and shares
+ * its reduced-motion handling.
+ */
+function scrollToFraction(t: number) {
+  const max = document.documentElement.scrollHeight - window.innerHeight
+  const target = Math.max(0, Math.min(max, max * t))
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  if (reduced) {
+    window.scrollTo(0, target)
+    return
+  }
+  const start = window.scrollY
+  const distance = target - start
+  const duration = 700
+  const startTime = performance.now()
+  const easeOutCubic = (x: number) => 1 - Math.pow(1 - x, 3)
+  function step(now: number) {
+    const elapsed = now - startTime
+    const p = Math.min(1, elapsed / duration)
+    window.scrollTo(0, start + distance * easeOutCubic(p))
+    if (p < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
 /* ── shared building blocks ─────────────────────────────────────────────── */
 
 function Section({
@@ -352,11 +386,16 @@ const NAV = [
   { label: "Limits", at: 0.876 },
 ]
 
+const NAV_ANCHOR: Record<string, string> = {
+  Signals: "#signals",
+  Held: "#held",
+  Limits: "#limits",
+}
+
 function Header() {
   const go = (t: number) => (e: React.MouseEvent) => {
     e.preventDefault()
-    const max = document.documentElement.scrollHeight - window.innerHeight
-    window.scrollTo({ top: max * t, behavior: "smooth" })
+    scrollToFraction(t)
   }
   return (
     <header className="chrome-header">
@@ -369,11 +408,11 @@ function Header() {
         {NAV.map((n, i) => (
           <React.Fragment key={n.label}>
             {i > 0 ? <span className="nav-dot" aria-hidden /> : null}
-            <a href="#" className="nav-link" onClick={go(n.at)}>{n.label}</a>
+            <a href={NAV_ANCHOR[n.label]} className="nav-link" onClick={go(n.at)}>{n.label}</a>
           </React.Fragment>
         ))}
       </nav>
-      <a href="#" className="cta-pill" onClick={go(0.565)}>
+      <a href="#held" className="cta-pill" onClick={go(0.565)}>
         See a held payment
       </a>
     </header>
@@ -432,13 +471,11 @@ export function Narrative() {
           <div className="cta-row">
             <a href="#held" className="btn btn--solid" onClick={(e) => {
               e.preventDefault()
-              const max = document.documentElement.scrollHeight - window.innerHeight
-              window.scrollTo({ top: max * 0.565, behavior: "smooth" })
+              scrollToFraction(0.565)
             }}>See a held payment</a>
             <a href="#signals" className="btn btn--ghost" onClick={(e) => {
               e.preventDefault()
-              const max = document.documentElement.scrollHeight - window.innerHeight
-              window.scrollTo({ top: max * 0.1, behavior: "smooth" })
+              scrollToFraction(0.1)
             }}>Read the four signals</a>
           </div>
         </Section>
@@ -643,10 +680,9 @@ export function Narrative() {
             <a href="#" className="btn btn--solid" onClick={(e) => e.preventDefault()}>
               Add Avaran to your payments
             </a>
-            <a href="#" className="btn btn--ghost" onClick={(e) => {
+            <a href="#signals" className="btn btn--ghost" onClick={(e) => {
               e.preventDefault()
-              const max = document.documentElement.scrollHeight - window.innerHeight
-              window.scrollTo({ top: max * 0.1, behavior: "smooth" })
+              scrollToFraction(0.1)
             }}>See the four signals again</a>
           </div>
         </Section>

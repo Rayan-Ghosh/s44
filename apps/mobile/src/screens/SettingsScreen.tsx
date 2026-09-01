@@ -11,16 +11,25 @@ import { StatusBadge } from "../components/common/StatusBadge";
 import { useSecurity } from "../context/SecurityContext";
 import { useBiometrics } from "../context/BiometricContext";
 import { useAppHealth } from "../context/AppHealthContext";
+import { SetupAppPinModal } from "../components/security/SetupAppPinModal";
 
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { protectionActive, toggleProtection, resetDemo } = useSecurity();
-  const { isBiometricsEnabled, setBiometricsEnabled, biometricStatus } = useBiometrics();
+  const { isBiometricsEnabled, setBiometricsEnabled, isPinConfigured, biometricStatus } = useBiometrics();
   const { metrics, simulateFreeze } = useAppHealth();
 
+  const [showPinModal, setShowPinModal] = useState<boolean>(false);
   const [callMonitorEnabled, setCallMonitorEnabled] = useState<boolean>(true);
   const [upiGuardEnabled, setUpiGuardEnabled] = useState<boolean>(true);
   const [pushNotifsEnabled, setPushNotifsEnabled] = useState<boolean>(true);
+
+  const handleBiometricsToggle = async (value: boolean) => {
+    const res = await setBiometricsEnabled(value);
+    if (!res.success) {
+      Alert.alert("Authentication Required", res.error || "Biometric authentication required to change setting.");
+    }
+  };
 
   const handleReset = () => {
     resetDemo();
@@ -83,7 +92,7 @@ export const SettingsScreen: React.FC = () => {
               />
             </View>
 
-            <View style={styles.rowNoBorder}>
+            <View style={styles.row}>
               <View style={styles.rowInfo}>
                 <Text style={styles.rowTitle}>Biometric Launch Lock</Text>
                 <Text style={styles.rowSubtitle}>
@@ -92,11 +101,30 @@ export const SettingsScreen: React.FC = () => {
               </View>
               <Switch
                 value={isBiometricsEnabled}
-                onValueChange={setBiometricsEnabled}
+                onValueChange={handleBiometricsToggle}
                 trackColor={{ false: colors.borderLight, true: colors.safeSurface }}
                 thumbColor={isBiometricsEnabled ? colors.safe : colors.textMuted}
               />
             </View>
+
+            <TouchableOpacity
+              style={styles.rowNoBorder}
+              onPress={() => setShowPinModal(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>6-Digit App PIN Fallback</Text>
+                <Text style={styles.rowSubtitle}>
+                  {isPinConfigured ? "Configured • Tap to change" : "Not configured • Tap to set up"}
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={{ ...typography.caption, color: isPinConfigured ? colors.safe : colors.brand, fontWeight: "600" }}>
+                  {isPinConfigured ? "Active" : "Set Up"}
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </View>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -218,6 +246,11 @@ export const SettingsScreen: React.FC = () => {
           </View>
         </View>
       </ScrollView>
+
+      <SetupAppPinModal
+        visible={showPinModal}
+        onClose={() => setShowPinModal(false)}
+      />
     </View>
   );
 };

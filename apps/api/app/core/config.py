@@ -36,11 +36,16 @@ class Settings(BaseSettings):
     # not decided or implemented here.
     database_url: str = f"sqlite:///{BASE_DIR / 'Avaran.db'}"
 
+    # General Application Secret
+    secret_key: str = "s40-dev-general-secret-key-change-me"
+
     # Prototype-only pepper for hashing sensitive identifiers (see
     # app/core/security.py). The default below is intentionally obvious
     # and MUST be overridden via .env for anything beyond local dev — see
     # docs/SECURITY.md's open item on hashing/key management.
     hash_pepper: str = "s40-dev-only-pepper-change-me"
+    integrity_secret_pepper: str = "avaran-integrity-hmac-pepper-2026"
+    transaction_integrity_key: str = "avaran-dedicated-txn-integrity-key-dev-only"
 
     # Symmetric key for app/core/contact_encryption.py (Fernet). Guards the
     # one place raw, reversible contact info (email/phone) is allowed to
@@ -51,5 +56,93 @@ class Settings(BaseSettings):
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     contact_info_encryption_key: str = "_SiZeLTNC9qRCBhjjnil3lbCAYqQYDheLL-DYZ0fq1g="
 
+    # OTP Delivery Configuration
+    # Options: "mock" (default in-memory test/dev), "console" (stdout logger), "none"
+    # Live integrations (e.g. "twilio", "sendgrid") can be plugged in when configured.
+    otp_delivery_provider: str = "mock"
+    enable_dev_otp_inspection: bool = True
+
+    # HTTPS & Proxy Configuration
+    enforce_https: bool = False
+    trusted_proxy_ips: list[str] = ["127.0.0.1", "::1"]
+
+    # Session Security & Expiration
+    session_absolute_expiry_days: int = 30
+    session_inactivity_expiry_hours: int = 72
+
+    # Rate Limiting & Brute-Force Protection
+    auth_max_failed_attempts: int = 5
+    auth_attempt_window_seconds: int = 900  # 15 minutes
+    auth_base_lockout_seconds: int = 900    # 15 minutes
+    auth_progressive_lockout_multiplier: int = 2
+    auth_max_lockout_seconds: int = 86400   # 24 hours max
+    auth_abuse_history_reset_days: int = 7  # 7 days of good behavior resets progressive multiplier
+    auth_ip_max_attempts: int = 30          # 30 failed attempts / 15 min per IP across accounts
+    auth_signup_ip_max_per_hour: int = 10   # 10 signups / hour per IP
+    auth_otp_verify_ip_max_per_hour: int = 25
+    auth_otp_resend_ip_max_per_hour: int = 15
+    auth_transfer_request_ip_max_per_hour: int = 10
+    auth_password_reset_token_expiry_minutes: int = 15
+    auth_password_reset_ip_max_per_hour: int = 10
+
+
+INSECURE_DEV_SECRETS = {
+    "s40-dev-only-pepper-change-me",
+    "s40-dev-general-secret-key-change-me",
+    "avaran-dedicated-txn-integrity-key-dev-only",
+    "avaran-integrity-hmac-pepper-2026",
+    "_SiZeLTNC9qRCBhjjnil3lbCAYqQYDheLL-DYZ0fq1g=",
+}
+
+
+def validate_production_configuration(cfg: Settings) -> None:
+    """
+    Centralized startup validation for production environments.
+    Guarantees production does not start with default, empty, or insecure development secrets.
+    """
+    if cfg.environment.lower() == "production":
+        # 1. Secret Key
+        if not cfg.secret_key or cfg.secret_key in INSECURE_DEV_SECRETS or len(cfg.secret_key) < 32:
+            raise ValueError(
+                "Production configuration error: SECRET_KEY is missing, using a development default, or too short. "
+                "Production startup aborted for security."
+            )
+
+        # 2. Dedicated Transaction Integrity Key
+        if (
+            not cfg.transaction_integrity_key
+            or cfg.transaction_integrity_key in INSECURE_DEV_SECRETS
+            or len(cfg.transaction_integrity_key) < 32
+        ):
+            raise ValueError(
+                "Production configuration error: TRANSACTION_INTEGRITY_KEY is missing, using a development default, or too short. "
+                "Production startup aborted for security."
+            )
+
+        # 3. Pepper & Encryption Key
+        if not cfg.hash_pepper or cfg.hash_pepper in INSECURE_DEV_SECRETS:
+            raise ValueError(
+                "Production configuration error: HASH_PEPPER must be set to a secure unique production value."
+            )
+
+        if not cfg.contact_info_encryption_key or cfg.contact_info_encryption_key in INSECURE_DEV_SECRETS:
+            raise ValueError(
+                "Production configuration error: CONTACT_INFO_ENCRYPTION_KEY must be a valid unique Fernet key in production."
+            )
+
+        # 4. OTP Provider Safety in Production
+        if cfg.otp_delivery_provider in ("mock", "console", "none"):
+            raise ValueError(
+                "Production configuration error: Production requires a live verified OTP delivery provider. "
+                "Mock and console delivery modes are forbidden in production."
+            )
+
+        if cfg.enable_dev_otp_inspection:
+            raise ValueError(
+                "Production configuration error: enable_dev_otp_inspection must be set to False in production."
+            )
+
 
 settings = Settings()
+validate_production_configuration(settings)
+

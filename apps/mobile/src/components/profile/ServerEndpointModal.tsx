@@ -292,8 +292,16 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     color: colors.textPrimary,
+    backgroundColor: "transparent",
     ...typography.body,
     fontSize: 13,
+    ...(Platform.OS === "web"
+      ? ({
+          outlineStyle: "none",
+          outlineWidth: 0,
+          backgroundColor: "transparent",
+        } as any)
+      : {}),
   },
   presetHeading: {
     ...typography.caption,

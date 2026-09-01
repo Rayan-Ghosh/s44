@@ -539,12 +539,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   badgePillReady: {
-    backgroundColor: colors.safeSurface,
-    borderColor: colors.safeBorder,
+    backgroundColor: colors.safe,
+    borderColor: colors.safeDark,
   },
   badgePillDisabled: {
-    backgroundColor: colors.cautionSurface,
-    borderColor: colors.cautionBorder,
+    backgroundColor: colors.caution,
+    borderColor: colors.caution,
   },
   badgePillOffline: {
     backgroundColor: colors.surfaceSecondary,
@@ -556,10 +556,10 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   badgeDotReady: {
-    backgroundColor: colors.safe,
+    backgroundColor: colors.textInverse,
   },
   badgeDotDisabled: {
-    backgroundColor: colors.caution,
+    backgroundColor: colors.textInverse,
   },
   badgeDotOffline: {
     backgroundColor: colors.textMuted,
@@ -570,10 +570,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   badgeTextReady: {
-    color: colors.safeText,
+    color: colors.textInverse,
   },
   badgeTextDisabled: {
-    color: colors.cautionText,
+    color: colors.textInverse,
   },
   badgeTextOffline: {
     color: colors.textMuted,

@@ -20,10 +20,10 @@ export const RiskScoreBadge: React.FC<RiskScoreBadgeProps> = ({
   const isMedium = level === "MEDIUM";
 
   const theme = isHigh
-    ? { bg: colors.threatSurface, border: colors.threatBorder, text: colors.threatText, main: colors.threat }
+    ? { bg: colors.threat, border: colors.threat, text: colors.textInverse, main: colors.threat }
     : isMedium
-    ? { bg: colors.cautionSurface, border: colors.cautionBorder, text: colors.cautionText, main: colors.caution }
-    : { bg: colors.safeSurface, border: colors.safeBorder, text: colors.safeText, main: colors.safe };
+    ? { bg: colors.caution, border: colors.caution, text: colors.textInverse, main: colors.caution }
+    : { bg: colors.safe, border: colors.safeDark, text: colors.textInverse, main: colors.safe };
 
   if (size === "lg") {
     return (

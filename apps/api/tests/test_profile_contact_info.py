@@ -19,7 +19,19 @@ def _signup(mobile: str) -> int:
         json={"fullName": "Contact Info Test User", "mobileNumber": mobile, "email": ""},
     )
     assert res.status_code in (200, 201)
-    return res.json()["user"]["id"]
+    data = res.json()
+    user_id = data.get("userId") or data["user"]["id"]
+    from app.core.database import SessionLocal
+    from app.models.user import User
+    db = SessionLocal()
+    try:
+        u = db.get(User, user_id)
+        if u:
+            u.is_verified = True
+            db.commit()
+    finally:
+        db.close()
+    return user_id
 
 
 def test_encrypt_decrypt_round_trip():

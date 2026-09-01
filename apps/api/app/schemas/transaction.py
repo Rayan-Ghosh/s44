@@ -44,3 +44,7 @@ class TransactionRead(BaseModel):
     location: Optional[str]
     payment_method: Optional[str]
     status: TransactionStatus
+    authorization_required: bool = False
+    authorization_status: Optional[str] = "NONE"
+    authorized_at: Optional[datetime] = None
+    authorization_method: Optional[str] = None

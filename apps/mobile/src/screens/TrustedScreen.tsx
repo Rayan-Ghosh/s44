@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -12,8 +12,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   Switch,
+  Modal,
+  Animated,
+  Easing,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useIsFocused } from "@react-navigation/native";
+import { StaggerRevealCard } from "../components/common/StaggerRevealCard";
 import { colors } from "../theme/colors";
 import { typography } from "../theme/typography";
 import { spacing, radii, shadows } from "../theme/layout";
@@ -21,6 +26,7 @@ import { Header } from "../components/common/Header";
 import { Button } from "../components/common/Button";
 import { TextInput } from "../components/common/TextInput";
 import { useAuth } from "../context/AuthContext";
+import { useBiometrics } from "../context/BiometricContext";
 import { useGuardian } from "../context/GuardianContext";
 import { TrustedContact } from "../types/guardian";
 import { GuardianApprovalCard } from "../components/guardian/GuardianApprovalCard";
@@ -234,6 +240,7 @@ const ContactCard: React.FC<ContactCardProps> = ({ contact, onRemove }) => {
 // ---------------------------------------------------------------------------
 export const TrustedScreen: React.FC = () => {
   const { session } = useAuth();
+  const { requireBiometricAuth } = useBiometrics();
   const {
     trustedContacts,
     isTrustedFeatureEnabled,
@@ -251,6 +258,38 @@ export const TrustedScreen: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<"active" | "inactive">("active");
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const infoModalAnim = useRef(new Animated.Value(0)).current;
+  const isFocused = useIsFocused();
+  const hasPlayedTrustedStaggerRef = useRef(false);
+
+  const openInfoModal = () => {
+    setShowInfoModal(true);
+    Animated.timing(infoModalAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeInfoModal = () => {
+    Animated.timing(infoModalAnim, {
+      toValue: 0,
+      duration: 160,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => setShowInfoModal(false));
+  };
+
+  useEffect(() => {
+    if (isFocused && !isLoadingContacts && !hasPlayedTrustedStaggerRef.current) {
+      const timer = setTimeout(() => {
+        hasPlayedTrustedStaggerRef.current = true;
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, isLoadingContacts]);
 
   const userId = session?.userId ?? 1;
 
@@ -301,6 +340,10 @@ export const TrustedScreen: React.FC = () => {
   };
 
   const handleRemove = async (contactId: string) => {
+    const verified = await requireBiometricAuth("Authenticate to remove Trusted Contact");
+    if (!verified) {
+      return;
+    }
     await removeContact(userId, contactId);
   };
 
@@ -341,7 +384,18 @@ export const TrustedScreen: React.FC = () => {
 
       {/* Title section */}
       <View style={styles.titleSection}>
-        <Text style={styles.screenHeading}>Trusted Contacts</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.screenHeading}>Trusted Contacts</Text>
+          <TouchableOpacity
+            onPress={openInfoModal}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.infoButton}
+            accessibilityLabel="How it works"
+            accessibilityRole="button"
+          >
+            <Ionicons name="information-circle-outline" size={22} color={colors.brand} />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.screenSubtitle}>
           Guardian approvals for high-risk payments.
         </Text>
@@ -367,40 +421,42 @@ export const TrustedScreen: React.FC = () => {
             />
           }
         >
-          {/* How it works info banner */}
-          <View
-            style={[
-              styles.infoBanner,
-              !isTrustedFeatureEnabled && styles.infoBannerDisabled,
-            ]}
-          >
-            <Ionicons
-              name={isTrustedFeatureEnabled ? "information-circle-outline" : "alert-circle-outline"}
-              size={16}
-              color={isTrustedFeatureEnabled ? colors.brand : colors.textMuted}
-            />
-            <Text
-              style={[
-                styles.infoText,
-                !isTrustedFeatureEnabled && styles.infoTextDisabled,
-              ]}
-            >
-              {isTrustedFeatureEnabled
-                ? "When a high-risk payment is detected, your trusted contact will receive a 2-minute approval request before the payment is processed."
-                : "The Trusted Guardian feature is currently turned OFF. High-risk payments will proceed directly without guardian verification."}
-            </Text>
-          </View>
 
-          {/* Pending Approval Requests */}
-          {pendingRequests && pendingRequests.filter((r) => r.status === "PENDING").map((req) => (
-            <GuardianApprovalCard
-              key={req.id}
-              request={req}
-              onConfirm={() => respondToRequest(req.id, "APPROVED")}
-              onReject={() => respondToRequest(req.id, "REJECTED")}
-              onDismiss={() => {}}
-            />
-          ))}
+          {/* Dynamic Guardian Approval Requests Section */}
+          <StaggerRevealCard
+            index={0}
+            baseDelay={60}
+            hasPlayed={hasPlayedTrustedStaggerRef.current}
+          >
+            {pendingRequests && pendingRequests.filter((r) => r.status === "PENDING" && r.expiresAt > Date.now()).length > 0 ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionHeading}>ACTIVE GUARDIAN APPROVAL REQUEST</Text>
+                {pendingRequests
+                  .filter((r) => r.status === "PENDING" && r.expiresAt > Date.now())
+                  .map((req) => (
+                    <GuardianApprovalCard
+                      key={req.id}
+                      request={req}
+                      onConfirm={() => respondToRequest(req.id, "APPROVED")}
+                      onReject={() => respondToRequest(req.id, "REJECTED")}
+                      onDismiss={() => {}}
+                    />
+                  ))}
+              </View>
+            ) : (
+              <View style={styles.noPendingCard}>
+                <View style={styles.noPendingIconWrap}>
+                  <Ionicons name="shield-checkmark" size={20} color={colors.safe} />
+                </View>
+                <View style={styles.noPendingTextCol}>
+                  <Text style={styles.noPendingTitle}>No Pending Guardian Approvals</Text>
+                  <Text style={styles.noPendingSubtitle}>
+                    No payment currently requires guardian approval. Any high-risk transfer initiated will route an approval request here in real time.
+                  </Text>
+                </View>
+              </View>
+            )}
+          </StaggerRevealCard>
 
           {/* Add form (inline) - only allowed when 0 contacts exist */}
           {showForm && trustedContacts.length === 0 && (
@@ -412,8 +468,13 @@ export const TrustedScreen: React.FC = () => {
           )}
 
           {/* Contacts section with Toggle Switch on heading */}
-          {trustedContacts.length > 0 ? (
-            <View style={styles.section}>
+          <StaggerRevealCard
+            index={2}
+            baseDelay={60}
+            hasPlayed={hasPlayedTrustedStaggerRef.current}
+          >
+            {trustedContacts.length > 0 ? (
+              <View style={styles.section}>
               <View style={styles.sectionHeaderRow}>
                 <Text style={styles.sectionHeading}>YOUR TRUSTED CONTACT</Text>
                 {/* Toggle switch on right side of heading */}
@@ -430,11 +491,10 @@ export const TrustedScreen: React.FC = () => {
                     value={isTrustedFeatureEnabled}
                     onValueChange={handleToggleFeature}
                     trackColor={{
-                      false: colors.border,
-                      true: colors.brand,
+                      false: colors.borderLight,
+                      true: colors.safeSurface,
                     }}
-                    thumbColor={colors.surface}
-                    ios_backgroundColor={colors.border}
+                    thumbColor={isTrustedFeatureEnabled ? colors.safe : colors.textMuted}
                   />
                 </View>
               </View>
@@ -474,9 +534,69 @@ export const TrustedScreen: React.FC = () => {
                 style={{ marginTop: spacing.md }}
               />
             </View>
-          ) : null}
+            ) : null}
+          </StaggerRevealCard>
         </ScrollView>
       )}
+
+      {/* Info Modal */}
+      <Modal
+        transparent
+        visible={showInfoModal}
+        animationType="none"
+        onRequestClose={closeInfoModal}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.modalBackdrop} onPress={closeInfoModal}>
+          <Animated.View
+            style={[
+              styles.infoModalCard,
+              {
+                opacity: infoModalAnim,
+                transform: [
+                  {
+                    scale: infoModalAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.93, 1],
+                    }),
+                  },
+                  {
+                    translateY: infoModalAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [12, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Pressable onPress={(e) => e.stopPropagation()}>
+              {/* Modal Header */}
+              <View style={styles.infoModalHeader}>
+                <View style={styles.infoModalIconBox}>
+                  <Ionicons name="shield-checkmark-outline" size={18} color={colors.brand} />
+                </View>
+                <Text style={styles.infoModalTitle}>How It Works</Text>
+                <TouchableOpacity
+                  onPress={closeInfoModal}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel="Close"
+                >
+                  <Ionicons name="close" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Divider */}
+              <View style={styles.infoModalDivider} />
+
+              {/* Message */}
+              <Text style={styles.infoModalBody}>
+                When a high-risk payment is detected, your trusted contact will receive a 2-minute approval request before the payment is processed.
+              </Text>
+            </Pressable>
+          </Animated.View>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -496,6 +616,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  infoButton: {
+    padding: 2,
   },
   screenHeading: {
     ...typography.h2,
@@ -582,26 +710,101 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: 100,
   },
-  infoBanner: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.sm,
-    backgroundColor: colors.brandSurface,
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 15, 15, 0.45)",
+    justifyContent: "flex-end",
+    paddingHorizontal: spacing.lg,
+    paddingBottom: 100,
+  },
+  infoModalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
     borderWidth: 1,
-    borderColor: colors.brandBorder,
-    borderRadius: radii.md,
+    borderColor: colors.borderLight,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+    paddingTop: spacing.md,
+    ...shadows.lg,
+  },
+  infoModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  infoModalIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  infoModalTitle: {
+    ...typography.bodySemibold,
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: "700",
+    flex: 1,
+  },
+  infoModalDivider: {
+    height: 1,
+    backgroundColor: colors.borderLight,
+    marginBottom: spacing.md,
+  },
+  infoModalBody: {
+    ...typography.body,
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  noPendingCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
     padding: spacing.md,
     marginBottom: spacing.lg,
+    gap: spacing.md,
+    ...shadows.sm,
   },
-  infoBannerDisabled: {
+  noPendingIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: colors.surfaceSecondary,
-    borderColor: colors.border,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  noPendingTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  noPendingTitle: {
+    ...typography.bodySemibold,
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  noPendingSubtitle: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
   },
   infoText: {
     ...typography.small,
-    color: colors.brand,
-    fontSize: 12,
-    lineHeight: 18,
+    color: colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 19,
     flex: 1,
   },
   infoTextDisabled: {

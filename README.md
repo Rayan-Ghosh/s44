@@ -118,10 +118,14 @@ why it isn't committed.
 
 ```bash
 py -m venv .venv
-.venv\Scripts\python.exe -m pip install -r apps/api/requirements.txt
+.venv\Scripts\python.exe -m pip install -r apps/api/requirements.txt -r ml/requirements.txt
 ```
 
-(macOS/Linux: `python3 -m venv .venv && .venv/bin/python -m pip install -r apps/api/requirements.txt`)
+(macOS/Linux: `python3 -m venv .venv && .venv/bin/python -m pip install -r apps/api/requirements.txt -r ml/requirements.txt`)
+
+Both files are required: the risk API (`apps/api/app/api/routers/risk.py`) imports
+`ml.inference.predict` at module load time, so the backend will not start with
+only `apps/api/requirements.txt` installed.
 
 ### Initialize / migrate the development database
 

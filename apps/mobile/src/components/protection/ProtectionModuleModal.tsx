@@ -91,8 +91,8 @@ export const ProtectionModuleModal: React.FC<ProtectionModuleModalProps> = ({
                 <Switch
                   value={isEnabled}
                   onValueChange={onToggle}
-                  trackColor={{ false: colors.borderLight, true: colors.safe }}
-                  thumbColor={colors.surface}
+                  trackColor={{ false: colors.borderLight, true: colors.safeSurface }}
+                  thumbColor={isEnabled ? colors.safe : colors.textMuted}
                 />
               </View>
 

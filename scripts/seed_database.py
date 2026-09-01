@@ -1,34 +1,19 @@
 """
 Initialize and seed the local development database (Avaran.db).
 
-Avaran.db is a LOCAL DEVELOPMENT/TESTING database, git-ignored (see
-.gitignore). Reproducibility comes from this script, not from committing
-the binary file — anyone on the team gets an identical schema plus demo
-dataset by running:
+Avaran.db is a LOCAL DEVELOPMENT/TESTING database, git-ignored.
+Anyone on the team gets an identical schema plus demo dataset by running:
 
     python scripts/seed_database.py
 
 Schema is owned by Alembic (apps/api/alembic/) — this script runs
 `alembic upgrade head` rather than creating tables itself, so the seeded
-database always matches the latest migration, never a stale in-process
-Base.metadata.create_all() snapshot.
-
-Seed data is entirely synthetic (spec §2 Non-Goals, §24; product directive
-A: Indian names/context) — no real people, no real financial data. The
-script is idempotent: re-running it does not create duplicate rows.
-
-The risk_score/risk_factor/alert rows created by seed_risk_fixture() are
-explicitly labeled DEV FIXTURES. They exist only so the read-only
-GET /api/v1/risk and GET /api/v1/alerts endpoints have something to return
-during development. They are NOT the output of any real model — no fraud/
-anomaly/voice model exists yet (docs/DEVELOPMENT_PLAN.md Phase 4/6) — and
-must never be mistaken for measured ML performance (see CLAUDE.md's rule
-against fabricating metrics).
+database always matches the latest migrations.
 """
 
-import sys
 from decimal import Decimal
 from pathlib import Path
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 API_ROOT = REPO_ROOT / "apps" / "api"
@@ -37,39 +22,146 @@ sys.path.insert(0, str(API_ROOT))
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
 
+from app.core.contact_encryption import encrypt_field  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
-from app.core.security import hash_identifier  # noqa: E402
+from app.core.security import hash_identifier, hash_password, mask_phone  # noqa: E402
 from app.models.alert import Alert  # noqa: E402
-from app.models.enums import AlertStatus, RiskDecision, RiskLevel  # noqa: E402
+from app.models.enums import AlertStatus, ConsentStatus, GuardianOutcome, RiskDecision, RiskLevel, TransactionStatus  # noqa: E402
+from app.models.guardian_request import GuardianRequest  # noqa: E402
 from app.models.risk_factor import RiskFactor  # noqa: E402
 from app.models.risk_score import RiskScore  # noqa: E402
+from app.models.transaction import Transaction  # noqa: E402
+from app.models.trusted_contact import TrustedContact  # noqa: E402
+from app.models.user_contact_info import UserContactInfo  # noqa: E402
 from app.repositories import risk_repository, user_repository  # noqa: E402
 from app.schemas.transaction import TransactionCreate  # noqa: E402
 from app.schemas.user import UserCreate  # noqa: E402
 from app.services import transaction_service, user_service  # noqa: E402
 
-# Deterministic synthetic demo data — Indian names/context per
-# docs/PRODUCT_DIRECTIVES.md §A. Not real people; not real payment handles.
 DEMO_USERS = [
+    {
+        "name": "Rahul Sharma",
+        "phone_number": "+91-98765-43210",
+        "email": "rahul.sharma@example.com",
+        "password": "password123",
+        "device_identifier": "default-mobile-device",
+        "transactions": [
+            {
+                "recipient_identifier": "urgent.transfer@okaxis",
+                "recipient_display_name": "Unknown High-Risk Recipient",
+                "amount": Decimal("49000.00"),
+                "location": "New Delhi",
+                "payment_method": "UPI",
+                "status": TransactionStatus.PENDING_AUTHORIZATION,
+                "risk": {
+                    "score": 88.0,
+                    "level": RiskLevel.HIGH,
+                    "decision": RiskDecision.CONFIRM_OR_CANCEL,
+                    "factors": [
+                        {"type": "behaviour", "name": "amount_spike", "contribution": 45.0, "explanation": "Transaction amount (Rs 49,000) is 15x higher than user's 30-day average."},
+                        {"type": "recipient", "name": "new_recipient", "contribution": 35.0, "explanation": "Recipient VPA has no prior payment history across network."},
+                        {"type": "voice", "name": "coercion_risk", "contribution": 20.0, "explanation": "Live call analysis detected high authority coercion pattern."}
+                    ],
+                    "alert": "High-risk suspicious payment of Rs 49,000 flagged under urgent authority coercion patterns."
+                }
+            },
+            {
+                "recipient_identifier": "electricity.utility@upi",
+                "recipient_display_name": "Electricity Bill Payment",
+                "amount": Decimal("1450.00"),
+                "location": "Mumbai",
+                "payment_method": "UPI",
+                "status": TransactionStatus.CONFIRMED,
+            },
+            {
+                "recipient_identifier": "quickmart.groceries@upi",
+                "recipient_display_name": "Quick Mart Groceries",
+                "amount": Decimal("820.00"),
+                "location": "Mumbai",
+                "payment_method": "UPI",
+                "status": TransactionStatus.CONFIRMED,
+            },
+            {
+                "recipient_identifier": "rohit.verma@okaxis",
+                "recipient_display_name": "Rohit Verma",
+                "amount": Decimal("2400.00"),
+                "location": "Mumbai",
+                "payment_method": "UPI",
+                "status": TransactionStatus.CONFIRMED,
+            },
+            {
+                "recipient_identifier": "apollo.pharmacy@upi",
+                "recipient_display_name": "Apollo Pharmacy",
+                "amount": Decimal("430.00"),
+                "location": "Mumbai",
+                "payment_method": "UPI",
+                "status": TransactionStatus.CONFIRMED,
+            },
+        ]
+    },
     {
         "name": "Ananya Sharma",
         "phone_number": "+91-90000-00001",
+        "email": "ananya.sharma@example.com",
+        "password": "password123",
         "device_identifier": "DEV-FIXTURE-DEVICE-ANANYA-1",
-        "recipient_identifier": "ananya.friend@upi",
-        "recipient_display_name": "Rohit Verma",
-        "amount": Decimal("450.00"),
-        "location": "Bhubaneswar",
-        "payment_method": "UPI",
+        "transactions": [
+            {
+                "recipient_identifier": "ananya.friend@upi",
+                "recipient_display_name": "Rohit Verma",
+                "amount": Decimal("450.00"),
+                "location": "Bhubaneswar",
+                "payment_method": "UPI",
+                "status": TransactionStatus.CONFIRMED,
+            }
+        ]
     },
     {
         "name": "Priya Nair",
         "phone_number": "+91-90000-00002",
+        "email": "priya.nair@example.com",
+        "password": "password123",
         "device_identifier": "DEV-FIXTURE-DEVICE-PRIYA-1",
-        "recipient_identifier": "priya.landlord@upi",
-        "recipient_display_name": "Suresh Iyer",
-        "amount": Decimal("12000.00"),
-        "location": "Chennai",
-        "payment_method": "UPI",
+        "transactions": [
+            {
+                "recipient_identifier": "priya.landlord@upi",
+                "recipient_display_name": "Suresh Iyer",
+                "amount": Decimal("12000.00"),
+                "location": "Chennai",
+                "payment_method": "UPI",
+                "status": TransactionStatus.PENDING,
+                "risk": {
+                    "score": 66.0,
+                    "level": RiskLevel.MEDIUM,
+                    "decision": RiskDecision.WARN,
+                    "factors": [
+                        {"type": "behaviour", "name": "amount_deviation", "contribution": 40.0, "explanation": "Transaction amount is higher than this user's typical range."}
+                    ],
+                    "alert": "Transaction amount of Rs 12,000 exceeds usual velocity."
+                }
+            }
+        ]
+    },
+]
+
+DEMO_CONTACTS = [
+    {
+        "user_phone": "+91-98765-43210",
+        "contact_name": "Ramesh Sharma",
+        "phone_number": "+91-98765-43299",
+        "relationship": "Father",
+    },
+    {
+        "user_phone": "+91-98765-43210",
+        "contact_name": "Sunita Sharma",
+        "phone_number": "+91-98765-43298",
+        "relationship": "Mother",
+    },
+    {
+        "user_phone": "+91-90000-00001",
+        "contact_name": "Alok Sharma",
+        "phone_number": "+91-90000-00099",
+        "relationship": "Brother",
     },
 ]
 
@@ -81,96 +173,137 @@ def run_migrations() -> None:
 
 
 def seed_users_and_transactions(db) -> list[tuple]:
-    """Create demo users/transactions if they don't already exist. Returns
-    (user, transaction) pairs for every demo entry, new or pre-existing."""
     results = []
     for demo in DEMO_USERS:
-        phone_hash = hash_identifier(demo["phone_number"])
+        phone_clean = demo["phone_number"]
+        phone_hash = hash_identifier(phone_clean)
         user = user_repository.get_user_by_phone_hash(db, phone_hash)
         if user is None:
             user = user_service.create_user(
-                db, UserCreate(name=demo["name"], phone_number=demo["phone_number"])
+                db, UserCreate(name=demo["name"], phone_number=phone_clean), is_verified=True
             )
 
-        if user.transactions:
-            transaction = user.transactions[0]
-        else:
-            transaction = transaction_service.create_transaction(
-                db,
-                TransactionCreate(
-                    user_id=user.id,
-                    recipient_identifier=demo["recipient_identifier"],
-                    recipient_display_name=demo["recipient_display_name"],
-                    device_identifier=demo["device_identifier"],
-                    amount=demo["amount"],
-                    location=demo["location"],
-                    payment_method=demo["payment_method"],
-                ),
+        # Ensure UserContactInfo exists with password hash
+        contact_info = db.query(UserContactInfo).filter_by(user_id=user.id).first()
+        if contact_info is None:
+            contact_info = UserContactInfo(
+                user_id=user.id,
+                email_encrypted=encrypt_field(demo["email"]),
+                phone_encrypted=encrypt_field(phone_clean),
+                password_hash=hash_password(demo["password"]),
             )
-        results.append((user, transaction))
+            db.add(contact_info)
+            db.commit()
+        elif not contact_info.password_hash:
+            contact_info.password_hash = hash_password(demo["password"])
+            db.commit()
+
+        for tx_data in demo.get("transactions", []):
+            existing_tx = (
+                db.query(Transaction)
+                .filter(
+                    Transaction.user_id == user.id,
+                    Transaction.amount == tx_data["amount"],
+                )
+                .first()
+            )
+            if not existing_tx:
+                created_tx = transaction_service.create_transaction(
+                    db,
+                    TransactionCreate(
+                        user_id=user.id,
+                        recipient_identifier=tx_data["recipient_identifier"],
+                        recipient_display_name=tx_data["recipient_display_name"],
+                        device_identifier=demo["device_identifier"],
+                        amount=tx_data["amount"],
+                        location=tx_data["location"],
+                        payment_method=tx_data["payment_method"],
+                    ),
+                )
+                if "status" in tx_data:
+                    created_tx.status = tx_data["status"]
+                    if tx_data["status"] == TransactionStatus.PENDING_AUTHORIZATION:
+                        created_tx.authorization_required = True
+                        created_tx.authorization_status = "PENDING"
+                    db.commit()
+
+                # Add risk data if defined
+                if "risk" in tx_data:
+                    r_info = tx_data["risk"]
+                    r_score = RiskScore(
+                        transaction_id=created_tx.id,
+                        fraud_probability=0.88 if r_info["level"] == RiskLevel.HIGH else 0.65,
+                        anomaly_score=0.85,
+                        device_score=0.60,
+                        behaviour_score=0.75,
+                        final_score=r_info["score"],
+                        risk_level=r_info["level"],
+                        decision=r_info["decision"],
+                    )
+                    db.add(r_score)
+                    db.flush()
+
+                    for factor in r_info.get("factors", []):
+                        db.add(
+                            RiskFactor(
+                                risk_score_id=r_score.id,
+                                factor_type=factor["type"],
+                                factor_name=factor["name"],
+                                contribution=factor["contribution"],
+                                explanation=factor["explanation"],
+                            )
+                        )
+                    if "alert" in r_info:
+                        db.add(
+                            Alert(
+                                transaction_id=created_tx.id,
+                                risk_score_id=r_score.id,
+                                severity=r_info["level"],
+                                status=AlertStatus.OPEN,
+                                summary=r_info["alert"],
+                            )
+                        )
+                    db.commit()
+                results.append((user, created_tx))
+            else:
+                results.append((user, existing_tx))
     return results
 
 
-def seed_risk_fixture(db, transaction) -> None:
-    """Attach one illustrative risk_score/risk_factor/alert to the given
-    transaction, only if it doesn't already have one. See module
-    docstring: this is a DEV FIXTURE, not real model output."""
-    if risk_repository.get_latest_risk_score(db, transaction.id) is not None:
-        return
+def seed_trusted_contacts(db) -> None:
+    for item in DEMO_CONTACTS:
+        phone_hash = hash_identifier(item["user_phone"])
+        user = user_repository.get_user_by_phone_hash(db, phone_hash)
+        if not user:
+            continue
 
-    risk_score = RiskScore(
-        transaction_id=transaction.id,
-        fraud_probability=0.81,
-        anomaly_score=0.74,
-        device_score=0.60,
-        behaviour_score=0.55,
-        voice_score=None,
-        final_score=66.0,
-        risk_level=RiskLevel.MEDIUM,
-        decision=RiskDecision.WARN,
-    )
-    db.add(risk_score)
-    db.flush()  # assigns risk_score.id without committing yet
-
-    db.add(
-        RiskFactor(
-            risk_score_id=risk_score.id,
-            factor_type="behaviour",
-            factor_name="amount_deviation",
-            contribution=40.0,
-            explanation=(
-                "DEV FIXTURE, not real model output. Illustrative reason: "
-                "transaction amount is higher than this user's typical range."
-            ),
-        )
-    )
-    db.add(
-        Alert(
-            transaction_id=transaction.id,
-            risk_score_id=risk_score.id,
-            severity=RiskLevel.MEDIUM,
-            status=AlertStatus.OPEN,
-            summary=(
-                "DEV FIXTURE, not a real alert. Seed data for exercising "
-                "GET /api/v1/alerts during development."
-            ),
-        )
-    )
-    db.commit()
+        c_phone_hash = hash_identifier(item["phone_number"])
+        existing = db.query(TrustedContact).filter_by(user_id=user.id, contact_phone_hash=c_phone_hash).first()
+        if not existing:
+            contact = TrustedContact(
+                user_id=user.id,
+                contact_name=item["contact_name"],
+                contact_phone_hash=c_phone_hash,
+                phone_masked=mask_phone(item["phone_number"]),
+                relationship=item["relationship"],
+                consent_status=ConsentStatus.ACCEPTED,
+            )
+            db.add(contact)
+            db.commit()
 
 
 def seed() -> None:
+    print("Running Alembic migrations...")
     run_migrations()
 
     with SessionLocal() as db:
-        pairs = seed_users_and_transactions(db)
-        # Attach the illustrative risk fixture to the higher-amount demo
-        # transaction only, so the other stays a clean "no evaluation yet"
-        # example (GET /api/v1/risk/{id} returns 404 for it, by design).
-        _, highest_amount_transaction = max(pairs, key=lambda pair: pair[1].amount)
-        seed_risk_fixture(db, highest_amount_transaction)
+        print("Seeding users and transactions...")
+        seed_users_and_transactions(db)
 
-    print(f"Avaran.db ready at: {REPO_ROOT / 'Avaran.db'}")
+        print("Seeding trusted contacts / guardian shield...")
+        seed_trusted_contacts(db)
+
+    print(f"Avaran.db successfully seeded and ready at: {REPO_ROOT / 'Avaran.db'}")
 
 
 if __name__ == "__main__":

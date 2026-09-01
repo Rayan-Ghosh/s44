@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { spacing, radii, shadows } from "../theme/layout";
 import { Header } from "../components/common/Header";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { RiskGauge } from "../components/common/RiskGauge";
+import { StaggerRevealCard } from "../components/common/StaggerRevealCard";
 import { useAuth } from "../context/AuthContext";
 import { useGuardian } from "../context/GuardianContext";
 import { useAlertBadge } from "../context/AlertBadgeContext";
@@ -29,10 +30,11 @@ import {
 import { AlertService, SecurityAlert } from "../services/alert-service";
 import { NotificationDropdown } from "../components/guardian/NotificationDropdown";
 import { GuardianApprovalCard } from "../components/guardian/GuardianApprovalCard";
+import { LinearGradient } from "expo-linear-gradient";
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { session } = useAuth();
+  const { session, isPostLoginLoading } = useAuth();
   const { alerts: securityAlerts } = useSecurity();
   const {
     pendingRequests,
@@ -52,6 +54,12 @@ export const HomeScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // Increments once when the post-login splash finishes — replays the gauge animation visibly
+  const [animationTrigger, setAnimationTrigger] = useState(0);
+  // Tracks if we saw isPostLoginLoading=true (fresh login), so we know to replay on splash clear
+  const wasPostLoginLoadingRef = useRef(false);
+  // Tracks whether the initial card stagger animation has played in this session
+  const hasPlayedHomeStaggerRef = useRef(false);
 
   const loadData = useCallback(async () => {
     setError(null);
@@ -84,6 +92,33 @@ export const HomeScreen: React.FC = () => {
 
     return unsubscribe;
   }, [loadData]);
+
+  // Replay the gauge animation exactly once when the post-login splash clears.
+  // isPostLoginLoading goes true→false only during a fresh login (never during session restore).
+  // Tab switching never changes this value, so the animation never replays on tab switches.
+  useEffect(() => {
+    if (isPostLoginLoading) {
+      // Record that we are in a post-login splash flow
+      wasPostLoginLoadingRef.current = true;
+      return;
+    }
+    // isPostLoginLoading just became false
+    if (wasPostLoginLoadingRef.current) {
+      wasPostLoginLoadingRef.current = false;
+      // Splash has fully faded out — replay the gauge animation now that the screen is visible
+      setAnimationTrigger((t) => t + 1);
+    }
+  }, [isPostLoginLoading]);
+
+  // Mark initial home stagger as completed after reveal sequence
+  useEffect(() => {
+    if (!isLoading) {
+      const timer = setTimeout(() => {
+        hasPlayedHomeStaggerRef.current = true;
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
 
   const onRefresh = () => {
     setIsRefreshing(true);
@@ -208,54 +243,43 @@ export const HomeScreen: React.FC = () => {
             </Text>
           </View>
 
-          {/* PAYMENT OVERVIEW */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeading}>PAYMENT OVERVIEW</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("Payments")}>
-                <Text style={styles.seeAllText}>View all</Text>
-              </TouchableOpacity>
+          {/* 1. HERO (PRIMARY): CURRENT RISK STATUS */}
+          <View style={styles.heroSection}>
+            <View style={styles.heroHeaderRow}>
+              <Text style={styles.heroSectionHeading}>CURRENT RISK STATUS</Text>
             </View>
 
-            <View style={styles.overviewCard}>
-              <Text style={styles.overviewLabel}>Total this month</Text>
-              <Text style={styles.totalAmount}>
-                ₹{(overview?.totalAmountThisMonth ?? 0).toLocaleString("en-IN")}
-              </Text>
-              <View style={styles.statsRow}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statNumber}>{overview?.transactionCount ?? 0}</Text>
-                  <Text style={styles.statLabel}>Total</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={[styles.statNumber, { color: colors.safe }]}>{overview?.safeCount ?? 0}</Text>
-                  <Text style={styles.statLabel}>Safe</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={[styles.statNumber, { color: colors.threat }]}>{overview?.needsReviewCount ?? 0}</Text>
-                  <Text style={styles.statLabel}>Needs attention</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* CURRENT RISK STATUS */}
-          <View style={styles.section}>
-            <Text style={styles.sectionHeading}>CURRENT RISK STATUS</Text>
-            <View style={styles.riskCard}>
+            <LinearGradient
+              colors={
+                overview.currentRiskLevel === "HIGH"
+                  ? ["#FFFFFF", "rgba(247,238,236,0.7)"]
+                  : ["#FFFFFF", "rgba(234,243,240,0.7)"]
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[
+                styles.heroRiskCard,
+                overview.currentRiskLevel === "HIGH" ? styles.heroRiskCardHigh : styles.heroRiskCardLow,
+              ]}
+            >
               <RiskGauge
                 score={Math.round(overview?.currentRiskScore ?? 0)}
                 riskLevel={overview?.currentRiskLevel || "LOW"}
                 size="md"
+                animationTrigger={animationTrigger}
+                enableRevealAnimation={true}
               />
-            </View>
+            </LinearGradient>
           </View>
 
-          {/* NEEDS YOUR ATTENTION */}
+          {/* 2. SECONDARY (ACTIONABLE): NEEDS YOUR ATTENTION */}
           {suspiciousTx ? (
-            <View style={styles.section}>
+            <StaggerRevealCard
+              index={0}
+              baseDelay={1350}
+              hasPlayed={hasPlayedHomeStaggerRef.current}
+              style={styles.section}
+            >
               <Text style={styles.sectionHeading}>NEEDS YOUR ATTENTION</Text>
 
               <TouchableOpacity
@@ -285,67 +309,16 @@ export const HomeScreen: React.FC = () => {
                   </View>
                 </View>
               </TouchableOpacity>
-            </View>
+            </StaggerRevealCard>
           ) : null}
 
-          {/* RECENT PAYMENTS */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeading}>RECENT PAYMENTS</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("Payments")}>
-                <Text style={styles.seeAllText}>See all</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.paymentListCard}>
-              {recentTxns.length === 0 ? (
-                <Text style={styles.emptyText}>No recent transactions recorded.</Text>
-              ) : (
-                recentTxns.map((item, idx) => {
-                  const isRisk = item.status === "Risk detected" || item.status === "Held";
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[
-                        styles.paymentItem,
-                        idx === recentTxns.length - 1 && styles.paymentItemNoBorder,
-                      ]}
-                      onPress={() => navigation.navigate("Payments", { selectedTxId: item.id })}
-                      activeOpacity={0.8}
-                    >
-                      <View style={styles.paymentItemLeft}>
-                        <Text style={styles.paymentMerchant}>{item.merchant}</Text>
-                        <Text style={styles.paymentDate}>{item.date} · {item.paymentMethod}</Text>
-                      </View>
-                      <View style={styles.paymentItemRight}>
-                        <Text
-                          style={[
-                            styles.paymentAmount,
-                            isRisk && { color: colors.threatText },
-                          ]}
-                        >
-                          ₹{(item?.amount ?? 0).toLocaleString("en-IN")}
-                        </Text>
-                        <StatusBadge
-                          label={
-                            isRisk
-                              ? "Needs review"
-                              : item.status === "Reported"
-                              ? "Reported"
-                              : "Safe"
-                          }
-                          status={isRisk ? "high" : item.status === "Reported" ? "escalated" : "low"}
-                        />
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
-              )}
-            </View>
-          </View>
-
-          {/* SECURITY ALERTS */}
-          <View style={styles.section}>
+          {/* 3. SECONDARY (ALERTS): SECURITY ALERTS */}
+          <StaggerRevealCard
+            index={suspiciousTx ? 1 : 0}
+            baseDelay={1350}
+            hasPlayed={hasPlayedHomeStaggerRef.current}
+            style={styles.section}
+          >
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeading}>SECURITY ALERTS</Text>
               <TouchableOpacity onPress={() => navigation.navigate("Protection")}>
@@ -378,7 +351,117 @@ export const HomeScreen: React.FC = () => {
                 <Text style={styles.viewAlertsBtnText}>VIEW</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </StaggerRevealCard>
+
+          {/* 4. SUPPORTING: PAYMENT OVERVIEW */}
+          <StaggerRevealCard
+            index={suspiciousTx ? 2 : 1}
+            baseDelay={1350}
+            hasPlayed={hasPlayedHomeStaggerRef.current}
+            style={styles.section}
+          >
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionHeading}>PAYMENT OVERVIEW</Text>
+              <TouchableOpacity onPress={() => navigation.navigate("Payments")}>
+                <Text style={styles.seeAllText}>View all</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.overviewCard}>
+              <Text style={styles.overviewLabel}>Total this month</Text>
+              <Text style={styles.totalAmount}>
+                ₹{(overview?.totalAmountThisMonth ?? 0).toLocaleString("en-IN")}
+              </Text>
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>{overview?.transactionCount ?? 0}</Text>
+                  <Text style={styles.statLabel}>Total</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Text style={[styles.statNumber, { color: colors.safe }]}>{overview?.safeCount ?? 0}</Text>
+                  <Text style={styles.statLabel}>Safe</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Text style={[styles.statNumber, { color: colors.threat }]}>{overview?.needsReviewCount ?? 0}</Text>
+                  <Text style={styles.statLabel}>Needs attention</Text>
+                </View>
+              </View>
+            </View>
+          </StaggerRevealCard>
+
+          {/* 5. SUPPORTING: RECENT PAYMENTS */}
+          <StaggerRevealCard
+            index={suspiciousTx ? 3 : 2}
+            baseDelay={1350}
+            hasPlayed={hasPlayedHomeStaggerRef.current}
+            style={styles.section}
+          >
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionHeading}>RECENT PAYMENTS</Text>
+              <TouchableOpacity onPress={() => navigation.navigate("Payments")}>
+                <Text style={styles.seeAllText}>See all</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.paymentListCard}>
+              {recentTxns.length === 0 ? (
+                <Text style={styles.emptyText}>No recent transactions recorded.</Text>
+              ) : (
+                recentTxns.map((item, idx) => {
+                  const isRisk = item.status === "Risk detected" || item.status === "Held";
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[
+                        styles.paymentItem,
+                        idx === recentTxns.length - 1 && styles.paymentItemNoBorder,
+                      ]}
+                      onPress={() => navigation.navigate("Payments", { selectedTxId: item.id })}
+                      activeOpacity={0.78}
+                    >
+                      {/* Left icon identifier */}
+                      <View style={[styles.paymentIconBox, isRisk && styles.paymentIconBoxRisk]}>
+                        <Ionicons
+                          name={isRisk ? "warning" : "checkmark-circle"}
+                          size={17}
+                          color={isRisk ? colors.threat : colors.safe}
+                        />
+                      </View>
+                      {/* Merchant + meta */}
+                      <View style={styles.paymentItemLeft}>
+                        <Text style={styles.paymentMerchant} numberOfLines={1}>{item.merchant}</Text>
+                        <Text style={styles.paymentDate}>{item.paymentMethod} · {item.date}</Text>
+                      </View>
+                      {/* Amount + badge */}
+                      <View style={styles.paymentItemRight}>
+                        <Text
+                          style={[
+                            styles.paymentAmount,
+                            isRisk && { color: colors.threat },
+                          ]}
+                        >
+                          ₹{(item?.amount ?? 0).toLocaleString("en-IN")}
+                        </Text>
+                        <StatusBadge
+                          label={
+                            isRisk
+                              ? "Review"
+                              : item.status === "Reported"
+                              ? "Reported"
+                              : "Safe"
+                          }
+                          status={isRisk ? "high" : item.status === "Reported" ? "escalated" : "low"}
+                          dot={false}
+                        />
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          </StaggerRevealCard>
         </ScrollView>
       )}
     </View>
@@ -472,8 +555,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   protectionBannerAttention: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.caution,
+    borderColor: colors.cautionBorder,
   },
   protectionText: {
     ...typography.smallSemibold,
@@ -483,6 +565,65 @@ const styles = StyleSheet.create({
   },
   protectionTextAttention: {
     color: colors.textPrimary,
+  },
+  heroSection: {
+    marginBottom: spacing.xl,
+  },
+  heroHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
+  heroHeadingLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  heroSectionHeading: {
+    ...typography.caption,
+    color: colors.textPrimary,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    fontSize: 11,
+  },
+  liveShieldPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 3,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.full,
+    backgroundColor: colors.safeSurface,
+    borderWidth: 1,
+    borderColor: colors.safeBorder,
+  },
+  liveShieldPillAttention: {
+    backgroundColor: colors.cautionSurface,
+    borderColor: colors.cautionBorder,
+  },
+  liveShieldText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  heroRiskCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    borderWidth: 1.2,
+    borderColor: colors.border,
+    paddingVertical: spacing.lg + 2,
+    paddingHorizontal: spacing.lg,
+    ...shadows.lg,
+  },
+  heroRiskCardHigh: {
+    borderColor: "rgba(163, 61, 53, 0.25)",
+    backgroundColor: "#FFFFFF",
+  },
+  heroRiskCardLow: {
+    borderColor: "rgba(23, 107, 91, 0.25)",
+    backgroundColor: "#FFFFFF",
   },
   section: {
     marginBottom: spacing.lg,
@@ -509,7 +650,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderLight,
     padding: spacing.lg,
     ...shadows.sm,
   },
@@ -554,21 +695,11 @@ const styles = StyleSheet.create({
     height: 24,
     backgroundColor: colors.borderLight,
   },
-  riskCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.sm,
-    ...shadows.sm,
-  },
   attentionCard: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.threat,
+    borderColor: "rgba(220, 38, 38, 0.35)",
     padding: spacing.lg,
     ...shadows.sm,
   },
@@ -633,43 +764,63 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: spacing.lg,
+    overflow: "hidden",
     ...shadows.sm,
   },
   paymentItem: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md + 1,
+    gap: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+  },
+  paymentIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm + 2,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  paymentIconBoxRisk: {
+    backgroundColor: "rgba(163,61,53,0.07)",
+    borderColor: colors.threatBorder,
   },
   paymentItemNoBorder: {
     borderBottomWidth: 0,
   },
   paymentItemLeft: {
     flex: 1,
+    paddingRight: spacing.xs,
   },
   paymentMerchant: {
     ...typography.bodySemibold,
     color: colors.textPrimary,
-    fontSize: 14,
+    fontSize: 13.5,
   },
   paymentDate: {
     ...typography.small,
     color: colors.textMuted,
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 2,
   },
   paymentItemRight: {
     alignItems: "flex-end",
     gap: 4,
+    flexShrink: 0,
   },
   paymentAmount: {
     ...typography.bodySemibold,
     color: colors.textPrimary,
-    fontWeight: "700",
+    fontWeight: "600",
     fontSize: 14,
+    letterSpacing: -0.2,
   },
   emptyText: {
     ...typography.body,

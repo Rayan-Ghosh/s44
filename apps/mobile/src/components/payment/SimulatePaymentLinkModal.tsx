@@ -131,8 +131,8 @@ export const SimulatePaymentLinkModal: React.FC<SimulatePaymentLinkModalProps> =
                   >
                     <View style={styles.presetTop}>
                       <Text style={styles.presetTitle}>{item.title}</Text>
-                      <View style={[styles.badge, { backgroundColor: `${item.badgeColor}20`, borderColor: item.badgeColor }]}>
-                        <Text style={[styles.badgeText, { color: item.badgeColor }]}>{item.badge}</Text>
+                      <View style={[styles.badge, { backgroundColor: item.badgeColor, borderColor: item.badgeColor }]}>
+                        <Text style={[styles.badgeText, { color: colors.textInverse }]}>{item.badge}</Text>
                       </View>
                     </View>
                     <Text style={styles.presetSub}>{item.subtitle}</Text>
@@ -317,8 +317,16 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     color: colors.textPrimary,
+    backgroundColor: "transparent",
     ...typography.small,
     fontSize: 12,
+    ...(Platform.OS === "web"
+      ? ({
+          outlineStyle: "none",
+          outlineWidth: 0,
+          backgroundColor: "transparent",
+        } as any)
+      : {}),
   },
   triggerBtn: {
     width: 32,

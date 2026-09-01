@@ -79,6 +79,8 @@ htmlcov/
 .env.*.local
 .env.development
 .env.production
+.env.old
+.env.*.bak
 *.pem
 *.key
 *.crt
@@ -160,6 +162,11 @@ Avaran.db
 *.sqlite3
 *.sqlite3-journal
 *.db-journal
+# Ad-hoc backups and superseded copies made during local verification/repair
+# sessions — never source, never the canonical file itself.
+Avaran.db.backup*
+Avaran.db.before-*
+*.STALE*
 
 # --------------------------------------------------------------------------
 # Docker / infra local overrides
