@@ -13,6 +13,7 @@ import { colors } from "../../theme/colors";
 import { typography } from "../../theme/typography";
 import { spacing, radii, shadows } from "../../theme/layout";
 import { GuardianRequest } from "../../types/guardian";
+import { getRiskLevelFromScore } from "../../utils/risk-scoring";
 
 interface NotificationDropdownProps {
   visible: boolean;
@@ -79,13 +80,25 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({
                     <Ionicons name="shield-outline" size={18} color={colors.threat} />
                   </View>
                   <View style={styles.notifTextCol}>
-                    <Text style={styles.notifTitle} numberOfLines={1}>
-                      Guardian Approval Needed
-                    </Text>
+                    <View style={styles.notifHeaderRow}>
+                      <Text style={styles.notifTitle} numberOfLines={1}>
+                        {req.senderName ? `Payment by ${req.senderName}` : "Guardian Approval Needed"}
+                      </Text>
+                      <View style={styles.riskBadge}>
+                        <Text style={styles.riskBadgeText}>
+                          {req.riskLevel || getRiskLevelFromScore(req.riskScore)} {Math.round(req.riskScore)}/100
+                        </Text>
+                      </View>
+                    </View>
                     <Text style={styles.notifSub} numberOfLines={1}>
                       ₹{req.amount.toLocaleString("en-IN")} · {req.merchant}
                     </Text>
-                    <Text style={styles.notifMeta}>Tap to review</Text>
+                    {req.reasons && req.reasons.length > 0 && (
+                      <Text style={styles.notifReasons} numberOfLines={2}>
+                        ⚠ {req.reasons.slice(0, 2).join(" · ")}
+                      </Text>
+                    )}
+                    <Text style={styles.notifMeta}>Tap to review & authorize</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                 </TouchableOpacity>
@@ -112,8 +125,8 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    width: 300,
-    maxHeight: 360,
+    width: 320,
+    maxHeight: 420,
     overflow: "hidden",
     ...shadows.md,
   },
@@ -159,11 +172,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   list: {
-    maxHeight: 300,
+    maxHeight: 340,
   },
   notifItem: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
@@ -181,26 +194,58 @@ const styles = StyleSheet.create({
     borderColor: colors.threatBorder,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 2,
   },
   notifTextCol: {
     flex: 1,
-    gap: 1,
+    gap: 2,
+  },
+  notifHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.xs,
   },
   notifTitle: {
     ...typography.smallSemibold,
     color: colors.textPrimary,
     fontSize: 13,
     fontWeight: "700",
+    flex: 1,
+  },
+  riskBadge: {
+    backgroundColor: colors.threatSurface,
+    borderWidth: 1,
+    borderColor: colors.threatBorder,
+    borderRadius: radii.sm,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  riskBadgeText: {
+    ...typography.caption,
+    color: colors.threat,
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.3,
   },
   notifSub: {
     ...typography.small,
     color: colors.textSecondary,
     fontSize: 12,
+    fontWeight: "600",
   },
-  notifMeta: {
+  notifReasons: {
     ...typography.small,
     color: colors.textMuted,
     fontSize: 11,
+    lineHeight: 14,
     marginTop: 1,
+  },
+  notifMeta: {
+    ...typography.small,
+    color: colors.brand,
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
   },
 });

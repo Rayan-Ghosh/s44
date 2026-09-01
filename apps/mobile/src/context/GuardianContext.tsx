@@ -12,29 +12,58 @@ import { GuardianService, GuardianRequestDto } from "../services/guardian-servic
 import { PaymentService, UserTransaction } from "../services/payment-service";
 import { useAuth } from "./AuthContext";
 
+import { ApiClient, IS_DEMO_MODE, getApiBaseUrl } from "../services/api-client";
+import { getRiskLevelFromScore } from "../utils/risk-scoring";
+
 // A 2-minute hold, matching the backend's real expiry (spec §6.3) — the UI
 // previously used a hardcoded 60s that didn't match what the server actually
 // enforced.
 const HOLD_SECONDS = 120;
 const POLL_INTERVAL_MS = 3000;
 
+const parseUtcDate = (dateStr: string | null | undefined): number => {
+  if (!dateStr) return 0;
+  const s = dateStr.endsWith("Z") || dateStr.includes("+") ? dateStr : `${dateStr}Z`;
+  const parsed = new Date(s).getTime();
+  return isNaN(parsed) ? 0 : parsed;
+};
+
 const toGuardianRequest = (
   dto: GuardianRequestDto,
   fallback?: Partial<Pick<GuardianRequest, "merchant" | "paymentMethod" | "riskLevel">>
-): GuardianRequest => ({
-  id: String(dto.id),
-  transactionId: String(dto.transactionId),
-  merchant: fallback?.merchant || "Recipient",
-  amount: dto.transactionAmount,
-  paymentMethod: fallback?.paymentMethod || "UPI",
-  riskScore: dto.riskScore ?? 75,
-  riskLevel: fallback?.riskLevel || (dto.riskScore && dto.riskScore >= 75 ? "HIGH" : "MEDIUM"),
-  reasons: dto.riskReasons,
-  status: (dto.outcome || "PENDING") as GuardianStatus,
-  createdAt: new Date(dto.requestedAt).getTime(),
-  expiresAt: new Date(dto.expiresAt).getTime(),
-  resolvedAt: dto.resolvedAt ? new Date(dto.resolvedAt).getTime() : undefined,
-});
+): GuardianRequest => {
+  const createdAt = parseUtcDate(dto.requestedAt) || Date.now();
+  const expiresAt =
+    dto.remainingSeconds > 0
+      ? Date.now() + dto.remainingSeconds * 1000
+      : parseUtcDate(dto.expiresAt) || createdAt + HOLD_SECONDS * 1000;
+  const resolvedAt = dto.resolvedAt ? parseUtcDate(dto.resolvedAt) : undefined;
+  // Authoritative score -> level, never a locally invented threshold. This
+  // used to be `dto.riskScore >= 75 ? "HIGH" : "MEDIUM"` (a different cutoff
+  // than utils/risk-scoring.ts's shared 61/31 bands, and one that could never
+  // produce "LOW") — the same transaction could show as MEDIUM here while
+  // correctly showing LOW/HIGH elsewhere. `?? 0` similarly replaces an
+  // invented `?? 75` fallback score.
+  const resolvedRiskScore = dto.riskScore ?? 0;
+
+  return {
+    id: String(dto.id),
+    transactionId: String(dto.transactionId),
+    merchant: dto.recipientName || fallback?.merchant || "Recipient",
+    amount: dto.transactionAmount,
+    paymentMethod: fallback?.paymentMethod || "UPI",
+    riskScore: resolvedRiskScore,
+    riskLevel: fallback?.riskLevel || getRiskLevelFromScore(resolvedRiskScore),
+    reasons: dto.riskReasons,
+    status: (dto.outcome || "PENDING") as GuardianStatus,
+    senderName: dto.senderName,
+    senderPhoneMasked: dto.senderPhoneMasked,
+    recipientName: dto.recipientName,
+    createdAt,
+    expiresAt,
+    resolvedAt,
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Context shape
@@ -59,7 +88,11 @@ interface GuardianContextType {
   paymentOutcome: "APPROVED" | "REJECTED" | "EXPIRED" | null;
 
   initiateGuardianRequest: (tx: UserTransaction) => Promise<void>;
-  respondToRequest: (requestId: string, decision: "APPROVED" | "REJECTED") => Promise<void>;
+  syncActiveRequestForTransaction: (tx: UserTransaction) => Promise<void>;
+  respondToRequest: (
+    requestId: string,
+    decision: "APPROVED" | "REJECTED"
+  ) => Promise<{ success: boolean; error?: string }>;
   clearPaymentOutcome: () => void;
 
   notificationBadge: number;
@@ -84,7 +117,8 @@ const GuardianContext = createContext<GuardianContextType>({
   countdown: HOLD_SECONDS,
   paymentOutcome: null,
   initiateGuardianRequest: async () => {},
-  respondToRequest: async () => {},
+  syncActiveRequestForTransaction: async () => {},
+  respondToRequest: async () => ({ success: true }),
   clearPaymentOutcome: () => {},
   notificationBadge: 0,
   clearNotificationBadge: () => {},
@@ -109,19 +143,23 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
   const [approvalCard, setApprovalCard] = useState<GuardianRequest | null>(null);
 
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activePollHolderRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resolvedRef = useRef<boolean>(false);
   const seenPendingIdsRef = useRef<Set<string>>(new Set());
+
+  // Pulled to top-of-component scope so the pending-request polling effect
+  // can read session.userId before the contacts are loaded.
+  const { session } = useAuth();
 
   const clearTimers = useCallback(() => {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
     }
-    if (activePollRef.current) {
-      clearInterval(activePollRef.current);
-      activePollRef.current = null;
+    if (activePollHolderRef.current) {
+      clearInterval(activePollHolderRef.current);
+      activePollHolderRef.current = null;
     }
   }, []);
 
@@ -132,34 +170,66 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, [clearTimers]);
 
+  // Clear pending and notification state on user session change
+  useEffect(() => {
+    seenPendingIdsRef.current.clear();
+    setPendingRequests([]);
+    setNotificationBadge(0);
+    setApprovalCard(null);
+  }, [session?.userId]);
+
   // -------------------------------------------------------------------------
-  // Poll for pending requests visible to this user's own trusted contact
-  // (the demo runs both "sender" and "guardian" roles on one device — a real
-  // multi-device guardian would poll this same endpoint from their own app).
+  // Poll for pending requests addressed to this guardian user.
+  //
+  // Only the actual guardian (trusted person) whose guardian_user_id matches
+  // the currently logged-in session.userId will receive pending requests.
+  // The payment sender will receive [] from the backend, ensuring zero badge
+  // or approval cards appear on the sender's account.
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (pendingPollRef.current) {
       clearInterval(pendingPollRef.current);
       pendingPollRef.current = null;
     }
-    const contactId = trustedContacts[0]?.id ? parseInt(trustedContacts[0].id, 10) : null;
-    if (!contactId || !isTrustedFeatureEnabled) {
+
+    const guardianUserId = session?.userId && session.userId > 0 ? session.userId : null;
+
+    // Only authenticated guardian sessions should poll for approval requests
+    if (!guardianUserId) {
       setPendingRequests([]);
+      setNotificationBadge(0);
       return;
     }
 
     const poll = async () => {
-      const dtos = await GuardianService.getPendingRequests(contactId);
+      const baseUrl = getApiBaseUrl();
+      const pollingUrl = `${baseUrl}/api/v1/guardian/requests/by-guardian-user/${guardianUserId}`;
+      const dtos = await GuardianService.getPendingRequestsByGuardianUserId(guardianUserId);
+
       const mapped = dtos
         .map((d) => toGuardianRequest(d))
         .filter((r) => r.status === "PENDING" && r.expiresAt > Date.now());
+
+      console.log(
+        `[GuardianContext:DIAGNOSTIC] session.userId=${guardianUserId} | API_URL=${baseUrl} | Polling_URL=${pollingUrl} | API_response_count=${dtos.length} | pendingRequests.length=${mapped.length} | notificationBadge=${mapped.length}`
+      );
+
       const newOnes = mapped.filter((r) => !seenPendingIdsRef.current.has(r.id));
       if (newOnes.length > 0) {
-        Vibration.vibrate([0, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200]);
-        setNotificationBadge((prev) => prev + newOnes.length);
+        // Vibrate only the guardian device receiving the new request
+        Vibration.vibrate([0, 250, 150, 250, 150, 250, 150, 250, 150, 250]);
       }
+
       mapped.forEach((r) => seenPendingIdsRef.current.add(r.id));
       setPendingRequests(mapped);
+      setNotificationBadge(mapped.length);
+
+      // Auto-close open approval card if the request expired or was resolved elsewhere
+      setApprovalCard((current) => {
+        if (!current) return null;
+        const stillPending = mapped.some((r) => r.id === current.id);
+        return stillPending ? current : null;
+      });
     };
 
     poll();
@@ -170,7 +240,8 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
         pendingPollRef.current = null;
       }
     };
-  }, [trustedContacts, isTrustedFeatureEnabled]);
+  }, [session?.userId]);
+
 
   const toggleTrustedFeature = useCallback(() => {
     let nextState = false;
@@ -208,13 +279,6 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
-  // Load once a session exists, regardless of which tab the user opens
-  // first. Previously this only happened from TrustedScreen's own mount
-  // effect — found live while testing: a HIGH-risk payment on Payments
-  // silently skipped the Guardian hold entirely if the user hadn't visited
-  // the Trusted tab yet in that session, even with a real saved contact,
-  // because trustedContacts was still empty at decision time.
-  const { session } = useAuth();
   useEffect(() => {
     if (session?.userId) {
       loadContacts(session.userId);
@@ -273,7 +337,15 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       const txnId = parseInt(tx.id, 10);
       if (isNaN(txnId)) return;
 
-      const contactId = trustedContacts[0]?.id ? parseInt(trustedContacts[0].id, 10) : undefined;
+      let contactId = trustedContacts[0]?.id ? parseInt(trustedContacts[0].id, 10) : undefined;
+      if (!contactId && session?.userId) {
+        const fetched = await GuardianService.getTrustedContacts(session.userId);
+        if (fetched.length > 0) {
+          setTrustedContacts(fetched.slice(0, 1));
+          contactId = parseInt(fetched[0].id, 10);
+        }
+      }
+
       const res = await GuardianService.createRequest(txnId, contactId);
       if (!res.success || !res.request) {
         setPaymentOutcome("EXPIRED");
@@ -286,22 +358,37 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
         riskLevel: tx.riskLevel,
       });
 
-      setActiveRequest(request);
-      setCountdown(res.request.remainingSeconds || HOLD_SECONDS);
-      setPaymentOutcome(null);
-      setNotificationBadge((prev) => prev + 1);
+      const initialRemaining =
+        typeof res.request.remainingSeconds === "number" && res.request.remainingSeconds > 0
+          ? res.request.remainingSeconds
+          : HOLD_SECONDS;
+      const expiresAtMs = Date.now() + initialRemaining * 1000;
 
-      Vibration.vibrate([0, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200]);
+      setActiveRequest(request);
+      setCountdown(initialRemaining);
+      setPaymentOutcome(null);
 
       countdownIntervalRef.current = setInterval(() => {
-        setCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
+        const rem = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+        setCountdown(rem);
+        if (rem <= 0) {
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+          }
+        }
       }, 1000);
 
       // Poll the request's own status so an approval/rejection made from the
       // guardian side of the flow (or another device) is reflected here.
-      activePollRef.current = setInterval(async () => {
+      activePollHolderRef.current = setInterval(async () => {
         const latest = await GuardianService.getRequest(res.request!.id);
         if (!latest || resolvedRef.current) return;
+
+        // Keep countdown synchronized with authoritative backend remainingSeconds
+        if (typeof latest.remainingSeconds === "number") {
+          setCountdown(latest.remainingSeconds);
+        }
 
         if (latest.outcome && latest.outcome !== "PENDING") {
           resolvedRef.current = true;
@@ -329,21 +416,119 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }, POLL_INTERVAL_MS);
     },
-    [activeRequest, clearTimers, trustedContacts]
+    [activeRequest, clearTimers, trustedContacts, session?.userId]
+  );
+
+  const syncActiveRequestForTransaction = useCallback(
+    async (tx: UserTransaction) => {
+      const numTxnId = parseInt(tx.id, 10);
+      if (isNaN(numTxnId)) return;
+
+      let contactId = trustedContacts[0]?.id ? parseInt(trustedContacts[0].id, 10) : undefined;
+      if (!contactId && session?.userId) {
+        const fetched = await GuardianService.getTrustedContacts(session.userId);
+        if (fetched.length > 0) {
+          setTrustedContacts(fetched.slice(0, 1));
+          contactId = parseInt(fetched[0].id, 10);
+        }
+      }
+
+      let dto = await GuardianService.getRequestByTransactionId(numTxnId);
+      
+      // If transaction is held / risk detected with high risk and trusted contacts exist, create request if not present
+      if (!dto && isTrustedFeatureEnabled && (contactId || trustedContacts.length > 0) && (tx.status === "Risk detected" || tx.status === "Held") && (tx.riskLevel === "HIGH" || (tx.riskScore && tx.riskScore >= 60))) {
+        const createRes = await GuardianService.createRequest(numTxnId, contactId);
+        if (createRes.success && createRes.request) {
+          dto = createRes.request;
+        }
+      }
+
+      if (dto && dto.outcome === "PENDING" && dto.remainingSeconds > 0) {
+        const request = toGuardianRequest(dto, {
+          merchant: tx.merchant,
+          paymentMethod: tx.paymentMethod,
+          riskLevel: tx.riskLevel,
+        });
+
+        const initialRemaining = dto.remainingSeconds;
+        const expiresAtMs = Date.now() + initialRemaining * 1000;
+
+        clearTimers();
+        resolvedRef.current = false;
+        setActiveRequest(request);
+        setCountdown(initialRemaining);
+        setPaymentOutcome(null);
+
+        countdownIntervalRef.current = setInterval(() => {
+          const rem = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+          setCountdown(rem);
+          if (rem <= 0) {
+            if (countdownIntervalRef.current) {
+              clearInterval(countdownIntervalRef.current);
+              countdownIntervalRef.current = null;
+            }
+          }
+        }, 1000);
+
+        activePollHolderRef.current = setInterval(async () => {
+          const latest = await GuardianService.getRequest(dto.id);
+          if (!latest || resolvedRef.current) return;
+
+          if (typeof latest.remainingSeconds === "number") {
+            setCountdown(latest.remainingSeconds);
+          }
+
+          if (latest.outcome && latest.outcome !== "PENDING") {
+            resolvedRef.current = true;
+            clearTimers();
+            const finalStatus: GuardianStatus = latest.outcome === "APPROVED" ? "APPROVED" : "REJECTED";
+            setActiveRequest((prev) => (prev ? { ...prev, status: finalStatus, resolvedAt: Date.now() } : null));
+            PaymentService.updateTransactionStatus(
+              tx.id,
+              latest.outcome === "APPROVED" ? "Approved by you" : "Blocked"
+            );
+            setPaymentOutcome(latest.outcome === "APPROVED" ? "APPROVED" : "REJECTED");
+            setNotificationBadge(0);
+            setApprovalCard(null);
+            return;
+          }
+
+          if (latest.remainingSeconds <= 0) {
+            resolvedRef.current = true;
+            clearTimers();
+            setActiveRequest((prev) => (prev ? { ...prev, status: "EXPIRED", resolvedAt: Date.now() } : null));
+            PaymentService.updateTransactionStatus(tx.id, "Blocked");
+            setPaymentOutcome("EXPIRED");
+            setNotificationBadge(0);
+            setApprovalCard(null);
+          }
+        }, POLL_INTERVAL_MS);
+      }
+    },
+    [clearTimers]
   );
 
   // -------------------------------------------------------------------------
   // Respond to guardian request — real POST .../approve or .../reject.
   // -------------------------------------------------------------------------
   const respondToRequest = useCallback(
-    async (requestId: string, decision: "APPROVED" | "REJECTED") => {
+    async (
+      requestId: string,
+      decision: "APPROVED" | "REJECTED"
+    ): Promise<{ success: boolean; error?: string }> => {
       const numId = parseInt(requestId, 10);
-      if (isNaN(numId)) return;
+      if (isNaN(numId)) {
+        return { success: false, error: "Invalid request identifier." };
+      }
 
-      const res = decision === "APPROVED"
-        ? await GuardianService.approve(numId)
-        : await GuardianService.reject(numId);
-      if (!res.success) return;
+      const res =
+        decision === "APPROVED"
+          ? await GuardianService.approve(numId)
+          : await GuardianService.reject(numId);
+
+      if (!res.success) {
+        return { success: false, error: res.error || `Failed to ${decision.toLowerCase()} request.` };
+      }
 
       if (!resolvedRef.current || activeRequest?.id === requestId) {
         resolvedRef.current = true;
@@ -368,11 +553,14 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       setPaymentOutcome(decision);
 
-      setPendingRequests((prev) =>
-        prev.map((r) => (r.id === requestId ? { ...r, status: decision, resolvedAt: Date.now() } : r))
-      );
-      setNotificationBadge(0);
-      setApprovalCard(null);
+      // Remove from pendingRequests and update notification badge
+      setPendingRequests((prev) => prev.filter((r) => r.id !== requestId));
+      setNotificationBadge((prev) => Math.max(0, prev - 1));
+      
+      // Ensure resolved request ID is remembered so it never alerts again
+      seenPendingIdsRef.current.add(requestId);
+
+      return { success: true };
     },
     [activeRequest, clearTimers, pendingRequests]
   );
@@ -411,6 +599,7 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
         countdown,
         paymentOutcome,
         initiateGuardianRequest,
+        syncActiveRequestForTransaction,
         respondToRequest,
         clearPaymentOutcome,
         notificationBadge,

@@ -28,7 +28,7 @@ def extract_client_ip(request: Optional[Request]) -> str:
         return "127.0.0.1"
 
     forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded and settings.environment == "production":
+    if forwarded:
         # Extract the leftmost non-empty client IP
         ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
         if ips:

@@ -102,14 +102,79 @@ def get_user_devices(user_id: int, db: Session = Depends(get_db)) -> list:
     ]
 
 
+def get_risk_level_from_score(score: float) -> str:
+    s = float(score) if score is not None else 0.0
+    if s >= 61.0:
+        return "HIGH"
+    if s >= 31.0:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _get_or_compute_risk_score(db: Session, txn: Transaction):
+    risk = risk_repository.get_latest_risk_score(db, txn.id)
+    if risk is not None:
+        return risk
+
+    try:
+        from ml.inference.predict import get_predictor
+        from app.models.enums import RiskDecision
+        predictor = get_predictor()
+        user_risk_profile = txn.user.risk_profile if txn.user and txn.user.risk_profile else {}
+        inference_input = {
+            "transaction": {
+                "transaction_id": str(txn.id),
+                "amount": float(txn.amount),
+                "recipient_id": str(txn.recipient_id),
+                "timestamp": txn.timestamp.isoformat() if txn.timestamp else "",
+                "device_id": str(txn.device_id),
+                "location": txn.location or "",
+                "voice_transcript": "",
+            },
+            "user_profile": user_risk_profile,
+        }
+        decision_package = predictor.predict(inference_input)
+        final_sc = float(decision_package.get("risk_score", 0.0))
+        computed_level_str = get_risk_level_from_score(final_sc)
+        level_map = {"LOW": RiskLevel.LOW, "MEDIUM": RiskLevel.MEDIUM, "HIGH": RiskLevel.HIGH}
+        decision_map = {
+            "ALLOW": RiskDecision.ALLOW,
+            "WARN_CHOICE": RiskDecision.WARN,
+            "CONFIRM_OR_CANCEL": RiskDecision.CONFIRM_OR_CANCEL,
+        }
+        r_level = level_map.get(computed_level_str, RiskLevel.LOW)
+        r_dec = decision_map.get(decision_package.get("decision"), RiskDecision.ALLOW)
+        factors_to_save = []
+        for factor_name in decision_package.get("risk_factors", []):
+            pct = decision_package.get("risk_contributions_pct", {}).get(factor_name, 0.0)
+            factors_to_save.append({
+                "factor_type": "ml_signal",
+                "name": factor_name,
+                "contribution": pct,
+                "explanation": factor_name.replace("_", " ").title(),
+            })
+        saved = risk_repository.save_risk_evaluation(
+            db,
+            transaction_id=txn.id,
+            fraud_probability=float(decision_package.get("sub_scores", {}).get("transaction_fraud", 0.0)),
+            final_score=final_sc,
+            risk_level=r_level,
+            decision=r_dec,
+            risk_factors=factors_to_save,
+        )
+        return saved
+    except Exception:
+        return None
+
+
 @router.get("/{user_id}/overview")
 def get_user_overview(user_id: int, db: Session = Depends(get_db)) -> dict:
     try:
         user = user_service.get_user(db, user_id)
-    except UserNotFoundError as exc:
+    except UserNotFoundError:
         user = None
 
-    txns = db.query(Transaction).filter(Transaction.user_id == user_id).all() if user else []
+    txns = db.query(Transaction).filter(Transaction.user_id == user_id).order_by(Transaction.timestamp.desc()).all() if user else []
 
     if not txns:
         return {
@@ -126,19 +191,41 @@ def get_user_overview(user_id: int, db: Session = Depends(get_db)) -> dict:
 
     total_amount = sum(float(t.amount) for t in txns)
     safe_count = sum(1 for t in txns if t.status in (TransactionStatus.CONFIRMED, TransactionStatus.ALLOWED, TransactionStatus.GUARDIAN_APPROVED))
-    needs_review_count = sum(1 for t in txns if t.status in (TransactionStatus.AWAITING_CONFIRMATION, TransactionStatus.PENDING, TransactionStatus.PENDING_GUARDIAN_APPROVAL))
+    
+    # Active / Pending transactions requiring review or action
+    ACTIVE_REVIEW_STATUSES = (
+        TransactionStatus.PENDING,
+        TransactionStatus.AWAITING_CONFIRMATION,
+        TransactionStatus.PENDING_AUTHORIZATION,
+        TransactionStatus.PENDING_GUARDIAN_APPROVAL,
+        TransactionStatus.AUTHORIZED,
+    )
+    active_review_txns = [t for t in txns if t.status in ACTIVE_REVIEW_STATUSES]
+    needs_review_count = len(active_review_txns)
     blocked_count = sum(1 for t in txns if t.status in (TransactionStatus.CANCELLED, TransactionStatus.GUARDIAN_REJECTED))
     reported_count = sum(1 for t in txns if t.status == TransactionStatus.REPORTED)
 
-    latest_risk = 0.0
-    latest_level = "LOW"
-    for t in txns:
-        if t.risk_scores:
-            latest_risk = t.risk_scores[-1].final_score
-            latest_level = t.risk_scores[-1].risk_level.value
-            break
+    # Compute risk score prioritizing active review items
+    current_risk_score = 0.0
+    current_risk_level = "LOW"
 
-    protection_status = "ATTENTION REQUIRED" if (needs_review_count > 0 or latest_level == "HIGH") else "PROTECTED"
+    if active_review_txns:
+        max_score = -1.0
+        
+        for t in active_review_txns:
+            score_obj = _get_or_compute_risk_score(db, t)
+            if score_obj:
+                sc = float(score_obj.final_score)
+                if sc > max_score:
+                    max_score = sc
+        
+        current_risk_score = max(0.0, max_score) if max_score >= 0 else 0.0
+        current_risk_level = get_risk_level_from_score(current_risk_score)
+    else:
+        current_risk_score = 0.0
+        current_risk_level = "LOW"
+
+    protection_status = "ATTENTION REQUIRED" if (needs_review_count > 0 or current_risk_level in ("HIGH", "MEDIUM")) else "PROTECTED"
 
     return {
         "total_amount_this_month": total_amount,
@@ -147,8 +234,8 @@ def get_user_overview(user_id: int, db: Session = Depends(get_db)) -> dict:
         "needs_review_count": needs_review_count,
         "blocked_count": blocked_count,
         "reported_count": reported_count,
-        "current_risk_level": latest_level,
-        "current_risk_score": latest_risk,
+        "current_risk_level": current_risk_level,
+        "current_risk_score": current_risk_score,
         "protection_status": protection_status,
     }
 
@@ -174,7 +261,7 @@ def get_user_transactions(
 
     items = []
     for t in txns:
-        latest_risk = risk_repository.get_latest_risk_score(db, t.id)
+        latest_risk = _get_or_compute_risk_score(db, t)
         factors = []
         if latest_risk and latest_risk.risk_factors:
             for rf in latest_risk.risk_factors:
@@ -185,6 +272,7 @@ def get_user_transactions(
                     "explanation": rf.explanation,
                 })
 
+        final_sc = float(latest_risk.final_score) if latest_risk else 0.0
         items.append({
             "id": t.id,
             "merchant": t.recipient.display_name if (t.recipient and t.recipient.display_name) else "UPI Merchant",
@@ -192,8 +280,8 @@ def get_user_transactions(
             "timestamp": t.timestamp.isoformat() if t.timestamp else "",
             "payment_method": t.payment_method or "UPI",
             "status": t.status.value if hasattr(t.status, "value") else str(t.status),
-            "risk_level": latest_risk.risk_level.value if (latest_risk and hasattr(latest_risk.risk_level, "value")) else "LOW",
-            "risk_score": float(latest_risk.final_score) if latest_risk else 0.0,
+            "risk_level": get_risk_level_from_score(final_sc),
+            "risk_score": final_sc,
             "risk_factors": factors,
         })
 
@@ -211,6 +299,7 @@ def get_user_trusted_contacts_by_path(user_id: int, db: Session = Depends(get_db
             "phone": c.phone_masked,
             "phone_number": c.phone_masked,
             "relationship": c.relationship,
+            "guardian_user_id": c.guardian_user_id,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in contacts
@@ -220,14 +309,21 @@ def get_user_trusted_contacts_by_path(user_id: int, db: Session = Depends(get_db
 @router.post("/{user_id}/trusted-contacts", status_code=201)
 def add_user_trusted_contact_by_path(user_id: int, payload: dict, db: Session = Depends(get_db)) -> dict:
     from app.core.security import hash_identifier, mask_phone
-    from app.repositories import guardian_repository
+    from app.repositories import guardian_repository, user_repository
 
     name = payload.get("name") or payload.get("contact_name") or "Contact"
     phone_raw = payload.get("phone_number") or payload.get("phone") or "+91-98765-00000"
     rel = payload.get("relationship") or "Family"
+    guardian_user_id = payload.get("guardian_user_id")
 
     phone_hash = hash_identifier(phone_raw)
     phone_masked = mask_phone(phone_raw)
+
+    # If guardian_user_id not passed explicitly, attempt to match an existing user by phone hash
+    if not guardian_user_id:
+        matched_user = user_repository.get_user_by_phone_hash(db, phone_hash)
+        if matched_user:
+            guardian_user_id = matched_user.id
 
     c = guardian_repository.create_trusted_contact(
         db,
@@ -236,6 +332,8 @@ def add_user_trusted_contact_by_path(user_id: int, payload: dict, db: Session = 
         contact_phone_hash=phone_hash,
         phone_masked=phone_masked,
         relationship=rel,
+        guardian_user_id=guardian_user_id,
+        phone_raw=phone_raw,
     )
     return {
         "id": c.id,
@@ -243,6 +341,7 @@ def add_user_trusted_contact_by_path(user_id: int, payload: dict, db: Session = 
         "phone": c.phone_masked,
         "phone_number": c.phone_masked,
         "relationship": c.relationship,
+        "guardian_user_id": c.guardian_user_id,
         "created_at": c.created_at.isoformat() if c.created_at else None,
     }
 

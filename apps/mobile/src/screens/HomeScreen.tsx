@@ -31,6 +31,11 @@ import { AlertService, SecurityAlert } from "../services/alert-service";
 import { NotificationDropdown } from "../components/guardian/NotificationDropdown";
 import { GuardianApprovalCard } from "../components/guardian/GuardianApprovalCard";
 import { LinearGradient } from "expo-linear-gradient";
+import {
+  getRiskLevelFromScore,
+  getStatusBadgeProps,
+  validateAndLogRiskState,
+} from "../utils/risk-scoring";
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -128,7 +133,14 @@ export const HomeScreen: React.FC = () => {
   const userName = session?.name ? session.name.split(" ")[0] : "Rahul";
   const activeAlertsList = securityAlerts && securityAlerts.length > 0 ? securityAlerts : alerts;
   const unreadAlerts = activeAlertsList.filter((a: any) => !a.isRead);
-  const suspiciousTx = recentTxns.find((t) => t.status === "Risk detected" || t.status === "Held");
+  const activeReviewTxns = recentTxns.filter((t) => t.status === "Risk detected" || t.status === "Held");
+  const suspiciousTx =
+    activeReviewTxns.length > 0
+      ? activeReviewTxns.reduce(
+          (max, cur) => ((cur.riskScore ?? 0) > (max.riskScore ?? 0) ? cur : max),
+          activeReviewTxns[0]
+        )
+      : null;
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -199,11 +211,17 @@ export const HomeScreen: React.FC = () => {
               <Ionicons
                 name="notifications-outline"
                 size={22}
-                color={notificationBadge > 0 ? colors.threat : colors.textSecondary}
+                color={
+                  notificationBadge > 0 || pendingRequests.length > 0
+                    ? colors.threat
+                    : colors.textSecondary
+                }
               />
-              {notificationBadge > 0 && (
+              {(notificationBadge > 0 || pendingRequests.length > 0) && (
                 <View style={styles.bellBadge}>
-                  <Text style={styles.bellBadgeText}>{notificationBadge}</Text>
+                  <Text style={styles.bellBadgeText}>
+                    {notificationBadge > 0 ? notificationBadge : pendingRequests.length}
+                  </Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -251,20 +269,24 @@ export const HomeScreen: React.FC = () => {
 
             <LinearGradient
               colors={
-                overview.currentRiskLevel === "HIGH"
+                (overview.currentRiskLevel || getRiskLevelFromScore(overview.currentRiskScore)) === "HIGH"
                   ? ["#FFFFFF", "rgba(247,238,236,0.7)"]
+                  : (overview.currentRiskLevel || getRiskLevelFromScore(overview.currentRiskScore)) === "MEDIUM"
+                  ? ["#FFFFFF", "rgba(254,243,199,0.5)"]
                   : ["#FFFFFF", "rgba(234,243,240,0.7)"]
               }
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={[
                 styles.heroRiskCard,
-                overview.currentRiskLevel === "HIGH" ? styles.heroRiskCardHigh : styles.heroRiskCardLow,
+                (overview.currentRiskLevel || getRiskLevelFromScore(overview.currentRiskScore)) === "HIGH"
+                  ? styles.heroRiskCardHigh
+                  : styles.heroRiskCardLow,
               ]}
             >
               <RiskGauge
                 score={Math.round(overview?.currentRiskScore ?? 0)}
-                riskLevel={overview?.currentRiskLevel || "LOW"}
+                riskLevel={overview?.currentRiskLevel || getRiskLevelFromScore(overview?.currentRiskScore ?? 0)}
                 size="md"
                 animationTrigger={animationTrigger}
                 enableRevealAnimation={true}
@@ -273,44 +295,60 @@ export const HomeScreen: React.FC = () => {
           </View>
 
           {/* 2. SECONDARY (ACTIONABLE): NEEDS YOUR ATTENTION */}
-          {suspiciousTx ? (
-            <StaggerRevealCard
-              index={0}
-              baseDelay={1350}
-              hasPlayed={hasPlayedHomeStaggerRef.current}
-              style={styles.section}
-            >
-              <Text style={styles.sectionHeading}>NEEDS YOUR ATTENTION</Text>
+          {suspiciousTx ? (() => {
+            const attScore = suspiciousTx.riskScore ?? 0;
+            const attLevel = suspiciousTx.riskLevel || getRiskLevelFromScore(attScore);
+            const attBadge = getStatusBadgeProps(attLevel);
+            validateAndLogRiskState({
+              component: "HomeScreen:AttentionCard",
+              transactionId: suspiciousTx.id,
+              riskScore: attScore,
+              riskLevel: attLevel,
+            });
 
-              <TouchableOpacity
-                style={styles.attentionCard}
-                onPress={() => navigation.navigate("Payments", { selectedTxId: suspiciousTx.id })}
-                activeOpacity={0.85}
+            return (
+              <StaggerRevealCard
+                index={0}
+                baseDelay={1350}
+                hasPlayed={hasPlayedHomeStaggerRef.current}
+                style={styles.section}
               >
-                <View style={styles.attentionTop}>
-                  <View style={styles.attentionIconBox}>
-                    <Ionicons name="warning" size={18} color={colors.threat} />
-                  </View>
-                  <View style={styles.attentionTextCol}>
-                    <Text style={styles.attentionMerchant}>{suspiciousTx.merchant}</Text>
-                    <Text style={styles.attentionAmount}>
-                      ₹{(suspiciousTx?.amount ?? 0).toLocaleString("en-IN")}
-                    </Text>
-                  </View>
-                  <StatusBadge label="HIGH RISK" status="high" dot={false} />
-                </View>
+                <Text style={styles.sectionHeading}>NEEDS YOUR ATTENTION</Text>
 
-                <View style={styles.attentionBottom}>
-                  <Text style={styles.riskScoreText}>
-                    Risk score: {suspiciousTx.riskScore ?? "—"}/100
-                  </Text>
-                  <View style={styles.reviewBtn}>
-                    <Text style={styles.reviewBtnText}>Review Payment →</Text>
+                <TouchableOpacity
+                  style={styles.attentionCard}
+                  onPress={() => navigation.navigate("Payments", { selectedTxId: suspiciousTx.id })}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.attentionTop}>
+                    <View style={styles.attentionIconBox}>
+                      <Ionicons
+                        name="warning"
+                        size={18}
+                        color={attLevel === "HIGH" ? colors.threat : attLevel === "MEDIUM" ? colors.caution : colors.safe}
+                      />
+                    </View>
+                    <View style={styles.attentionTextCol}>
+                      <Text style={styles.attentionMerchant}>{suspiciousTx.merchant}</Text>
+                      <Text style={styles.attentionAmount}>
+                        ₹{(suspiciousTx?.amount ?? 0).toLocaleString("en-IN")}
+                      </Text>
+                    </View>
+                    <StatusBadge label={attBadge.label} status={attBadge.status} dot={false} />
                   </View>
-                </View>
-              </TouchableOpacity>
-            </StaggerRevealCard>
-          ) : null}
+
+                  <View style={styles.attentionBottom}>
+                    <Text style={styles.riskScoreText}>
+                      Risk score: {suspiciousTx.riskScore ?? "—"}/100
+                    </Text>
+                    <View style={styles.reviewBtn}>
+                      <Text style={styles.reviewBtnText}>Review Payment →</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </StaggerRevealCard>
+            );
+          })() : null}
 
           {/* 3. SECONDARY (ALERTS): SECURITY ALERTS */}
           <StaggerRevealCard
@@ -447,12 +485,18 @@ export const HomeScreen: React.FC = () => {
                         <StatusBadge
                           label={
                             isRisk
-                              ? "Review"
+                              ? `${item.riskLevel || getRiskLevelFromScore(item.riskScore ?? 0)} RISK`
                               : item.status === "Reported"
                               ? "Reported"
                               : "Safe"
                           }
-                          status={isRisk ? "high" : item.status === "Reported" ? "escalated" : "low"}
+                          status={
+                            isRisk
+                              ? ((item.riskLevel || getRiskLevelFromScore(item.riskScore ?? 0)) === "HIGH" ? "high" : (item.riskLevel || getRiskLevelFromScore(item.riskScore ?? 0)) === "MEDIUM" ? "medium" : "low")
+                              : item.status === "Reported"
+                              ? "escalated"
+                              : "low"
+                          }
                           dot={false}
                         />
                       </View>

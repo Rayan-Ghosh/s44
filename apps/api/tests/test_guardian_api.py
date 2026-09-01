@@ -79,13 +79,75 @@ def test_guardian_request_reject(client):
     assert txn["status"] == "GUARDIAN_REJECTED"
 
 
-def test_guardian_user_friction_override(client):
-    user_id, contact_id, txn_id = _setup_high_risk_txn(client)
-    req = client.post("/api/v1/guardian/requests", json={"transaction_id": txn_id, "trusted_contact_id": contact_id}).json()
+def test_dynamic_guardian_user_lookup_and_approval(client):
+    # 1. Register User A (Payer) and User B (Guardian)
+    payer = client.post("/api/v1/users", json={"name": "Payer User", "phone_number": "+91-98765-11111"}).json()
+    guardian = client.post("/api/v1/users", json={"name": "Guardian User", "phone_number": "+91-98765-22222"}).json()
 
-    override_res = client.post(f"/api/v1/guardian/requests/{req['id']}/user-override", json={"pin": "1234"})
-    assert override_res.status_code == 200
-    assert override_res.json()["status"] == "GUARDIAN_TIMEOUT_USER_OVERRODE"
+    # 2. Payer adds Guardian by phone number -> guardian_user_id automatically resolved
+    tc_res = client.post(
+        f"/api/v1/users/{payer['id']}/trusted-contacts",
+        json={"name": "My Guardian", "phone_number": "+91-98765-22222", "relationship": "Sister"},
+    )
+    assert tc_res.status_code == 201
+    contact = tc_res.json()
+    assert contact["guardian_user_id"] == guardian["id"]
 
-    txn = client.get(f"/api/v1/transactions/{txn_id}").json()
-    assert txn["status"] == "GUARDIAN_TIMEOUT_USER_OVERRODE"
+    # 3. Payer initiates high-risk transaction
+    txn = client.post(
+        "/api/v1/transactions",
+        json={
+            "user_id": payer["id"],
+            "recipient_identifier": "unknown.crypto@upi",
+            "recipient_display_name": "Apex Crypto Merchant",
+            "device_identifier": "device-payer-1",
+            "amount": "80000.00",
+        },
+    ).json()
+
+    # 4. Trigger guardian hold request dynamically without explicit contact ID
+    req_res = client.post("/api/v1/guardian/requests", json={"transaction_id": txn["id"]})
+    assert req_res.status_code == 201
+    req = req_res.json()
+    assert req["sender_name"] == "Payer User"
+    assert req["recipient_name"] == "Apex Crypto Merchant"
+
+    # 5. Guardian polls notifications dynamically by their own user ID
+    guardian_pending = client.get(f"/api/v1/guardian/requests/by-guardian-user/{guardian['id']}").json()
+    assert len(guardian_pending) == 1
+    assert guardian_pending[0]["id"] == req["id"]
+    assert guardian_pending[0]["sender_name"] == "Payer User"
+    assert guardian_pending[0]["transaction_amount"] == 80000.0
+
+    # 6. Guardian approves
+    appr = client.post(f"/api/v1/guardian/requests/{req['id']}/approve", json={"notes": "Approved by sister"})
+    assert appr.status_code == 200
+
+    # 7. Transaction status is updated
+    txn_check = client.get(f"/api/v1/transactions/{txn['id']}").json()
+    assert txn_check["status"] == "GUARDIAN_APPROVED"
+
+    # 8. Guardian's pending list is now cleared
+    guardian_pending_after = client.get(f"/api/v1/guardian/requests/by-guardian-user/{guardian['id']}").json()
+    assert len(guardian_pending_after) == 0
+
+
+def test_late_guardian_signup_backlink(client):
+    # 1. Payer exists, Guardian does NOT yet have an account
+    payer = client.post("/api/v1/users", json={"name": "Kavita Rao", "phone_number": "+91-98765-33333"}).json()
+
+    # 2. Payer adds contact with phone +91-98765-44444 -> guardian_user_id is None initially
+    tc_res = client.post(
+        f"/api/v1/users/{payer['id']}/trusted-contacts",
+        json={"name": "Deepak Rao", "phone_number": "+91-98765-44444", "relationship": "Brother"},
+    )
+    contact = tc_res.json()
+    assert contact["guardian_user_id"] is None
+
+    # 3. Deepak now registers on Avaran
+    deepak = client.post("/api/v1/users", json={"name": "Deepak Rao", "phone_number": "+91-98765-44444"}).json()
+
+    # 4. Verify contact was automatically backlinked!
+    contacts_list = client.get(f"/api/v1/users/{payer['id']}/trusted-contacts").json()
+    assert len(contacts_list) == 1
+    assert contacts_list[0]["guardian_user_id"] == deepak["id"]

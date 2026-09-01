@@ -12,6 +12,7 @@ class TrustedContactCreate(BaseModel):
     contact_name: str = Field(..., min_length=2, max_length=100)
     phone_number: str = Field(..., min_length=10, max_length=20)
     relationship: str = Field(default="Family", max_length=50)
+    guardian_user_id: Optional[int] = None
 
 
 class TrustedContactRead(BaseModel):
@@ -22,6 +23,7 @@ class TrustedContactRead(BaseModel):
     contact_name: str
     phone_masked: str
     relationship: str
+    guardian_user_id: Optional[int] = None
     consent_status: ConsentStatus
     consented_at: datetime
     created_at: datetime
@@ -48,6 +50,9 @@ class GuardianRequestRead(BaseModel):
     transaction_amount: Optional[float] = None
     risk_score: Optional[int] = None
     risk_reasons: Optional[list[str]] = None
+    sender_name: Optional[str] = None
+    sender_phone_masked: Optional[str] = None
+    recipient_name: Optional[str] = None
 
 
 class GuardianActionRequest(BaseModel):

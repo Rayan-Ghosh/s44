@@ -40,7 +40,9 @@ class User(Base):
     recipients: Mapped[list["Recipient"]] = relationship(back_populates="user")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
     trusted_contacts: Mapped[list["TrustedContact"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
+        back_populates="user",
+        foreign_keys="TrustedContact.user_id",
+        cascade="all, delete-orphan",
     )
     contact_info: Mapped[Optional["UserContactInfo"]] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"

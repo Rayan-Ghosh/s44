@@ -9,6 +9,7 @@ import { Header } from "../components/common/Header";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { Button } from "../components/common/Button";
 import { HistoryItem, PaymentHistoryItem, CallHistoryItem } from "../types/history";
+import { getRiskLevelFromScore } from "../utils/risk-scoring";
 
 export const HistoryDetailScreen: React.FC = () => {
   const route = useRoute<any>();
@@ -29,6 +30,7 @@ export const HistoryDetailScreen: React.FC = () => {
   const isPayment = item.type === "payment";
   const payment = isPayment ? (item as PaymentHistoryItem) : null;
   const call = !isPayment ? (item as CallHistoryItem) : null;
+  const itemLevel = item.riskLevel || getRiskLevelFromScore(item.riskScore);
 
   return (
     <View style={styles.screen}>
@@ -47,8 +49,8 @@ export const HistoryDetailScreen: React.FC = () => {
         <View style={styles.card}>
           <View style={styles.topRow}>
             <StatusBadge
-              label={`${item.riskLevel} RISK · ${item.riskScore}/100`}
-              status={item.riskLevel === "HIGH" ? "high" : item.riskLevel === "MEDIUM" ? "medium" : "low"}
+              label={`${itemLevel} RISK · ${item.riskScore}/100`}
+              status={itemLevel === "HIGH" ? "high" : itemLevel === "MEDIUM" ? "medium" : "low"}
             />
             <Text style={styles.statusPill}>{item.status}</Text>
           </View>

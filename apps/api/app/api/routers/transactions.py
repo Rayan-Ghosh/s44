@@ -8,8 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.enums import FraudCaseStatus, GuardianOutcome, TransactionStatus
 from app.models.fraud_case import FraudCase
-from app.models.guardian_request import GuardianRequest
-from app.repositories import transaction_repository
+from app.repositories import guardian_repository, transaction_repository
 from app.schemas.transaction import TransactionCreate, TransactionRead
 from app.services import transaction_service
 from app.services.exceptions import TransactionNotFoundError, UserNotFoundError
@@ -46,10 +45,44 @@ def create_transaction(
         ) from exc
 
 
-@router.get("/{transaction_id}", response_model=TransactionRead)
-def get_transaction(transaction_id: int, db: Session = Depends(get_db)) -> TransactionRead:
+@router.get("/{transaction_id}")
+def get_transaction(transaction_id: int, db: Session = Depends(get_db)) -> dict:
     try:
-        return transaction_service.get_transaction(db, transaction_id)
+        txn = transaction_service.get_transaction(db, transaction_id)
+        from app.api.routers.users import _get_or_compute_risk_score
+        latest_risk = _get_or_compute_risk_score(db, txn)
+        factors = []
+        if latest_risk and latest_risk.risk_factors:
+            for rf in latest_risk.risk_factors:
+                factors.append({
+                    "factor_type": getattr(rf, "factor_type", "rule"),
+                    "factor_name": getattr(rf, "factor_name", "Risk Factor"),
+                    "contribution": float(rf.contribution),
+                    "explanation": rf.explanation,
+                })
+
+        final_sc = float(latest_risk.final_score) if latest_risk else 0.0
+        from app.api.routers.users import get_risk_level_from_score
+        return {
+            "id": txn.id,
+            "user_id": txn.user_id,
+            "recipient_id": txn.recipient_id,
+            "device_id": txn.device_id,
+            "amount": str(txn.amount),
+            "timestamp": txn.timestamp.isoformat() if txn.timestamp else "",
+            "location": txn.location,
+            "payment_method": txn.payment_method or "UPI",
+            "merchant": txn.recipient.display_name if (txn.recipient and txn.recipient.display_name) else "UPI Merchant",
+            "status": txn.status.value if hasattr(txn.status, "value") else str(txn.status),
+            "authorization_required": txn.authorization_required,
+            "authorization_status": txn.authorization_status or "NONE",
+            "authorized_at": txn.authorized_at.isoformat() if txn.authorized_at else None,
+            "authorization_method": txn.authorization_method,
+            "risk_level": get_risk_level_from_score(final_sc),
+            "risk_score": final_sc,
+            "risk_factors": factors,
+            "reasons": [f["explanation"] for f in factors if f.get("explanation")],
+        }
     except TransactionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -182,6 +215,20 @@ def confirm_transaction(transaction_id: int, db: Session = Depends(get_db)) -> d
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot confirm a transaction in terminal status {txn.status.value}.",
+        )
+
+    # Authoritative Backend Enforcement: High-risk payments awaiting guardian approval cannot be confirmed directly
+    if txn.status == TransactionStatus.PENDING_GUARDIAN_APPROVAL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transaction is awaiting trusted guardian approval and cannot be confirmed directly.",
+        )
+
+    pending_req = guardian_repository.get_pending_request_for_transaction(db, txn.id)
+    if pending_req:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Transaction is awaiting trusted contact approval.",
         )
 
     # Authoritative Backend Enforcement: High-risk payments MUST be authorized

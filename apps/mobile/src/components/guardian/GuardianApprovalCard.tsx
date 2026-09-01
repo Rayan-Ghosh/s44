@@ -12,11 +12,12 @@ import { spacing, radii, shadows } from "../../theme/layout";
 import { Button } from "../common/Button";
 import { StatusBadge } from "../common/StatusBadge";
 import { GuardianRequest } from "../../types/guardian";
+import { getStatusBadgeProps } from "../../utils/risk-scoring";
 
 interface GuardianApprovalCardProps {
   request: GuardianRequest;
-  onConfirm: () => void;
-  onReject: () => void;
+  onConfirm: () => Promise<{ success: boolean; error?: string } | void> | void;
+  onReject: () => Promise<{ success: boolean; error?: string } | void> | void;
   onDismiss: () => void;
 }
 
@@ -32,7 +33,11 @@ export const GuardianApprovalCard: React.FC<GuardianApprovalCardProps> = ({
   });
   const [decided, setDecided] = useState(false);
   const [decision, setDecision] = useState<"APPROVED" | "REJECTED" | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeAction, setActiveAction] = useState<"APPROVING" | "REJECTING" | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isActionInProgressRef = useRef(false);
 
   // Keep local countdown in sync with expiresAt
   useEffect(() => {
@@ -51,20 +56,70 @@ export const GuardianApprovalCard: React.FC<GuardianApprovalCardProps> = ({
     };
   }, [request.expiresAt, decided]);
 
-  const handleConfirm = () => {
-    if (decided) return;
-    setDecided(true);
-    setDecision("APPROVED");
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    onConfirm();
+  const handleConfirm = async () => {
+    if (decided || isSubmitting || isActionInProgressRef.current) return;
+    isActionInProgressRef.current = true;
+    setIsSubmitting(true);
+    setActiveAction("APPROVING");
+    setErrorMessage(null);
+
+    try {
+      const result = await onConfirm();
+      if (result && typeof result === "object" && (result as any).success === false) {
+        setErrorMessage((result as any).error || "Failed to approve payment. Please try again.");
+        setIsSubmitting(false);
+        setActiveAction(null);
+        isActionInProgressRef.current = false;
+        return;
+      }
+
+      setDecided(true);
+      setDecision("APPROVED");
+      if (intervalRef.current) clearInterval(intervalRef.current);
+
+      // Brief visual confirmation before card closes
+      setTimeout(() => {
+        onDismiss();
+      }, 1200);
+    } catch (err: any) {
+      setErrorMessage(err?.message || "Failed to approve payment. Please try again.");
+      setIsSubmitting(false);
+      setActiveAction(null);
+      isActionInProgressRef.current = false;
+    }
   };
 
-  const handleReject = () => {
-    if (decided) return;
-    setDecided(true);
-    setDecision("REJECTED");
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    onReject();
+  const handleReject = async () => {
+    if (decided || isSubmitting || isActionInProgressRef.current) return;
+    isActionInProgressRef.current = true;
+    setIsSubmitting(true);
+    setActiveAction("REJECTING");
+    setErrorMessage(null);
+
+    try {
+      const result = await onReject();
+      if (result && typeof result === "object" && (result as any).success === false) {
+        setErrorMessage((result as any).error || "Failed to reject payment. Please try again.");
+        setIsSubmitting(false);
+        setActiveAction(null);
+        isActionInProgressRef.current = false;
+        return;
+      }
+
+      setDecided(true);
+      setDecision("REJECTED");
+      if (intervalRef.current) clearInterval(intervalRef.current);
+
+      // Brief visual confirmation before card closes
+      setTimeout(() => {
+        onDismiss();
+      }, 1200);
+    } catch (err: any) {
+      setErrorMessage(err?.message || "Failed to reject payment. Please try again.");
+      setIsSubmitting(false);
+      setActiveAction(null);
+      isActionInProgressRef.current = false;
+    }
   };
 
   const isExpired = secondsLeft === 0 && !decided;
@@ -86,7 +141,8 @@ export const GuardianApprovalCard: React.FC<GuardianApprovalCardProps> = ({
         </View>
         <TouchableOpacity
           onPress={onDismiss}
-          style={styles.dismissBtn}
+          disabled={isSubmitting}
+          style={[styles.dismissBtn, isSubmitting && { opacity: 0.5 }]}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityLabel="Dismiss"
         >
@@ -97,13 +153,18 @@ export const GuardianApprovalCard: React.FC<GuardianApprovalCardProps> = ({
       {/* Payment Details */}
       <View style={styles.detailsRow}>
         <View style={styles.detailsLeft}>
+          {request.senderName ? (
+            <Text style={styles.senderSub}>
+              From: <Text style={{ color: colors.brand, fontWeight: "700" }}>{request.senderName}</Text>
+            </Text>
+          ) : null}
           <Text style={styles.merchantName}>{request.merchant}</Text>
           <Text style={styles.amount}>₹{request.amount.toLocaleString("en-IN")}</Text>
           <Text style={styles.method}>{request.paymentMethod}</Text>
         </View>
         <StatusBadge
           label={`${request.riskLevel} RISK · ${Math.round(request.riskScore)}/100`}
-          status={request.riskLevel === "HIGH" ? "high" : "medium"}
+          status={getStatusBadgeProps(request.riskLevel).status}
         />
       </View>
 
@@ -143,6 +204,14 @@ export const GuardianApprovalCard: React.FC<GuardianApprovalCardProps> = ({
         </View>
       )}
 
+      {/* Error state */}
+      {errorMessage && (
+        <View style={styles.errorBox}>
+          <Ionicons name="alert-circle" size={15} color={colors.threat} />
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      )}
+
       {/* Decision result */}
       {decided && decision && (
         <View
@@ -153,7 +222,7 @@ export const GuardianApprovalCard: React.FC<GuardianApprovalCardProps> = ({
         >
           <Ionicons
             name={decision === "APPROVED" ? "checkmark-circle" : "close-circle"}
-            size={15}
+            size={16}
             color={decision === "APPROVED" ? colors.safe : colors.threat}
           />
           <Text
@@ -162,7 +231,7 @@ export const GuardianApprovalCard: React.FC<GuardianApprovalCardProps> = ({
               { color: decision === "APPROVED" ? colors.safeText : colors.threatText },
             ]}
           >
-            {decision === "APPROVED" ? "Payment confirmed by guardian." : "Payment rejected by guardian."}
+            {decision === "APPROVED" ? "Payment approved by family guardian." : "Payment rejected and blocked by guardian."}
           </Text>
         </View>
       )}
@@ -171,20 +240,24 @@ export const GuardianApprovalCard: React.FC<GuardianApprovalCardProps> = ({
       {!decided && !isExpired && (
         <View style={styles.actionsRow}>
           <Button
-            label="CONFIRM PAYMENT"
+            label={isSubmitting && activeAction === "APPROVING" ? "APPROVING..." : "CONFIRM PAYMENT"}
             onPress={handleConfirm}
             variant="positive"
             size="md"
             style={{ flex: 1 }}
             icon="checkmark"
+            disabled={isSubmitting}
+            loading={isSubmitting && activeAction === "APPROVING"}
           />
           <Button
-            label="REJECT PAYMENT"
+            label={isSubmitting && activeAction === "REJECTING" ? "REJECTING..." : "REJECT PAYMENT"}
             onPress={handleReject}
             variant="destructive"
             size="md"
             style={{ flex: 1 }}
             icon="close"
+            disabled={isSubmitting}
+            loading={isSubmitting && activeAction === "REJECTING"}
           />
         </View>
       )}
@@ -243,6 +316,12 @@ const styles = StyleSheet.create({
     gap: 2,
     paddingRight: spacing.md,
   },
+  senderSub: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginBottom: 2,
+  },
   merchantName: {
     ...typography.bodySemibold,
     color: colors.textPrimary,
@@ -300,6 +379,24 @@ const styles = StyleSheet.create({
     ...typography.smallSemibold,
     fontSize: 12,
     fontWeight: "700",
+  },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.threatSurface,
+    borderColor: colors.threatBorder,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  errorText: {
+    ...typography.small,
+    color: colors.threat,
+    fontSize: 12,
+    fontWeight: "600",
+    flex: 1,
   },
   actionsRow: {
     flexDirection: "row",

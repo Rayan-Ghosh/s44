@@ -5,6 +5,7 @@ import { HistoryItem } from "../types/history";
 import { VoiceService } from "../services/voice-service";
 import { AlertService } from "../services/alert-service";
 import { INITIAL_HISTORY } from "../services/history-service";
+import { PaymentService, UserTransaction, UserPaymentOverview } from "../services/payment-service";
 import { useAuth } from "./AuthContext";
 
 interface SecurityContextType {
@@ -56,7 +57,7 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     // Subscribe to changes in AlertService
-    const unsubscribe = AlertService.subscribe((updated) => {
+    const unsubscribeAlerts = AlertService.subscribe((updated) => {
       setAlerts(
         updated.map((a) => ({
           id: a.id,
@@ -74,7 +75,40 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       );
     });
 
-    return unsubscribe;
+    // Subscribe to PaymentService to keep history in sync with real transactions
+    const unsubscribePayments = PaymentService.subscribe((_ov: UserPaymentOverview, txns: UserTransaction[]) => {
+      if (txns && txns.length > 0) {
+        const paymentHistoryItems: HistoryItem[] = txns.map((t: UserTransaction) => ({
+          id: `tx-${t.id}`,
+          type: "payment" as const,
+          amount: t.amount,
+          recipientName: t.merchant,
+          recipientHandle: t.merchant,
+          timestamp: t.timestamp || new Date().toISOString(),
+          formattedTime: t.date || "Today",
+          riskScore: t.riskScore ?? 0,
+          riskLevel: t.riskLevel || "LOW",
+          status: t.status,
+          actionTaken:
+            t.status === "Approved by you" || t.status === "Completed"
+              ? "confirmed"
+              : t.status === "Safe"
+              ? "allowed"
+              : t.status === "Reported"
+              ? "reported"
+              : "cancelled",
+        }));
+        setHistory((prev) => {
+          const callItems = prev.filter((p) => p.type === "call");
+          return [...paymentHistoryItems, ...callItems];
+        });
+      }
+    });
+
+    return () => {
+      unsubscribeAlerts();
+      unsubscribePayments();
+    };
   }, []);
 
   const toggleProtection = useCallback(() => {

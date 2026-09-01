@@ -39,9 +39,14 @@ export const RiskGauge: React.FC<RiskGaugeProps> = ({
   animationTrigger = 0,
   enableRevealAnimation = false,
 }) => {
+  // Color is derived solely from the authoritative `riskLevel` prop — never
+  // re-derived from `score` independently. The two used to be OR'd together
+  // (`score >= 61 || riskLevel === "HIGH"`), which meant a stale/differently
+  // sourced `score` could paint the gauge red even when the trusted
+  // `riskLevel` said otherwise (or vice versa). See utils/risk-scoring.ts.
   const getRiskColor = () => {
-    if (score >= 61 || riskLevel === "HIGH") return colors.threat;
-    if (score >= 31 || riskLevel === "MEDIUM") return colors.caution;
+    if (riskLevel === "HIGH") return colors.threat;
+    if (riskLevel === "MEDIUM") return colors.caution;
     return colors.safe;
   };
 
