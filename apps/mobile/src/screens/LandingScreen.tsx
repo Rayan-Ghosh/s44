@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -14,9 +14,11 @@ import { typography } from "../theme/typography";
 import { spacing, radii, shadows } from "../theme/layout";
 import { Button } from "../components/common/Button";
 import { AvaranLogo } from "../components/common/AvaranLogo";
+import { ServerEndpointModal } from "../components/profile/ServerEndpointModal";
 
 export const LandingScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const [isServerModalVisible, setIsServerModalVisible] = useState<boolean>(false);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -26,8 +28,18 @@ export const LandingScreen: React.FC = () => {
       >
         {/* Brand Header */}
         <View style={styles.brandRow}>
-          <AvaranLogo size="sm" showText={false} />
-          <Text style={styles.brandName}>AVARAN</Text>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <AvaranLogo size="sm" showText={false} />
+            <Text style={styles.brandName}>AVARAN</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setIsServerModalVisible(true)}
+            style={styles.serverIconBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Configure Backend Server"
+          >
+            <Ionicons name="server-outline" size={18} color={colors.brand} />
+          </TouchableOpacity>
         </View>
 
         {/* Hero Section */}
@@ -109,6 +121,11 @@ export const LandingScreen: React.FC = () => {
           </View>
         </View>
       </ScrollView>
+      <ServerEndpointModal
+        visible={isServerModalVisible}
+        onClose={() => setIsServerModalVisible(false)}
+        onEndpointSaved={() => setIsServerModalVisible(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -125,14 +142,25 @@ const styles = StyleSheet.create({
   brandRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: spacing.xxl,
-    gap: spacing.sm,
   },
   brandName: {
     fontSize: 16,
     fontWeight: "700",
     color: colors.textPrimary,
     letterSpacing: 1.2,
+    marginLeft: spacing.sm,
+  },
+  serverIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
   },
   heroSection: {
     marginBottom: spacing.xxl,
