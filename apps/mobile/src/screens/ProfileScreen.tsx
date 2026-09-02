@@ -174,15 +174,7 @@ export const ProfileScreen: React.FC = () => {
     else { showToast(res.error || "Failed to update profile", "warning"); return false; }
   };
   const handleSignOut = async () => {
-    if (Platform.OS === "web") {
-      const confirmed = typeof window !== "undefined" ? window.confirm("Are you sure you want to log out of Avaran?") : true;
-      if (confirmed) { await logout(); }
-    } else {
-      Alert.alert("Log Out", "Are you sure you want to log out of Avaran?", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Log Out", style: "destructive", onPress: async () => { await logout(); } },
-      ]);
-    }
+    await logout();
   };
 
   const initials = session?.name

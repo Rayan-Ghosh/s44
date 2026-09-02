@@ -43,6 +43,7 @@
       ]
     ],
     "extra": {
+      "apiUrl": "http://127.0.0.1:8000",
       "eas": {
         "projectId": "08a48009-eb7d-429b-994d-14abf398faa9"
       }

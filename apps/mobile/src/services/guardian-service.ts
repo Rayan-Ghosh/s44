@@ -1,6 +1,6 @@
 import { ApiClient, IS_DEMO_MODE } from "./api-client";
 import { TrustedContact } from "../types/guardian";
-import { DEMO_TRUSTED_CONTACTS } from "../data/demo-data";
+import { DEMO_TRUSTED_CONTACTS, DEMO_USER_TRANSACTIONS } from "../data/demo-data";
 
 export interface GuardianRequestDto {
   id: number;
@@ -14,6 +14,9 @@ export interface GuardianRequestDto {
   transactionAmount: number;
   riskScore: number | null;
   riskReasons: string[];
+  senderName?: string;
+  senderPhoneMasked?: string;
+  recipientName?: string;
 }
 
 const mapGuardianRequest = (r: any): GuardianRequestDto => ({
@@ -28,6 +31,9 @@ const mapGuardianRequest = (r: any): GuardianRequestDto => ({
   transactionAmount: r.transaction_amount ?? 0,
   riskScore: r.risk_score ?? null,
   riskReasons: r.risk_reasons ?? [],
+  senderName: r.sender_name,
+  senderPhoneMasked: r.sender_phone_masked,
+  recipientName: r.recipient_name,
 });
 
 export class GuardianService {
@@ -46,11 +52,12 @@ export class GuardianService {
     try {
       const res = await ApiClient.get<any[]>(`/api/v1/users/${userId}/trusted-contacts`);
       if (res.data && Array.isArray(res.data)) {
-        this.localContacts = res.data.map((c: any) => ({
+        return res.data.map((c: any) => ({
           id: String(c.id),
           name: c.name,
           phone: c.phone_number || c.phone,
           relationship: c.relationship || "Contact",
+          guardianUserId: c.guardian_user_id,
           addedAt: c.created_at
             ? new Date(c.created_at).toLocaleDateString("en-IN", {
                 day: "numeric",
@@ -59,13 +66,12 @@ export class GuardianService {
               })
             : new Date().toLocaleDateString("en-IN"),
         }));
-        return [...this.localContacts];
       }
     } catch {
-      // Fallback
+      // Return empty array on network failure in live mode
     }
 
-    return [...this.localContacts];
+    return [];
   }
 
   static async addTrustedContact(
@@ -78,6 +84,7 @@ export class GuardianService {
           name: contact.name,
           phone_number: contact.phone,
           relationship: contact.relationship,
+          guardian_user_id: contact.guardianUserId,
         });
 
         if (res.data && (res.data as any).id) {
@@ -86,17 +93,18 @@ export class GuardianService {
             name: contact.name,
             phone: contact.phone,
             relationship: contact.relationship,
+            guardianUserId: (res.data as any).guardian_user_id,
             addedAt: new Date().toLocaleDateString("en-IN", {
               day: "numeric",
               month: "short",
               year: "numeric",
             }),
           };
-          this.localContacts = [...this.localContacts, saved];
           return { success: true, contact: saved };
         }
-      } catch {
-        // Fallback
+        return { success: false, error: res.error || "Failed to add trusted contact" };
+      } catch (err: any) {
+        return { success: false, error: err?.message || "Failed to add trusted contact" };
       }
     }
 
@@ -123,11 +131,12 @@ export class GuardianService {
       const numId = parseInt(contactId, 10);
       if (!isNaN(numId)) {
         try {
-          await ApiClient.request(`/api/v1/users/${userId}/trusted-contacts/${numId}`, {
+          const res = await ApiClient.request(`/api/v1/users/${userId}/trusted-contacts/${numId}`, {
             method: "DELETE",
           });
-        } catch {
-          // Best effort
+          return { success: res.status === 200 || res.status === 204 };
+        } catch (err: any) {
+          return { success: false, error: err?.message || "Failed to remove contact" };
         }
       }
     }
@@ -150,17 +159,19 @@ export class GuardianService {
           transaction_id: transactionId,
           trusted_contact_id: trustedContactId,
         });
-        if (res.data) {
+        if (res.data && (res.status === 200 || res.status === 201)) {
           return { success: true, request: mapGuardianRequest(res.data) };
         }
-      } catch {
-        // Fallback to local request simulation
+        return { success: false, error: res.error || "Failed to trigger guardian request." };
+      } catch (err: any) {
+        return { success: false, error: err?.message || "Failed to trigger guardian request." };
       }
     }
 
     const now = new Date();
     const expires = new Date(now.getTime() + 120000);
     const mockId = Date.now();
+    const tx = DEMO_USER_TRANSACTIONS.find((t) => t.id === String(transactionId));
     const localReq: GuardianRequestDto = {
       id: mockId,
       transactionId,
@@ -170,13 +181,14 @@ export class GuardianService {
       resolvedAt: null,
       outcome: "PENDING",
       remainingSeconds: 120,
-      transactionAmount: 4890,
-      riskScore: 78,
-      riskReasons: [
+      transactionAmount: tx ? tx.amount : 4890,
+      riskScore: tx ? (tx.riskScore ?? 78) : 78,
+      riskReasons: tx && tx.reasons && tx.reasons.length > 0 ? tx.reasons : [
         "Coercive urgency keywords detected in utility scam",
         "Active phone call detected during payment flow",
         "Recipient VPA has no past interaction history",
       ],
+      recipientName: tx?.merchant,
     };
     this.localRequests.set(mockId, localReq);
     return { success: true, request: localReq };
@@ -188,10 +200,25 @@ export class GuardianService {
         const res = await ApiClient.get<any>(`/api/v1/guardian/requests/${requestId}`);
         if (res.data) return mapGuardianRequest(res.data);
       } catch {
-        // Fallback
+        return null;
       }
     }
     return this.localRequests.get(requestId) || null;
+  }
+
+  static async getRequestByTransactionId(transactionId: number): Promise<GuardianRequestDto | null> {
+    if (!IS_DEMO_MODE) {
+      try {
+        const res = await ApiClient.get<any>(`/api/v1/guardian/requests/by-transaction/${transactionId}`);
+        if (res.data) return mapGuardianRequest(res.data);
+      } catch {
+        return null;
+      }
+    }
+    return (
+      Array.from(this.localRequests.values()).find((r) => r.transactionId === transactionId) ||
+      null
+    );
   }
 
   static async getPendingRequests(trustedContactId: number): Promise<GuardianRequestDto[]> {
@@ -200,19 +227,48 @@ export class GuardianService {
         const res = await ApiClient.get<any[]>(`/api/v1/guardian/requests/pending/${trustedContactId}`);
         if (res.data && Array.isArray(res.data)) return res.data.map(mapGuardianRequest);
       } catch {
-        // Fallback
+        return [];
       }
     }
-    return Array.from(this.localRequests.values()).filter((r) => r.outcome === "PENDING");
+    return IS_DEMO_MODE
+      ? Array.from(this.localRequests.values()).filter((r) => r.outcome === "PENDING")
+      : [];
+  }
+
+  /**
+   * Fetch all non-expired PENDING GuardianRequests for a guardian user by
+   * their own Avaran user_id, using:
+   *   GET /api/v1/guardian/requests/by-guardian-user/{guardianUserId}
+   */
+  static async getPendingRequestsByGuardianUserId(guardianUserId: number): Promise<GuardianRequestDto[]> {
+    if (!IS_DEMO_MODE) {
+      try {
+        const res = await ApiClient.get<any[]>(
+          `/api/v1/guardian/requests/by-guardian-user/${guardianUserId}`
+        );
+        if (res.data && Array.isArray(res.data)) return res.data.map(mapGuardianRequest);
+      } catch {
+        return [];
+      }
+    }
+    return IS_DEMO_MODE
+      ? Array.from(this.localRequests.values()).filter((r) => r.outcome === "PENDING")
+      : [];
   }
 
   static async approve(requestId: number, notes?: string): Promise<{ success: boolean; error?: string }> {
     if (!IS_DEMO_MODE) {
       try {
-        const res = await ApiClient.post<any>(`/api/v1/guardian/requests/${requestId}/approve`, notes ? { notes } : undefined);
-        if (res.data) return { success: true };
-      } catch {
-        // Fallback
+        const res = await ApiClient.post<any>(
+          `/api/v1/guardian/requests/${requestId}/approve`,
+          notes ? { notes } : undefined
+        );
+        if (res.data && (res.status === 200 || res.status === 201)) {
+          return { success: true };
+        }
+        return { success: false, error: res.error || "Failed to approve transaction." };
+      } catch (err: any) {
+        return { success: false, error: err?.message || "Failed to approve transaction." };
       }
     }
 
@@ -228,10 +284,16 @@ export class GuardianService {
   static async reject(requestId: number, notes?: string): Promise<{ success: boolean; error?: string }> {
     if (!IS_DEMO_MODE) {
       try {
-        const res = await ApiClient.post<any>(`/api/v1/guardian/requests/${requestId}/reject`, notes ? { notes } : undefined);
-        if (res.data) return { success: true };
-      } catch {
-        // Fallback
+        const res = await ApiClient.post<any>(
+          `/api/v1/guardian/requests/${requestId}/reject`,
+          notes ? { notes } : undefined
+        );
+        if (res.data && (res.status === 200 || res.status === 201)) {
+          return { success: true };
+        }
+        return { success: false, error: res.error || "Failed to reject transaction." };
+      } catch (err: any) {
+        return { success: false, error: err?.message || "Failed to reject transaction." };
       }
     }
 

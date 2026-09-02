@@ -5,47 +5,86 @@ import { getDevicePayload } from "./device-info-service";
 declare const process: any;
 
 /**
- * Default fallback URLs based on environment:
- * - Web / Desktop: http://localhost:8000
- * - Android Emulator: http://10.0.2.2:8000
- * - Physical Phone / Production: Configured via EXPO_PUBLIC_API_URL or runtime setApiBaseUrl()
+ * Default API URL.
+ *
+ * Local development:
+ * http://127.0.0.1:8000
+ *
+ * Android Emulator normally uses:
+ * http://10.0.2.2:8000
  */
 const getDefaultFallbackUrl = (): string => {
-  if (Platform.OS === "web" || (typeof window !== "undefined" && window?.location?.hostname === "localhost")) {
-    return "http://localhost:8000";
-  }
   if (Platform.OS === "android") {
     return "http://10.0.2.2:8000";
   }
-  return "http://localhost:8000";
+  return "http://127.0.0.1:8000";
 };
 
 let _customApiBaseUrl: string | null = null;
 
+/**
+ * Cleans and normalizes an API URL.
+ */
 export const sanitizeApiUrl = (url: string): string => {
   let clean = url.trim();
-  if (!clean) return getDefaultFallbackUrl();
-  if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+
+  if (!clean) {
+    return getDefaultFallbackUrl();
+  }
+
+  if (
+    !clean.startsWith("http://") &&
+    !clean.startsWith("https://")
+  ) {
     clean = `http://${clean}`;
   }
+
   return clean.replace(/\/+$/, "");
 };
 
+/**
+ * Gets the current API base URL.
+ *
+ * Priority:
+ * 1. Runtime custom URL
+ * 2. EXPO_PUBLIC_API_URL from .env
+ * 3. Expo config extra.apiUrl
+ * 4. Physical device fallback IP
+ */
 export const getApiBaseUrl = (): string => {
   if (_customApiBaseUrl) {
     return _customApiBaseUrl;
   }
-  const envUrl = typeof process !== "undefined" ? process?.env?.EXPO_PUBLIC_API_URL : null;
-  if (envUrl && typeof envUrl === "string" && envUrl.trim()) {
+
+  const envUrl =
+    typeof process !== "undefined"
+      ? process?.env?.EXPO_PUBLIC_API_URL
+      : null;
+
+  if (
+    envUrl &&
+    typeof envUrl === "string" &&
+    envUrl.trim()
+  ) {
     return sanitizeApiUrl(envUrl);
   }
+
   const extraUrl = Constants?.expoConfig?.extra?.apiUrl;
-  if (extraUrl && typeof extraUrl === "string" && extraUrl.trim()) {
+
+  if (
+    extraUrl &&
+    typeof extraUrl === "string" &&
+    extraUrl.trim()
+  ) {
     return sanitizeApiUrl(extraUrl);
   }
+
   return getDefaultFallbackUrl();
 };
 
+/**
+ * Allows the user to override the API URL at runtime.
+ */
 export const setApiBaseUrl = (url: string | null): void => {
   if (!url || !url.trim()) {
     _customApiBaseUrl = null;
@@ -54,16 +93,33 @@ export const setApiBaseUrl = (url: string | null): void => {
   }
 };
 
+/**
+ * Resets runtime API URL.
+ */
 export const resetApiBaseUrl = (): void => {
   _customApiBaseUrl = null;
 };
 
+/**
+ * Initial API base URL.
+ */
 export const API_BASE_URL = getApiBaseUrl();
 
+/**
+ * Demo mode.
+ */
 export const IS_DEMO_MODE =
-  typeof process !== "undefined" && process?.env?.EXPO_PUBLIC_DEMO_MODE === "true";
+  typeof process !== "undefined" &&
+  process?.env?.EXPO_PUBLIC_DEMO_MODE === "true";
 
+/**
+ * Authentication token.
+ */
 let _authToken: string | null = null;
+
+/**
+ * Callback for unauthorized responses.
+ */
 let _onUnauthorizedCallback: (() => void) | null = null;
 
 export const setAuthToken = (token: string | null) => {
@@ -74,7 +130,9 @@ export const getAuthToken = (): string | null => {
   return _authToken;
 };
 
-export const setOnUnauthorizedCallback = (cb: (() => void) | null) => {
+export const setOnUnauthorizedCallback = (
+  cb: (() => void) | null
+) => {
   _onUnauthorizedCallback = cb;
 };
 
@@ -91,19 +149,29 @@ export class ApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     const baseUrl = getApiBaseUrl();
-    const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+
+    const cleanEndpoint = endpoint.startsWith("/")
+      ? endpoint
+      : `/${endpoint}`;
+
     const url = `${baseUrl}${cleanEndpoint}`;
 
-    let devInfo: { deviceId: string; deviceName: string; deviceType: string } | null = null;
+    let devInfo: {
+      deviceId: string;
+      deviceName: string;
+      deviceType: string;
+    } | null = null;
+
     try {
       devInfo = await getDevicePayload();
     } catch {
-      // best-effort
+      // Device information is optional.
     }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
+
       ...(devInfo
         ? {
             "X-Device-Id": devInfo.deviceId,
@@ -111,6 +179,7 @@ export class ApiClient {
             "X-Device-Type": devInfo.deviceType,
           }
         : {}),
+
       ...(options.headers as Record<string, string>),
     };
 
@@ -120,7 +189,10 @@ export class ApiClient {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, 10000);
 
       const response = await fetch(url, {
         ...options,
@@ -131,6 +203,7 @@ export class ApiClient {
       clearTimeout(timeoutId);
 
       let data: any = null;
+
       try {
         data = await response.json();
       } catch {
@@ -139,31 +212,50 @@ export class ApiClient {
 
       if (!response.ok) {
         let errorMsg = "An unexpected error occurred.";
+
         if (data && typeof data.detail === "string") {
           errorMsg = data.detail;
-        } else if (data && data.detail && typeof data.detail === "object" && data.detail.message) {
+        } else if (
+          data &&
+          data.detail &&
+          typeof data.detail === "object" &&
+          data.detail.message
+        ) {
           errorMsg = data.detail.message;
-        } else if (data && typeof data.message === "string") {
+        } else if (
+          data &&
+          typeof data.message === "string"
+        ) {
           errorMsg = data.message;
         } else if (response.status === 401) {
           errorMsg = "Unauthorized. Please log in again.";
+
           if (_onUnauthorizedCallback) {
             _onUnauthorizedCallback();
           }
         } else if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After");
+          const retryAfter =
+            response.headers.get("Retry-After");
+
           if (retryAfter) {
-            const minutes = Math.ceil(parseInt(retryAfter, 10) / 60);
-            errorMsg = `Too many attempts. Please wait ${minutes > 1 ? `${minutes} minutes` : "a few moments"} before trying again.`;
-          } else if (data && typeof data.detail === "string") {
-            errorMsg = data.detail;
+            const minutes = Math.ceil(
+              parseInt(retryAfter, 10) / 60
+            );
+
+            errorMsg = `Too many attempts. Please wait ${
+              minutes > 1
+                ? `${minutes} minutes`
+                : "a few moments"
+            } before trying again.`;
           } else {
-            errorMsg = "Too many attempts. Please wait a few minutes before trying again.";
+            errorMsg =
+              "Too many attempts. Please wait a few minutes before trying again.";
           }
         } else if (response.status === 404) {
           errorMsg = "Resource not found.";
         } else if (response.status >= 500) {
-          errorMsg = "Server error. Please try again later.";
+          errorMsg =
+            "Server error. Please try again later.";
         }
 
         return {
@@ -179,6 +271,7 @@ export class ApiClient {
       };
     } catch (err: any) {
       const isAbort = err?.name === "AbortError";
+
       return {
         status: 0,
         isNetworkError: true,
@@ -189,11 +282,21 @@ export class ApiClient {
     }
   }
 
-  static get<T>(endpoint: string, headers?: Record<string, string>) {
-    return this.request<T>(endpoint, { method: "GET", headers });
+  static get<T>(
+    endpoint: string,
+    headers?: Record<string, string>
+  ) {
+    return this.request<T>(endpoint, {
+      method: "GET",
+      headers,
+    });
   }
 
-  static post<T>(endpoint: string, body?: any, headers?: Record<string, string>) {
+  static post<T>(
+    endpoint: string,
+    body?: any,
+    headers?: Record<string, string>
+  ) {
     return this.request<T>(endpoint, {
       method: "POST",
       headers,
@@ -201,7 +304,11 @@ export class ApiClient {
     });
   }
 
-  static patch<T>(endpoint: string, body?: any, headers?: Record<string, string>) {
+  static patch<T>(
+    endpoint: string,
+    body?: any,
+    headers?: Record<string, string>
+  ) {
     return this.request<T>(endpoint, {
       method: "PATCH",
       headers,

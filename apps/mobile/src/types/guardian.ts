@@ -5,6 +5,7 @@ export interface TrustedContact {
   name: string;
   phone: string;
   relationship: string;
+  guardianUserId?: number;
   addedAt: string;
 }
 
@@ -18,6 +19,9 @@ export interface GuardianRequest {
   riskLevel: "LOW" | "MEDIUM" | "HIGH";
   reasons: string[];
   status: GuardianStatus;
+  senderName?: string;
+  senderPhoneMasked?: string;
+  recipientName?: string;
   createdAt: number; // Unix ms timestamp
   expiresAt: number; // Unix ms timestamp (createdAt + 60000)
   resolvedAt?: number;

@@ -3,7 +3,7 @@ Automated unit & integration tests for Cryptographic Transaction Integrity,
 Authorization Binding, Anti-Replay, Tamper Detection, and Guardian Invalidation.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from fastapi.testclient import TestClient
 import pytest
@@ -239,7 +239,7 @@ def test_guardian_approval_tamper_invalidates_request(client: TestClient, integr
     req = GuardianRequest(
         transaction_id=txn.id,
         trusted_contact_id=integrity_setup["guardian_contact"].id,
-        expires_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=120),
     )
     db_session.add(req)
     db_session.commit()

@@ -24,19 +24,26 @@ import { StaggerRevealCard } from "../components/common/StaggerRevealCard";
 import { AnimatedAmount } from "../components/common/AnimatedAmount";
 import { AiScanBanner } from "../components/common/AiScanBanner";
 import { RiskContributionBar, ContributionItem } from "../components/common/RiskContributionBar";
-import { RiskTimeline } from "../components/common/RiskTimeline";
 import { Button } from "../components/common/Button";
 import { FloatingToast, ToastConfig } from "../components/common/FloatingToast";
 import { ChoosePaymentAppModal } from "../components/payment/ChoosePaymentAppModal";
 import { useAuth } from "../context/AuthContext";
 import { useGuardian } from "../context/GuardianContext";
+import { GuardianService } from "../services/guardian-service";
 import { BiometricService } from "../services/biometric-service";
 import {
   PaymentService,
   UserTransaction,
   UserPaymentOverview,
   EMPTY_PAYMENT_OVERVIEW,
+  isTransactionTerminal,
+  isTransactionPayable,
 } from "../services/payment-service";
+import {
+  getRiskLevelFromScore,
+  getStatusBadgeProps,
+  validateAndLogRiskState,
+} from "../utils/risk-scoring";
 
 const NewPaymentHighlightCard: React.FC<{
   children: React.ReactNode;
@@ -100,6 +107,7 @@ export const PaymentsScreen: React.FC = () => {
     paymentOutcome,
     clearPaymentOutcome,
     initiateGuardianRequest,
+    syncActiveRequestForTransaction,
     isTrustedFeatureEnabled,
     trustedContacts,
   } = useGuardian();
@@ -274,6 +282,17 @@ export const PaymentsScreen: React.FC = () => {
     }
   }, [route.params?.selectedTxId, session?.userId]);
 
+  // Sync active guardian request when viewing an active held/risk transaction
+  useEffect(() => {
+    if (
+      selectedTx &&
+      !selectedTx.isCompleted &&
+      (selectedTx.status === "Risk detected" || selectedTx.status === "Held")
+    ) {
+      syncActiveRequestForTransaction(selectedTx);
+    }
+  }, [selectedTx?.id, selectedTx?.status, syncActiveRequestForTransaction]);
+
   // Filtered transactions computed dynamically from centralized state
   const visibleTransactions = useMemo(() => {
     if (filter === "review") {
@@ -304,25 +323,19 @@ export const PaymentsScreen: React.FC = () => {
 
   // Watch for guardian decision and update UI accordingly
   useEffect(() => {
-    if (!awaitingGuardian || !paymentOutcome) return;
+    if (!paymentOutcome) return;
 
     if (paymentOutcome === "APPROVED") {
-      setAwaitingGuardian(false);
-      showToast("✓ Payment approved by your trusted contact", "success");
-      setIsChooseAppModalVisible(true);
+      showToast("✓ Trusted contact approved your payment", "success");
       loadPayments();
-      clearPaymentOutcome();
     } else if (paymentOutcome === "REJECTED") {
-      setAwaitingGuardian(false);
-      showToast("⚠ Payment rejected & blocked by trusted contact", "warning");
+      showToast("⚠ Payment rejected by trusted contact", "warning");
       loadPayments();
-      clearPaymentOutcome();
     } else if (paymentOutcome === "EXPIRED") {
-      setAwaitingGuardian(false);
-      showToast("Guardian request expired. Payment cancelled.", "info");
+      showToast("Guardian approval window expired. Payment cancelled.", "info");
       loadPayments();
     }
-  }, [paymentOutcome, awaitingGuardian, loadPayments, clearPaymentOutcome]);
+  }, [paymentOutcome, loadPayments]);
 
   const onRefresh = () => {
     setIsRefreshing(true);
@@ -330,7 +343,7 @@ export const PaymentsScreen: React.FC = () => {
   };
 
   const handleAuthorize = async (txId: string) => {
-    if (isAuthorizing || isActing) return;
+    if (isAuthorizing || isActing || !selectedTx) return;
     setIsAuthorizing(true);
     try {
       const authResult = await BiometricService.authenticate(
@@ -349,8 +362,35 @@ export const PaymentsScreen: React.FC = () => {
       setIsAuthorizing(false);
 
       if (res.success) {
+        let contacts = trustedContacts;
+        if (contacts.length === 0 && session?.userId) {
+          contacts = await GuardianService.getTrustedContacts(session.userId);
+        }
+
+        const isHighRisk =
+          selectedTx.riskLevel === "HIGH" ||
+          (selectedTx.riskScore && selectedTx.riskScore >= 60) ||
+          selectedTx.status === "Risk detected" ||
+          selectedTx.status === "Held";
+
+        const updatedSelected: UserTransaction = {
+          ...selectedTx,
+          authorizationStatus: "AUTHORIZED",
+          status: isTrustedFeatureEnabled && contacts.length > 0 ? "Held" : selectedTx.status,
+        };
+        setSelectedTx(updatedSelected);
+
+        // If high risk and Trusted contact is active, route through Guardian approval flow
+        if (isHighRisk && isTrustedFeatureEnabled && contacts.length > 0) {
+          showToast("✓ Identity Verified. Awaiting approval from your Trusted Contact...", "info");
+          setAwaitingGuardian(true);
+          await initiateGuardianRequest(updatedSelected);
+          await loadPayments();
+          return;
+        }
+
         showToast("✓ Identity Verified. Completing your secure payment...", "success");
-        loadPayments();
+        await loadPayments();
         setIsChooseAppModalVisible(true);
       } else {
         showToast(res.error || "Authorization failed. Please try again.", "warning");
@@ -365,13 +405,8 @@ export const PaymentsScreen: React.FC = () => {
     if (isActing || isAuthorizing) return;
     if (!selectedTx) return;
 
-    if (
-      selectedTx.isCompleted ||
-      selectedTx.status === "Approved by you" ||
-      selectedTx.status === "Safe" ||
-      selectedTx.status === "Completed"
-    ) {
-      showToast("This payment has already been completed", "info");
+    if (isTransactionTerminal(selectedTx)) {
+      showToast("This payment has already been completed or finalized", "info");
       return;
     }
 
@@ -381,12 +416,9 @@ export const PaymentsScreen: React.FC = () => {
       selectedTx.status === "Risk detected" ||
       selectedTx.status === "Held";
 
-    // If high risk and Trusted contact is active, route through Guardian approval flow
-    if (isHighRisk && isTrustedFeatureEnabled && trustedContacts.length > 0) {
-      initiateGuardianRequest(selectedTx);
-      setAwaitingGuardian(true);
-      showToast("Awaiting approval from your Trusted Contact...", "info");
-      return;
+    let contacts = trustedContacts;
+    if (contacts.length === 0 && session?.userId) {
+      contacts = await GuardianService.getTrustedContacts(session.userId);
     }
 
     // High-Risk Biometric Authorization Check
@@ -396,6 +428,15 @@ export const PaymentsScreen: React.FC = () => {
       selectedTx.authorizationStatus !== "AUTHORIZED"
     ) {
       await handleAuthorize(selectedTx.id);
+      return;
+    }
+
+    // If high risk and Trusted contact is active, route through Guardian approval flow
+    if (isHighRisk && isTrustedFeatureEnabled && contacts.length > 0) {
+      setAwaitingGuardian(true);
+      await initiateGuardianRequest(selectedTx);
+      showToast("Awaiting approval from your Trusted Contact...", "info");
+      await loadPayments();
       return;
     }
 
@@ -417,7 +458,7 @@ export const PaymentsScreen: React.FC = () => {
     setIsActing(false);
     if (res.success) {
       showToast("⚠ Fraud report submitted. Payment blocked.", "warning");
-      loadPayments();
+      await loadPayments();
     } else {
       showToast(res.error || "Unable to complete this action", "warning");
     }
@@ -427,13 +468,7 @@ export const PaymentsScreen: React.FC = () => {
     if (isActing) return;
     if (!selectedTx) return;
 
-    if (
-      selectedTx.isCompleted ||
-      selectedTx.status === "Blocked" ||
-      selectedTx.status === "Approved by you" ||
-      selectedTx.status === "Reported" ||
-      selectedTx.status === "Completed"
-    ) {
+    if (isTransactionTerminal(selectedTx)) {
       showToast("This payment is completed and cannot be cancelled", "info");
       return;
     }
@@ -443,13 +478,13 @@ export const PaymentsScreen: React.FC = () => {
     setIsActing(false);
     if (res.success) {
       showToast("Payment cancelled successfully", "info");
-      loadPayments();
+      await loadPayments();
     } else {
       showToast(res.error || "Unable to complete this action", "warning");
     }
   };
 
-  const handlePaymentCompleted = (txId: string) => {
+  const handlePaymentCompleted = async (txId: string): Promise<{ success: boolean; error?: string }> => {
     const trustedAudit = selectedTx?.trustedApproval?.required
       ? {
           required: true,
@@ -459,9 +494,14 @@ export const PaymentsScreen: React.FC = () => {
         }
       : { required: false };
 
-    PaymentService.completeTransaction(txId, "Google Pay UPI", trustedAudit);
-    showToast("✓ Payment completed and recorded in transaction history", "success");
-    loadPayments();
+    const res = await PaymentService.completeTransaction(txId, "Google Pay UPI", trustedAudit);
+    if (res.success) {
+      showToast("✓ Payment completed and recorded in transaction history", "success");
+      await loadPayments();
+    } else {
+      showToast(res.error || "Unable to complete payment on server", "warning");
+    }
+    return res;
   };
 
   const getDynamicContributions = (tx: UserTransaction): ContributionItem[] => {
@@ -481,22 +521,11 @@ export const PaymentsScreen: React.FC = () => {
     ];
   };
 
-  const isCurrentActiveTx =
-    selectedTx &&
-    !selectedTx.isCompleted &&
-    selectedTx.status !== "Safe" &&
-    selectedTx.status !== "Approved by you" &&
-    selectedTx.status !== "Reported" &&
-    selectedTx.status !== "Blocked" &&
-    selectedTx.status !== "Completed";
+  const isCurrentActiveTx = Boolean(selectedTx && isTransactionPayable(selectedTx) && !isTransactionTerminal(selectedTx));
 
   const allCount = transactions.length;
-  const reviewCount = transactions.filter(
-    (t) => t.status === "Risk detected" || t.status === "Held"
-  ).length;
-  const safeCount = transactions.filter(
-    (t) => t.status === "Safe" || t.status === "Approved by you" || t.status === "Completed"
-  ).length;
+  const reviewCount = transactions.filter((t) => isTransactionPayable(t)).length;
+  const safeCount = transactions.filter((t) => isTransactionTerminal(t)).length;
 
   const filterTabs = [
     { key: "all", label: "All", count: allCount, isAlert: false },
@@ -647,20 +676,24 @@ export const PaymentsScreen: React.FC = () => {
                   }}
                 />
 
-                <RiskGauge
-                  score={
-                    selectedTx.isCompleted || selectedTx.status === "Approved by you" || selectedTx.status === "Safe" || selectedTx.status === "Completed"
-                      ? selectedTx.riskScore || 8
-                      : selectedTx.riskScore || (selectedTx.riskLevel === "HIGH" ? 78 : 12)
-                  }
-                  riskLevel={
-                    selectedTx.isCompleted || selectedTx.status === "Approved by you" || selectedTx.status === "Safe" || selectedTx.status === "Completed"
-                      ? selectedTx.riskLevel || "LOW"
-                      : selectedTx.riskLevel || (selectedTx.status === "Risk detected" ? "HIGH" : "LOW")
-                  }
-                  size="md"
-                  enableRevealAnimation={!hasPlayedRevealRef.current}
-                />
+                {(() => {
+                  const dtScore = selectedTx.riskScore ?? 0;
+                  const dtLevel = selectedTx.riskLevel || getRiskLevelFromScore(dtScore);
+                  validateAndLogRiskState({
+                    component: "PaymentsScreen:DetailCard",
+                    transactionId: selectedTx.id,
+                    riskScore: dtScore,
+                    riskLevel: dtLevel,
+                  });
+                  return (
+                    <RiskGauge
+                      score={dtScore}
+                      riskLevel={dtLevel}
+                      size="md"
+                      enableRevealAnimation={!hasPlayedRevealRef.current}
+                    />
+                  );
+                })()}
 
                 {/* 1. WHY WAS THIS PAYMENT FLAGGED / ANALYSIS FACTORS */}
                 <StaggerRevealCard
@@ -671,22 +704,24 @@ export const PaymentsScreen: React.FC = () => {
                 >
                   <View style={styles.reasonsContainer}>
                     <Text style={styles.reasonsTitle}>
-                      {isCurrentActiveTx ? "Why was this payment flagged?" : "Risk analysis before payment"}
+                      {selectedTx.riskLevel === "HIGH" || selectedTx.status === "Risk detected" || selectedTx.status === "Held"
+                        ? "Why was this payment flagged?"
+                        : "Risk analysis & signature"}
                     </Text>
                     {selectedTx.reasons && selectedTx.reasons.length > 0 ? (
                       selectedTx.reasons.map((r, i) => (
                         <View key={i} style={styles.reasonBulletRow}>
                           <Ionicons
                             name={
-                              selectedTx.isCompleted || selectedTx.status === "Approved by you" || selectedTx.status === "Safe" || selectedTx.status === "Completed"
-                                ? "checkmark-circle"
-                                : "alert-circle"
+                              selectedTx.riskLevel === "HIGH" || selectedTx.status === "Risk detected" || selectedTx.status === "Held"
+                                ? "alert-circle"
+                                : "checkmark-circle"
                             }
                             size={14}
                             color={
-                              selectedTx.isCompleted || selectedTx.status === "Approved by you" || selectedTx.status === "Safe" || selectedTx.status === "Completed"
-                                ? colors.safe
-                                : colors.threat
+                              selectedTx.riskLevel === "HIGH" || selectedTx.status === "Risk detected" || selectedTx.status === "Held"
+                                ? colors.threat
+                                : colors.safe
                             }
                             style={{ marginRight: 6, marginTop: 2 }}
                           />
@@ -765,150 +800,154 @@ export const PaymentsScreen: React.FC = () => {
                   <RiskContributionBar contributions={getDynamicContributions(selectedTx)} />
                 </StaggerRevealCard>
 
-                {/* 4. RISK ASSESSMENT TIMELINE */}
+                {/* 4. CURRENT PAYMENT ACTIONS vs HISTORICAL SETTLED BANNER */}
                 <StaggerRevealCard
                   index={3}
                   baseDelay={1350}
                   staggerInterval={120}
                   hasPlayed={hasPlayedRevealRef.current}
                 >
-                  <View style={styles.timelineBox}>
-                    <Text style={styles.timelineHeading}>Assessment timeline</Text>
-                    <RiskTimeline
-                      steps={[
-                        { label: "Payment initiated", detail: `${selectedTx.paymentMethod} · ${selectedTx.date || "Today"}` },
-                        { label: "Signal collection", detail: "Device Keystore, Geolocation, Velocity" },
-                        { label: "Feature engineering", detail: "Behavioral anomaly + Transaction delta" },
-                        { label: "Rule engine check", detail: "UPI Intent Interception & Threat Matrix" },
-                        { label: "ML risk scoring", detail: "XGBoost fraud classifier" },
-                        { label: "Anomaly detection", detail: "IsolationForest behavioral model" },
-                        {
-                          label: `Final outcome — ${
-                            selectedTx.isCompleted || selectedTx.status === "Approved by you" || selectedTx.status === "Safe" || selectedTx.status === "Completed"
-                              ? "COMPLETED & SECURED"
-                              : selectedTx.riskLevel === "HIGH"
-                              ? "HIGH RISK (APPROVAL REQUIRED)"
-                              : "READY TO PAY"
-                          }`,
-                          detail: `Status: ${selectedTx.status} · Score: ${
-                            selectedTx.riskScore || 8
-                          }/100`,
-                          isHighlighted: Boolean(selectedTx.riskLevel === "HIGH" && isCurrentActiveTx),
-                        },
-                      ]}
-                    />
-                  </View>
-                </StaggerRevealCard>
-
-                {/* 5. CURRENT PAYMENT ACTIONS vs HISTORICAL SETTLED BANNER */}
-                <StaggerRevealCard
-                  index={4}
-                  baseDelay={1350}
-                  staggerInterval={120}
-                  hasPlayed={hasPlayedRevealRef.current}
-                >
                   {isCurrentActiveTx ? (
                     <View style={styles.decisionBlock}>
-                      {/* Guardian awaiting state */}
-                      {awaitingGuardian && activeRequest ? (
+                      {/* 1. Guardian Waiting State (Active hold / countdown) */}
+                      {((selectedTx.riskLevel === "HIGH" || (selectedTx.riskScore && selectedTx.riskScore >= 60) || selectedTx.status === "Risk detected" || selectedTx.status === "Held") && isTrustedFeatureEnabled && (trustedContacts.length > 0 || selectedTx.status === "Held") && !isTransactionTerminal(selectedTx) && selectedTx.status !== "Approved by you" && selectedTx.authorizationStatus === "AUTHORIZED" && !paymentOutcome) ||
+                      (((awaitingGuardian && activeRequest) || (activeRequest && activeRequest.status === "PENDING" && String(activeRequest.transactionId) === String(selectedTx.id) && !paymentOutcome)) && !paymentOutcome) ? (
                         <View style={styles.guardianWaitBlock}>
                           <View style={styles.guardianWaitHeader}>
-                            <Ionicons name="hourglass-outline" size={16} color={colors.caution} />
-                            <Text style={styles.guardianWaitTitle}>Awaiting Guardian Approval</Text>
+                            <View style={styles.guardianWaitHeaderLeft}>
+                              <View style={styles.guardianWaitIconBox}>
+                                <Ionicons name="hourglass-outline" size={18} color={colors.caution} />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.guardianWaitTitle}>Waiting for trusted contact approval</Text>
+                                <Text style={styles.guardianWaitSub}>
+                                  Approval is required from your trusted contact before this transfer can proceed.
+                                </Text>
+                              </View>
+                            </View>
+                            {(() => {
+                              const waitLevel = selectedTx.riskLevel || getRiskLevelFromScore(selectedTx.riskScore ?? 0);
+                              const waitBadge = getStatusBadgeProps(waitLevel);
+                              return <StatusBadge label={waitBadge.label} status={waitBadge.status} />;
+                            })()}
                           </View>
-                          <Text style={styles.guardianWaitSub}>
-                            Sent to your trusted contact ({trustedContacts[0]?.name || "your trusted contact"}). Waiting for approval.
-                          </Text>
+
+                          <View style={styles.guardianWaitDetails}>
+                            <View style={styles.guardianWaitAmountRow}>
+                              <Text style={styles.guardianWaitAmount}>
+                                ₹{(selectedTx.amount ?? 0).toLocaleString("en-IN")}
+                              </Text>
+                              <Text style={styles.guardianWaitMerchant}>
+                                To: {selectedTx.merchant}
+                              </Text>
+                            </View>
+                            <Text style={styles.guardianWaitNotice}>
+                              Sent to {trustedContacts[0]?.name || "your trusted contact"}. Your payment will automatically update once reviewed.
+                            </Text>
+                          </View>
+
                           <View style={styles.countdownRow}>
+                            <Ionicons
+                              name="time-outline"
+                              size={15}
+                              color={countdown <= 15 ? colors.threat : colors.caution}
+                            />
                             <Text
                               style={[
                                 styles.countdownNum,
                                 { color: countdown <= 15 ? colors.threat : colors.caution },
                               ]}
                             >
-                              {countdown}
+                              {countdown}s
                             </Text>
-                            <Text style={styles.countdownLabel}>seconds remaining</Text>
+                            <Text style={styles.countdownLabel}>remaining to approve</Text>
                           </View>
                         </View>
-                      ) : paymentOutcome === "EXPIRED" ? (
-                        <View style={styles.expiredBlock}>
-                          <Ionicons name="time-outline" size={15} color={colors.textMuted} />
-                          <Text style={styles.expiredText}>
-                            Guardian approval expired. Payment blocked for security.
-                          </Text>
-                        </View>
-                      ) : selectedTx.riskLevel === "HIGH" &&
-                        selectedTx.authorizationRequired !== false &&
-                        selectedTx.authorizationStatus !== "AUTHORIZED" ? (
-                        /* Secure High-Risk Biometric Authorization Card */
-                        <View style={styles.authRequiredCard}>
-                          <View style={styles.authRequiredHeader}>
-                            <View style={styles.authBadgeIcon}>
-                              <Ionicons name="shield-half" size={18} color={colors.threat} />
+                      ) : paymentOutcome === "APPROVED" || selectedTx.status === "Approved by you" ? (
+                        /* 2. Guardian Approved State */
+                        <View style={styles.approvedCard}>
+                          <View style={styles.approvedHeader}>
+                            <View style={styles.approvedIconBox}>
+                              <Ionicons name="checkmark-circle" size={22} color={colors.safe} />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={styles.authRequiredTitle}>Security Verification Required</Text>
-                              <Text style={styles.authRequiredSubtitle}>
-                                This payment has been identified as high risk. Verify your identity to continue securely.
+                              <Text style={styles.approvedTitle}>Trusted contact approved your payment</Text>
+                              <Text style={styles.approvedSubtitle}>
+                                ₹{(selectedTx.amount ?? 0).toLocaleString("en-IN")} payment to {selectedTx.merchant} is authorized and verified.
                               </Text>
                             </View>
                           </View>
-                          <Button
-                            label={isAuthorizing ? "Verifying..." : "Verify & Continue"}
-                            icon="finger-print-outline"
-                            onPress={() => handleAuthorize(selectedTx.id)}
-                            loading={isAuthorizing}
-                            disabled={isAuthorizing || isActing}
-                            variant="primary"
-                            size="md"
-                            style={{ marginTop: spacing.xs }}
-                          />
                           <View style={styles.actionRow}>
                             <Button
-                              label="REPORT AS FRAUD"
-                              icon="alert-circle"
-                              onPress={() => handleReport(selectedTx.id)}
-                              loading={isActing}
-                              disabled={isActing || isAuthorizing}
-                              variant="destructive"
+                              label="PROCEED TO PAY"
+                              icon="arrow-forward-circle"
+                              onPress={() => setIsChooseAppModalVisible(true)}
+                              variant="primary"
                               size="md"
                               style={styles.actionBtn}
                             />
                           </View>
                         </View>
+                      ) : paymentOutcome === "REJECTED" ? (
+                        /* 3. Guardian Rejected State */
+                        <View style={styles.rejectedCard}>
+                          <View style={styles.rejectedHeader}>
+                            <View style={styles.rejectedIconBox}>
+                              <Ionicons name="close-circle" size={22} color={colors.threat} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.rejectedTitle}>Payment rejected by trusted contact</Text>
+                              <Text style={styles.rejectedSubtitle}>
+                                Your trusted contact declined this transaction of ₹{(selectedTx.amount ?? 0).toLocaleString("en-IN")} due to security risk. This payment cannot continue.
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      ) : paymentOutcome === "EXPIRED" ? (
+                        /* 4. Guardian Expired State */
+                        <View style={styles.expiredBlock}>
+                          <Ionicons name="time-outline" size={16} color={colors.textMuted} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.expiredTitle}>Guardian approval window expired</Text>
+                            <Text style={styles.expiredText}>
+                              The 2-minute review window timed out. Payment cancelled for security.
+                            </Text>
+                          </View>
+                        </View>
                       ) : (
-                        /* Active Confirmation Buttons (Authorized or Standard) */
-                        <>
+                        /* 5. Active Confirmation Actions (Unified layout for Low, Medium, and High risk) */
+                        <View style={{ width: "100%" }}>
                           {selectedTx.authorizationStatus === "AUTHORIZED" && (
                             <View style={styles.authVerifiedBanner}>
                               <Ionicons name="checkmark-circle" size={15} color={colors.safe} />
-                              <Text style={styles.authVerifiedText}>Identity Verified with Biometrics</Text>
+                              <Text style={styles.authVerifiedText}>
+                                Biometric Identity Verified · Signature Valid
+                              </Text>
                             </View>
                           )}
                           <View style={styles.actionRow}>
                             <Button
-                              label={width < 380 ? "CONFIRM" : width < 480 ? "CONFIRM PAYMENT" : "CONFIRM & CHOOSE APP"}
-                              icon="checkmark-circle"
+                              label={isAuthorizing ? "Verifying..." : "CONFIRM & CHOOSE APP"}
+                              icon="arrow-forward-circle"
                               onPress={() => handleConfirm(selectedTx.id)}
-                              loading={isActing}
-                              disabled={isActing}
+                              loading={isActing || isAuthorizing}
+                              disabled={isActing || isAuthorizing}
                               variant="primary"
                               size="md"
                               style={styles.actionBtn}
                             />
                             <Button
-                              label={width < 360 ? "REPORT FRAUD" : "REPORT AS FRAUD"}
-                              icon="alert-circle"
-                              onPress={() => handleReport(selectedTx.id)}
+                              label="CANCEL"
+                              icon="close-circle-outline"
+                              onPress={() => handleCancel(selectedTx.id)}
                               loading={isActing}
-                              disabled={isActing}
-                              variant="destructive"
+                              disabled={isActing || isAuthorizing}
+                              variant="outline"
                               size="md"
                               style={styles.actionBtn}
                             />
                           </View>
-                        </>
+                        </View>
                       )}
 
                       {!awaitingGuardian && paymentOutcome !== "EXPIRED" && (
@@ -1032,19 +1071,30 @@ export const PaymentsScreen: React.FC = () => {
                             animateOnlyOnce={hasPlayedListStaggerRef.current}
                             duration={600}
                           />
-                          <StatusBadge
-                            label={
-                              isRisk
-                                ? `ACTION REQUIRED`
-                                : item.status === "Reported"
-                                ? "Reported"
-                                : item.status === "Blocked"
-                                ? "Blocked"
-                                : "Completed"
-                            }
-                            status={isRisk ? "high" : item.status === "Reported" ? "escalated" : "low"}
-                            dot={false}
-                          />
+                          {(() => {
+                            const itemLevel = item.riskLevel || getRiskLevelFromScore(item.riskScore ?? 0);
+                            return (
+                              <StatusBadge
+                                label={
+                                  isRisk
+                                    ? `${itemLevel} RISK`
+                                    : item.status === "Reported"
+                                    ? "Reported"
+                                    : item.status === "Blocked"
+                                    ? "Blocked"
+                                    : "Completed"
+                                }
+                                status={
+                                  isRisk
+                                    ? (itemLevel === "HIGH" ? "high" : itemLevel === "MEDIUM" ? "medium" : "low")
+                                    : item.status === "Reported"
+                                    ? "escalated"
+                                    : "low"
+                                }
+                                dot={false}
+                              />
+                            );
+                          })()}
                         </View>
                       </TouchableOpacity>
                     </NewPaymentHighlightCard>
@@ -1345,20 +1395,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 12,
   },
-  timelineBox: {
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginVertical: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  timelineHeading: {
-    ...typography.smallSemibold,
-    color: colors.textPrimary,
-    fontSize: 13,
-    marginBottom: spacing.xs,
-  },
   decisionBlock: {
     marginTop: spacing.md,
     gap: spacing.sm,
@@ -1535,56 +1571,193 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   guardianWaitBlock: {
-    backgroundColor: colors.cautionSurface,
-    borderRadius: radii.md,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1.5,
     borderColor: colors.cautionBorder,
     padding: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     gap: spacing.sm,
+    ...shadows.md,
   },
   guardianWaitHeader: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: spacing.sm,
+  },
+  guardianWaitHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    flex: 1,
+  },
+  guardianWaitIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.cautionSurface,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.cautionBorder,
+    marginTop: 1,
   },
   guardianWaitTitle: {
     ...typography.smallSemibold,
-    color: colors.cautionText,
-    fontSize: 13,
+    color: colors.textPrimary,
+    fontSize: 14,
     fontWeight: "700",
   },
   guardianWaitSub: {
     ...typography.small,
     color: colors.textSecondary,
     fontSize: 12,
+    marginTop: 1,
+  },
+  guardianWaitDetails: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radii.md,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    gap: 3,
+  },
+  guardianWaitAmountRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  guardianWaitAmount: {
+    ...typography.bodySemibold,
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  guardianWaitMerchant: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  guardianWaitNotice: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 11,
+    marginTop: 2,
   },
   countdownRow: {
     flexDirection: "row",
-    alignItems: "baseline",
-    gap: spacing.xs,
-    marginTop: spacing.xs,
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.cautionSurface,
+    borderRadius: radii.sm,
+    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    alignSelf: "flex-start",
   },
   countdownNum: {
-    ...typography.h2,
+    ...typography.smallSemibold,
     fontWeight: "800",
-    fontSize: 22,
+    fontSize: 13,
   },
   countdownLabel: {
     ...typography.small,
-    color: colors.textMuted,
+    color: colors.textSecondary,
+    fontSize: 11,
+  },
+  approvedCard: {
+    backgroundColor: colors.safeSurface,
+    borderRadius: radii.lg,
+    borderWidth: 1.5,
+    borderColor: colors.safeBorder,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.xs,
+    ...shadows.sm,
+  },
+  approvedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  approvedIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(16, 185, 129, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  approvedTitle: {
+    ...typography.bodySemibold,
+    color: colors.safeText,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  approvedSubtitle: {
+    ...typography.small,
+    color: colors.textSecondary,
     fontSize: 12,
+    lineHeight: 16,
+  },
+  rejectedCard: {
+    backgroundColor: colors.threatSurface,
+    borderRadius: radii.lg,
+    borderWidth: 1.5,
+    borderColor: colors.threatBorder,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.xs,
+    ...shadows.sm,
+  },
+  rejectedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  rejectedIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(220, 38, 38, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rejectedTitle: {
+    ...typography.bodySemibold,
+    color: colors.threatText,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  rejectedSubtitle: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
   },
   expiredBlock: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingVertical: spacing.sm,
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  expiredTitle: {
+    ...typography.smallSemibold,
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "700",
   },
   expiredText: {
     ...typography.small,
     color: colors.textMuted,
     fontSize: 12,
+    marginTop: 1,
   },
   authRequiredCard: {
     backgroundColor: colors.surface,

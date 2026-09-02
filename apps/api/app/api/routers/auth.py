@@ -189,10 +189,17 @@ def _find_user_by_identifier(db: Session, identifier: str):
     if user is not None:
         return user
 
-    # Also try normalized digits phone hash (e.g. +919876543210)
+    # Also try normalized digits phone hash (e.g. +919876543210 or +91-98765-43210)
     digits_only = "".join(c for c in clean if c.isdigit())
     if digits_only:
-        for candidate in (f"+91{digits_only[-10:]}", f"+{digits_only}", digits_only):
+        for candidate in (
+            f"+91{digits_only[-10:]}",
+            f"+91-{digits_only[-10:-5]}-{digits_only[-5:]}" if len(digits_only) >= 10 else "",
+            f"+{digits_only}",
+            digits_only,
+        ):
+            if not candidate:
+                continue
             cand_hash = hash_identifier(candidate)
             user = user_repository.get_user_by_phone_hash(db, cand_hash)
             if user is not None:

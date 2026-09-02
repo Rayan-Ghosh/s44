@@ -48,3 +48,8 @@ class TransactionRead(BaseModel):
     authorization_status: Optional[str] = "NONE"
     authorized_at: Optional[datetime] = None
     authorization_method: Optional[str] = None
+    merchant: Optional[str] = None
+    risk_level: Optional[str] = "LOW"
+    risk_score: Optional[float] = 0.0
+    risk_factors: Optional[list] = []
+    reasons: Optional[list[str]] = []

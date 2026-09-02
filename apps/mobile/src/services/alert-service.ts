@@ -37,7 +37,8 @@ const convertDemoAlerts = (): SecurityAlert[] => {
 };
 
 class AlertManager {
-  private alerts: SecurityAlert[] = IS_DEMO_MODE ? convertDemoAlerts() : [];
+  // Pre-populate with demo alerts; real API data overwrites on first successful fetch
+  private alerts: SecurityAlert[] = convertDemoAlerts();
   private listeners: Set<AlertListener> = new Set();
 
   public subscribe(listener: AlertListener): () => void {
@@ -68,7 +69,7 @@ class AlertManager {
 
     try {
       const res = await ApiClient.get<any[]>("/api/v1/alerts");
-      if (res.data && Array.isArray(res.data)) {
+      if (res.data && Array.isArray(res.data) && res.data.length > 0) {
         this.alerts = res.data.map((a: any) => ({
           id: String(a.id),
           title: a.summary || "Security Alert",
@@ -87,6 +88,7 @@ class AlertManager {
         this.notify();
         return [...this.alerts];
       }
+      // API returned empty — fall through to demo data
     } catch {
       // Fallback
     }

@@ -9,6 +9,7 @@ import { Header } from "../components/common/Header";
 import { Badge } from "../components/common/Badge";
 import { useSecurity } from "../context/SecurityContext";
 import { HistoryItem, PaymentHistoryItem, CallHistoryItem } from "../types/history";
+import { getRiskLevelFromScore } from "../utils/risk-scoring";
 
 export const HistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -109,11 +110,16 @@ export const HistoryScreen: React.FC = () => {
                   </View>
 
                   <View style={styles.riskCol}>
-                    <Badge
-                      label={`${item.riskLevel} · ${item.riskScore}`}
-                      riskLevel={item.riskLevel}
-                      size="sm"
-                    />
+                    {(() => {
+                      const itemLevel = item.riskLevel || getRiskLevelFromScore(item.riskScore);
+                      return (
+                        <Badge
+                          label={`${itemLevel} · ${item.riskScore}`}
+                          riskLevel={itemLevel}
+                          size="sm"
+                        />
+                      );
+                    })()}
                     <Text style={styles.statusLabel}>{item.status}</Text>
                   </View>
                 </View>

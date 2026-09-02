@@ -29,7 +29,6 @@ import { useAuth } from "../context/AuthContext";
 import { useBiometrics } from "../context/BiometricContext";
 import { useGuardian } from "../context/GuardianContext";
 import { TrustedContact } from "../types/guardian";
-import { GuardianApprovalCard } from "../components/guardian/GuardianApprovalCard";
 
 // ---------------------------------------------------------------------------
 // Relationship options
@@ -249,8 +248,6 @@ export const TrustedScreen: React.FC = () => {
     loadContacts,
     addContact,
     removeContact,
-    pendingRequests,
-    respondToRequest,
   } = useGuardian();
 
   const [showForm, setShowForm] = useState(false);
@@ -422,42 +419,6 @@ export const TrustedScreen: React.FC = () => {
           }
         >
 
-          {/* Dynamic Guardian Approval Requests Section */}
-          <StaggerRevealCard
-            index={0}
-            baseDelay={60}
-            hasPlayed={hasPlayedTrustedStaggerRef.current}
-          >
-            {pendingRequests && pendingRequests.filter((r) => r.status === "PENDING" && r.expiresAt > Date.now()).length > 0 ? (
-              <View style={styles.section}>
-                <Text style={styles.sectionHeading}>ACTIVE GUARDIAN APPROVAL REQUEST</Text>
-                {pendingRequests
-                  .filter((r) => r.status === "PENDING" && r.expiresAt > Date.now())
-                  .map((req) => (
-                    <GuardianApprovalCard
-                      key={req.id}
-                      request={req}
-                      onConfirm={() => respondToRequest(req.id, "APPROVED")}
-                      onReject={() => respondToRequest(req.id, "REJECTED")}
-                      onDismiss={() => {}}
-                    />
-                  ))}
-              </View>
-            ) : (
-              <View style={styles.noPendingCard}>
-                <View style={styles.noPendingIconWrap}>
-                  <Ionicons name="shield-checkmark" size={20} color={colors.safe} />
-                </View>
-                <View style={styles.noPendingTextCol}>
-                  <Text style={styles.noPendingTitle}>No Pending Guardian Approvals</Text>
-                  <Text style={styles.noPendingSubtitle}>
-                    No payment currently requires guardian approval. Any high-risk transfer initiated will route an approval request here in real time.
-                  </Text>
-                </View>
-              </View>
-            )}
-          </StaggerRevealCard>
-
           {/* Add form (inline) - only allowed when 0 contacts exist */}
           {showForm && trustedContacts.length === 0 && (
             <AddContactForm
@@ -469,7 +430,7 @@ export const TrustedScreen: React.FC = () => {
 
           {/* Contacts section with Toggle Switch on heading */}
           <StaggerRevealCard
-            index={2}
+            index={0}
             baseDelay={60}
             hasPlayed={hasPlayedTrustedStaggerRef.current}
           >
@@ -760,45 +721,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 22,
-  },
-  noPendingCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-    gap: spacing.md,
-    ...shadows.sm,
-  },
-  noPendingIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  noPendingTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  noPendingTitle: {
-    ...typography.bodySemibold,
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  noPendingSubtitle: {
-    ...typography.small,
-    color: colors.textSecondary,
-    fontSize: 11,
-    lineHeight: 16,
   },
   infoText: {
     ...typography.small,

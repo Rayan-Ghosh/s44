@@ -67,6 +67,21 @@ export interface UserTransaction {
   authorizationMethod?: string;
 }
 
+export const isTransactionTerminal = (
+  tx: UserTransaction | { status?: string; isCompleted?: boolean } | null | undefined
+): boolean => {
+  if (!tx) return false;
+  if (tx.isCompleted) return true;
+  const s = tx.status;
+  return s === "Completed" || s === "Safe" || s === "Blocked" || s === "Reported";
+};
+
+export const isTransactionPayable = (tx: UserTransaction | null | undefined): boolean => {
+  if (!tx) return false;
+  if (isTransactionTerminal(tx)) return false;
+  return tx.status === "Held" || tx.status === "Risk detected" || tx.status === "Approved by you";
+};
+
 const STATUS_MAP: Record<string, UserTransaction["status"]> = {
   PENDING: "Held",
   AWAITING_CONFIRMATION: "Held",
@@ -74,7 +89,7 @@ const STATUS_MAP: Record<string, UserTransaction["status"]> = {
   AUTHORIZED: "Held",
   PENDING_GUARDIAN_APPROVAL: "Held",
   ALLOWED: "Safe",
-  CONFIRMED: "Approved by you",
+  CONFIRMED: "Completed",
   GUARDIAN_APPROVED: "Approved by you",
   GUARDIAN_TIMEOUT_USER_OVERRODE: "Approved by you",
   CANCELLED: "Blocked",
@@ -82,10 +97,37 @@ const STATUS_MAP: Record<string, UserTransaction["status"]> = {
   REPORTED: "Reported",
 };
 
+import { getRiskLevelFromScore } from "../utils/risk-scoring";
+
 const mapBackendTransaction = (t: any): UserTransaction => {
   const status = STATUS_MAP[String(t.status).toUpperCase()] || "Held";
-  const isRisky = (t.risk_level === "HIGH" || t.risk_level === "MEDIUM") && status === "Held";
-  const authRequired = Boolean(t.authorization_required || t.risk_level === "HIGH");
+  const rawRiskScore = typeof t.risk_score === "number" ? Math.round(t.risk_score * 10) / 10 : (t.risk_score !== undefined ? Number(t.risk_score) : 0);
+  const riskLevel: "LOW" | "MEDIUM" | "HIGH" = getRiskLevelFromScore(rawRiskScore);
+
+  const isRisky = (riskLevel === "HIGH" || riskLevel === "MEDIUM") && status === "Held";
+  const authRequired = Boolean(t.authorization_required || riskLevel === "HIGH");
+
+  const factors: RiskFactorItem[] = Array.isArray(t.risk_factors)
+    ? t.risk_factors.map((f: any) => ({
+        factor_type: f.factor_type || "ml_signal",
+        factor_name: f.factor_name || f.name || "Risk Signal",
+        contribution: typeof f.contribution === "number" ? f.contribution : 0,
+        explanation: f.explanation || f.factor_name || "Telemetry signal evaluated",
+      }))
+    : [];
+
+  const reasons = factors.length > 0
+    ? factors.map((f) => f.explanation).filter(Boolean)
+    : Array.isArray(t.reasons) && t.reasons.length > 0
+    ? t.reasons
+    : riskLevel === "HIGH"
+    ? ["High-risk behavioral anomaly detected", "Transaction requires guardian verification"]
+    : riskLevel === "MEDIUM"
+    ? ["Transaction amount exceeds usual baseline", "Unverified recipient profile"]
+    : ["Standard verified transaction signature"];
+
+  const isTerminal = isTransactionTerminal({ status });
+
   return {
     id: String(t.id),
     title: t.merchant || "UPI Payment",
@@ -95,12 +137,12 @@ const mapBackendTransaction = (t: any): UserTransaction => {
     timestamp: t.timestamp || new Date().toISOString(),
     paymentMethod: t.payment_method || "UPI",
     status: isRisky ? "Risk detected" : status,
-    riskLevel: t.risk_level,
-    riskScore: typeof t.risk_score === "number" ? t.risk_score : undefined,
-    riskFactors: Array.isArray(t.risk_factors) ? t.risk_factors : [],
-    reasons: Array.isArray(t.risk_factors) ? t.risk_factors.map((f: any) => f.explanation).filter(Boolean) : [],
-    isCompleted: status === "Approved by you" || status === "Safe",
-    completionTimestamp: status !== "Held" ? t.timestamp : undefined,
+    riskLevel: riskLevel,
+    riskScore: rawRiskScore,
+    riskFactors: factors,
+    reasons: reasons,
+    isCompleted: isTerminal,
+    completionTimestamp: isTerminal ? t.timestamp : undefined,
     authorizationRequired: authRequired,
     authorizationStatus: t.authorization_status || (authRequired ? "PENDING" : "NONE"),
     authorizedAt: t.authorized_at,
@@ -112,7 +154,7 @@ type PaymentSubscriber = (overview: UserPaymentOverview, transactions: UserTrans
 
 class CentralPaymentManager {
   private transactions: UserTransaction[] = IS_DEMO_MODE ? [...DEMO_USER_TRANSACTIONS] : [];
-  private overview: UserPaymentOverview = IS_DEMO_MODE ? { ...DEMO_PAYMENT_OVERVIEW } : { ...EMPTY_PAYMENT_OVERVIEW };
+  private overview: UserPaymentOverview = IS_DEMO_MODE ? { ...DEMO_PAYMENT_OVERVIEW } : EMPTY_PAYMENT_OVERVIEW;
   private subscribers: Set<PaymentSubscriber> = new Set();
 
   public subscribe(fn: PaymentSubscriber): () => void {
@@ -146,10 +188,21 @@ class CentralPaymentManager {
     const blockedCount = this.transactions.filter((t) => t.status === "Blocked");
     const reportedCount = this.transactions.filter((t) => t.status === "Reported");
 
-    const hasRisk = reviewItems.length > 0;
-    const currentScore = hasRisk ? reviewItems[0].riskScore || 78.4 : 8.2;
-    const currentLevel = hasRisk ? "HIGH" : "LOW";
-    const protStatus = hasRisk ? "ATTENTION REQUIRED" : "PROTECTED";
+    let currentScore = 0;
+    let currentLevel: "LOW" | "MEDIUM" | "HIGH" = "LOW";
+
+    if (reviewItems.length > 0) {
+      const highestItem = reviewItems.reduce((max, cur) => {
+        const curScore = cur.riskScore ?? 0;
+        const maxScore = max.riskScore ?? 0;
+        return curScore > maxScore ? cur : max;
+      }, reviewItems[0]);
+
+      currentScore = highestItem.riskScore ?? 0;
+      currentLevel = getRiskLevelFromScore(currentScore);
+    }
+
+    const protStatus = reviewItems.length > 0 || currentLevel === "HIGH" || currentLevel === "MEDIUM" ? "ATTENTION REQUIRED" : "PROTECTED";
 
     return {
       totalAmountThisMonth: totalAmount,
@@ -174,6 +227,7 @@ class CentralPaymentManager {
     try {
       const res = await ApiClient.get<any>(`/api/v1/users/${userId}/overview`);
       if (res.data) {
+        const ovScore = res.data.current_risk_score ?? 0;
         this.overview = {
           totalAmountThisMonth: res.data.total_amount_this_month ?? 0,
           transactionCount: res.data.transaction_count ?? 0,
@@ -181,9 +235,9 @@ class CentralPaymentManager {
           needsReviewCount: res.data.needs_review_count ?? 0,
           blockedCount: res.data.blocked_count ?? 0,
           reportedCount: res.data.reported_count ?? 0,
-          currentRiskLevel: res.data.current_risk_level ?? "LOW",
-          currentRiskScore: res.data.current_risk_score ?? 0,
-          protectionStatus: res.data.protection_status ?? "PROTECTED",
+          currentRiskLevel: getRiskLevelFromScore(ovScore),
+          currentRiskScore: ovScore,
+          protectionStatus: res.data.protection_status ?? (ovScore >= 31 || res.data.needs_review_count > 0 ? "ATTENTION REQUIRED" : "PROTECTED"),
         };
         return this.overview;
       }
@@ -191,7 +245,7 @@ class CentralPaymentManager {
       // Fallback
     }
 
-    return this.computeOverview();
+    return this.overview;
   }
 
   /** GET Transactions */
@@ -241,16 +295,7 @@ class CentralPaymentManager {
       // Fallback
     }
 
-    // Return current local state if API is empty or demo mode
-    let items = [...this.transactions];
-    if (filter === "review") {
-      items = items.filter((t) => t.status === "Risk detected" || t.status === "Held");
-    } else if (filter === "safe" || filter === "completed") {
-      items = items.filter(
-        (t) => t.status === "Safe" || t.status === "Approved by you" || t.status === "Completed"
-      );
-    }
-    return { items, total: items.length };
+    return { items: [], total: 0 };
   }
 
   public addTransaction(newTx: UserTransaction) {
@@ -262,6 +307,7 @@ class CentralPaymentManager {
     transactionId: string,
     status: UserTransaction["status"]
   ): boolean {
+    const isTerminal = isTransactionTerminal({ status });
     let found = false;
     this.transactions = this.transactions.map((t) => {
       if (t.id === transactionId || String(t.id) === String(transactionId)) {
@@ -269,18 +315,15 @@ class CentralPaymentManager {
         return {
           ...t,
           status,
-          isCompleted: status === "Approved by you" || status === "Safe" || status === "Completed",
-          completionTimestamp:
-            status === "Approved by you" || status === "Safe" || status === "Completed"
-              ? new Date().toISOString()
-              : t.completionTimestamp,
+          isCompleted: isTerminal,
+          completionTimestamp: isTerminal ? new Date().toISOString() : t.completionTimestamp,
         };
       }
       return t;
     });
 
     if (found) {
-      if (status === "Approved by you" || status === "Safe" || status === "Completed") {
+      if (isTerminal) {
         AlertService.resolveAlertForTransaction(transactionId);
       }
       this.notify();
@@ -288,18 +331,27 @@ class CentralPaymentManager {
     return found;
   }
 
-  public completeTransaction(
+  public async completeTransaction(
     transactionId: string,
     paymentAppUsed?: string,
     trustedDetails?: TrustedApprovalAudit
-  ): boolean {
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!IS_DEMO_MODE) {
+      const res = await ApiClient.post<{ id: number; status: string; message?: string }>(
+        `/api/v1/transactions/${transactionId}/confirm`
+      );
+      if (res.error) {
+        return { success: false, error: res.error };
+      }
+    }
+
     let found = false;
     this.transactions = this.transactions.map((t) => {
       if (t.id === transactionId || String(t.id) === String(transactionId)) {
         found = true;
         return {
           ...t,
-          status: "Approved by you",
+          status: "Completed",
           isCompleted: true,
           paymentAppUsed: paymentAppUsed || t.paymentAppUsed || "Google Pay UPI",
           completionTimestamp: new Date().toISOString(),
@@ -313,7 +365,7 @@ class CentralPaymentManager {
       AlertService.resolveAlertForTransaction(transactionId);
       this.notify();
     }
-    return found;
+    return { success: found };
   }
 
   public async authorizeTransaction(
@@ -353,17 +405,7 @@ class CentralPaymentManager {
   }
 
   public async confirmTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    if (!IS_DEMO_MODE) {
-      const res = await ApiClient.post<{ status: string; message?: string }>(
-        `/api/v1/transactions/${transactionId}/confirm`
-      );
-      if (res.error) {
-        return { success: false, error: res.error };
-      }
-    }
-
-    const ok = this.updateTransactionStatus(transactionId, "Approved by you");
-    return { success: ok };
+    return this.completeTransaction(transactionId);
   }
 
   public async reportTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
