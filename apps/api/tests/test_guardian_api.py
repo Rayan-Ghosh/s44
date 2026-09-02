@@ -151,3 +151,49 @@ def test_late_guardian_signup_backlink(client):
     contacts_list = client.get(f"/api/v1/users/{payer['id']}/trusted-contacts").json()
     assert len(contacts_list) == 1
     assert contacts_list[0]["guardian_user_id"] == deepak["id"]
+
+
+def test_guardian_request_exact_120_seconds_countdown(client):
+    from datetime import datetime, timezone
+    user_id, contact_id, txn_id = _setup_high_risk_txn(client)
+
+    req_res = client.post("/api/v1/guardian/requests", json={"transaction_id": txn_id, "trusted_contact_id": contact_id})
+    assert req_res.status_code == 201
+    req = req_res.json()
+
+    assert req["outcome"] == "PENDING"
+    assert req["remaining_seconds"] in (119, 120)
+
+    req_at = datetime.fromisoformat(req["requested_at"])
+    exp_at = datetime.fromisoformat(req["expires_at"])
+    diff = (exp_at - req_at).total_seconds()
+    assert int(diff) == 120
+
+
+def test_guardian_request_expired_blocks_approval_and_blocks_transaction(client, db_session):
+    from datetime import datetime, timedelta, timezone
+    from app.models.guardian_request import GuardianRequest
+
+    user_id, contact_id, txn_id = _setup_high_risk_txn(client)
+    req_res = client.post("/api/v1/guardian/requests", json={"transaction_id": txn_id, "trusted_contact_id": contact_id})
+    req_id = req_res.json()["id"]
+
+    # Artificially set expires_at in the past
+    req_orm = db_session.get(GuardianRequest, req_id)
+    req_orm.expires_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+    db_session.commit()
+
+    # Attempting to approve an expired request must fail with 400
+    appr_res = client.post(f"/api/v1/guardian/requests/{req_id}/approve", json={"notes": "Late approval"})
+    assert appr_res.status_code == 400
+    assert "expired" in appr_res.json()["detail"].lower()
+
+    # Request detail should now be TIMEOUT with 0 remaining seconds
+    detail = client.get(f"/api/v1/guardian/requests/{req_id}").json()
+    assert detail["outcome"] == "TIMEOUT"
+    assert detail["remaining_seconds"] == 0
+
+    # Associated transaction must be permanently blocked (GUARDIAN_REJECTED)
+    txn = client.get(f"/api/v1/transactions/{txn_id}").json()
+    assert txn["status"] == "GUARDIAN_REJECTED"
+

@@ -168,7 +168,17 @@ class PaymentAppLauncher {
     const uri = this.buildUpiUri(details, app.scheme);
 
     if (Platform.OS === "web") {
-      // On web/desktop, simulate opening intent
+      if (typeof window !== "undefined" && typeof document !== "undefined") {
+        try {
+          const anchor = document.createElement("a");
+          anchor.href = uri;
+          anchor.target = "_blank";
+          anchor.rel = "noopener noreferrer";
+          anchor.click();
+        } catch {
+          // Handled gracefully in browser sandbox
+        }
+      }
       return { success: true, uri };
     }
 

@@ -83,13 +83,35 @@ def _get_sender_masked_phone(db: Session, sender) -> Optional[str]:
     return None
 
 
+def _check_and_expire_request(db: Session, req) -> bool:
+    """Check if a PENDING guardian request has passed its authoritative expires_at timestamp.
+    If expired, atomically transition to TIMEOUT and mark the transaction as GUARDIAN_REJECTED.
+    """
+    if req is None or req.outcome != GuardianOutcome.PENDING:
+        return False
+    now = datetime.now(timezone.utc)
+    exp = req.expires_at.replace(tzinfo=timezone.utc) if req.expires_at.tzinfo is None else req.expires_at
+    if now >= exp:
+        req.outcome = GuardianOutcome.TIMEOUT
+        req.resolved_at = now
+        req.resolution_notes = "Guardian approval window expired after 120 seconds."
+        if req.transaction and req.transaction.status == TransactionStatus.PENDING_GUARDIAN_APPROVAL:
+            req.transaction.status = TransactionStatus.GUARDIAN_REJECTED
+        db.commit()
+        db.refresh(req)
+        return True
+    return False
+
+
 def _serialize_pending_requests(db: Session, reqs: list) -> list[GuardianRequestRead]:
     """Shared helper: convert a list of pending GuardianRequest ORM rows into
     GuardianRequestRead responses with dynamic sender and recipient details,
-    filtering out any that have already expired."""
+    filtering out any that have already expired and auto-resolving them."""
     results = []
     now = datetime.now(timezone.utc)
     for req in reqs:
+        if _check_and_expire_request(db, req) or req.outcome != GuardianOutcome.PENDING:
+            continue
         exp = req.expires_at.replace(tzinfo=timezone.utc) if req.expires_at.tzinfo is None else req.expires_at
         rem = max(0, int((exp - now).total_seconds()))
         if rem <= 0:
@@ -182,9 +204,7 @@ def get_guardian_request_by_transaction(transaction_id: int, db: Session = Depen
     )
     if not req:
         return None
-    serialized = _serialize_pending_requests(db, [req])
-    if serialized:
-        return serialized[0]
+    _check_and_expire_request(db, req)
     return get_guardian_request_detail(req.id, db)
 
 
@@ -194,37 +214,35 @@ def get_guardian_request_detail(request_id: int, db: Session = Depends(get_db)) 
     if req is None:
         raise HTTPException(status_code=404, detail=f"Guardian request {request_id} not found.")
 
-    serialized = _serialize_pending_requests(db, [req])
-    if not serialized:
-        # If already expired or resolved, serialize with remaining_seconds=0
-        now = datetime.now(timezone.utc)
-        exp = req.expires_at.replace(tzinfo=timezone.utc) if req.expires_at.tzinfo is None else req.expires_at
-        req_at = req.requested_at.replace(tzinfo=timezone.utc) if req.requested_at.tzinfo is None else req.requested_at
-        res_at = req.resolved_at.replace(tzinfo=timezone.utc) if (req.resolved_at and req.resolved_at.tzinfo is None) else req.resolved_at
-        txn = req.transaction
-        risk = risk_repository.get_latest_risk_score(db, txn.id) if txn else None
-        sender = txn.user if txn else None
-        recipient = txn.recipient if txn else None
-        return GuardianRequestRead(
-            id=req.id,
-            transaction_id=req.transaction_id,
-            trusted_contact_id=req.trusted_contact_id,
-            requested_at=req_at,
-            expires_at=exp,
-            resolved_at=res_at,
-            outcome=req.outcome,
-            resolution_notes=req.resolution_notes,
-            resolution_channel=req.resolution_channel,
-            remaining_seconds=0,
-            transaction_amount=float(txn.amount) if txn else 0.0,
-            risk_score=int(risk.final_score) if risk else None,
-            risk_reasons=[f.explanation for f in (risk.risk_factors if risk else [])],
-            sender_name=sender.name if sender else "Family Member",
-            sender_phone_masked=_get_sender_masked_phone(db, sender),
-            recipient_name=recipient.display_name if (recipient and recipient.display_name) else (txn.payment_method if txn and txn.payment_method else "UPI Merchant"),
-        )
+    _check_and_expire_request(db, req)
 
-    return serialized[0]
+    now = datetime.now(timezone.utc)
+    exp = req.expires_at.replace(tzinfo=timezone.utc) if req.expires_at.tzinfo is None else req.expires_at
+    req_at = req.requested_at.replace(tzinfo=timezone.utc) if req.requested_at.tzinfo is None else req.requested_at
+    res_at = req.resolved_at.replace(tzinfo=timezone.utc) if (req.resolved_at and req.resolved_at.tzinfo is None) else req.resolved_at
+    rem = max(0, int((exp - now).total_seconds())) if req.outcome == GuardianOutcome.PENDING else 0
+    txn = req.transaction
+    risk = risk_repository.get_latest_risk_score(db, txn.id) if txn else None
+    sender = txn.user if txn else None
+    recipient = txn.recipient if txn else None
+    return GuardianRequestRead(
+        id=req.id,
+        transaction_id=req.transaction_id,
+        trusted_contact_id=req.trusted_contact_id,
+        requested_at=req_at,
+        expires_at=exp,
+        resolved_at=res_at,
+        outcome=req.outcome,
+        resolution_notes=req.resolution_notes,
+        resolution_channel=req.resolution_channel,
+        remaining_seconds=rem,
+        transaction_amount=float(txn.amount) if txn else 0.0,
+        risk_score=int(risk.final_score) if risk else None,
+        risk_reasons=[f.explanation for f in (risk.risk_factors if risk else [])],
+        sender_name=sender.name if sender else "Family Member",
+        sender_phone_masked=_get_sender_masked_phone(db, sender),
+        recipient_name=recipient.display_name if (recipient and recipient.display_name) else (txn.payment_method if txn and txn.payment_method else "UPI Merchant"),
+    )
 
 
 @router.post("/requests/{request_id}/approve")
@@ -232,6 +250,13 @@ def approve_guardian_request(request_id: int, payload: Optional[GuardianActionRe
     req = guardian_repository.get_guardian_request(db, request_id)
     if req is None:
         raise HTTPException(status_code=404, detail=f"Guardian request {request_id} not found.")
+
+    is_expired = _check_and_expire_request(db, req)
+    if is_expired or req.outcome != GuardianOutcome.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Guardian request has expired or has already been resolved and cannot be approved.",
+        )
 
     notes = payload.notes if payload else "Approved by trusted contact"
     guardian_repository.resolve_guardian_request(db, request_id, GuardianOutcome.APPROVED, notes)
@@ -260,6 +285,13 @@ def reject_guardian_request(request_id: int, payload: Optional[GuardianActionReq
     req = guardian_repository.get_guardian_request(db, request_id)
     if req is None:
         raise HTTPException(status_code=404, detail=f"Guardian request {request_id} not found.")
+
+    _check_and_expire_request(db, req)
+    if req.outcome != GuardianOutcome.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Guardian request is already resolved ({req.outcome.value}).",
+        )
 
     notes = payload.notes if payload else "Rejected by trusted contact due to fraud risk"
     guardian_repository.resolve_guardian_request(db, request_id, GuardianOutcome.REJECTED, notes)

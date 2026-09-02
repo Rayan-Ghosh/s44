@@ -33,10 +33,7 @@ const toGuardianRequest = (
   fallback?: Partial<Pick<GuardianRequest, "merchant" | "paymentMethod" | "riskLevel">>
 ): GuardianRequest => {
   const createdAt = parseUtcDate(dto.requestedAt) || Date.now();
-  const expiresAt =
-    dto.remainingSeconds > 0
-      ? Date.now() + dto.remainingSeconds * 1000
-      : parseUtcDate(dto.expiresAt) || createdAt + HOLD_SECONDS * 1000;
+  const expiresAt = parseUtcDate(dto.expiresAt) || createdAt + HOLD_SECONDS * 1000;
   const resolvedAt = dto.resolvedAt ? parseUtcDate(dto.resolvedAt) : undefined;
   // Authoritative score -> level, never a locally invented threshold. This
   // used to be `dto.riskScore >= 75 ? "HIGH" : "MEDIUM"` (a different cutoff
@@ -130,27 +127,24 @@ const GuardianContext = createContext<GuardianContextType>({
 export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
+  const { session } = useAuth();
   const [trustedContacts, setTrustedContacts] = useState<TrustedContact[]>([]);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [isTrustedFeatureEnabled, setIsTrustedFeatureEnabled] = useState<boolean>(true);
 
   const [activeRequest, setActiveRequest] = useState<GuardianRequest | null>(null);
   const [pendingRequests, setPendingRequests] = useState<GuardianRequest[]>([]);
-  const [countdown, setCountdown] = useState(HOLD_SECONDS);
+  const [countdown, setCountdown] = useState<number>(HOLD_SECONDS);
   const [paymentOutcome, setPaymentOutcome] = useState<"APPROVED" | "REJECTED" | "EXPIRED" | null>(null);
 
-  const [notificationBadge, setNotificationBadge] = useState(0);
+  const [notificationBadge, setNotificationBadge] = useState<number>(0);
   const [approvalCard, setApprovalCard] = useState<GuardianRequest | null>(null);
 
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activePollHolderRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const knownPendingIdsRef = useRef<Set<string>>(new Set());
   const resolvedRef = useRef<boolean>(false);
-  const seenPendingIdsRef = useRef<Set<string>>(new Set());
-
-  // Pulled to top-of-component scope so the pending-request polling effect
-  // can read session.userId before the contacts are loaded.
-  const { session } = useAuth();
 
   const clearTimers = useCallback(() => {
     if (countdownIntervalRef.current) {
@@ -170,22 +164,13 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, [clearTimers]);
 
-  // Clear pending and notification state on user session change
   useEffect(() => {
-    seenPendingIdsRef.current.clear();
+    knownPendingIdsRef.current.clear();
     setPendingRequests([]);
     setNotificationBadge(0);
     setApprovalCard(null);
   }, [session?.userId]);
 
-  // -------------------------------------------------------------------------
-  // Poll for pending requests addressed to this guardian user.
-  //
-  // Only the actual guardian (trusted person) whose guardian_user_id matches
-  // the currently logged-in session.userId will receive pending requests.
-  // The payment sender will receive [] from the backend, ensuring zero badge
-  // or approval cards appear on the sender's account.
-  // -------------------------------------------------------------------------
   useEffect(() => {
     if (pendingPollRef.current) {
       clearInterval(pendingPollRef.current);
@@ -193,8 +178,6 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
     }
 
     const guardianUserId = session?.userId && session.userId > 0 ? session.userId : null;
-
-    // Only authenticated guardian sessions should poll for approval requests
     if (!guardianUserId) {
       setPendingRequests([]);
       setNotificationBadge(0);
@@ -203,28 +186,21 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const poll = async () => {
       const baseUrl = getApiBaseUrl();
-      const pollingUrl = `${baseUrl}/api/v1/guardian/requests/by-guardian-user/${guardianUserId}`;
       const dtos = await GuardianService.getPendingRequestsByGuardianUserId(guardianUserId);
 
       const mapped = dtos
         .map((d) => toGuardianRequest(d))
         .filter((r) => r.status === "PENDING" && r.expiresAt > Date.now());
 
-      console.log(
-        `[GuardianContext:DIAGNOSTIC] session.userId=${guardianUserId} | API_URL=${baseUrl} | Polling_URL=${pollingUrl} | API_response_count=${dtos.length} | pendingRequests.length=${mapped.length} | notificationBadge=${mapped.length}`
-      );
-
-      const newOnes = mapped.filter((r) => !seenPendingIdsRef.current.has(r.id));
+      const newOnes = mapped.filter((r) => !knownPendingIdsRef.current.has(r.id));
       if (newOnes.length > 0) {
-        // Vibrate only the guardian device receiving the new request
         Vibration.vibrate([0, 250, 150, 250, 150, 250, 150, 250, 150, 250]);
       }
 
-      mapped.forEach((r) => seenPendingIdsRef.current.add(r.id));
+      mapped.forEach((r) => knownPendingIdsRef.current.add(r.id));
       setPendingRequests(mapped);
       setNotificationBadge(mapped.length);
 
-      // Auto-close open approval card if the request expired or was resolved elsewhere
       setApprovalCard((current) => {
         if (!current) return null;
         const stillPending = mapped.some((r) => r.id === current.id);
@@ -242,26 +218,14 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, [session?.userId]);
 
-
-  const toggleTrustedFeature = useCallback(() => {
-    let nextState = false;
+  const toggleTrustedFeature = useCallback((): boolean => {
+    let next = true;
     setIsTrustedFeatureEnabled((prev) => {
-      nextState = !prev;
-      return nextState;
+      next = !prev;
+      return next;
     });
-
-    if (activeRequest && activeRequest.status === "PENDING" && !resolvedRef.current) {
-      resolvedRef.current = true;
-      clearTimers();
-      setActiveRequest((prev) => (prev ? { ...prev, status: "EXPIRED", resolvedAt: Date.now() } : null));
-      setPaymentOutcome("EXPIRED");
-      setNotificationBadge(0);
-      setApprovalCard(null);
-      setCountdown(HOLD_SECONDS);
-    }
-
-    return nextState;
-  }, [activeRequest, clearTimers]);
+    return next;
+  }, []);
 
   const setTrustedFeatureEnabled = useCallback((enabled: boolean) => {
     setIsTrustedFeatureEnabled(enabled);
@@ -271,9 +235,7 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsLoadingContacts(true);
     try {
       const contacts = await GuardianService.getTrustedContacts(userId);
-      setTrustedContacts(contacts.slice(0, 1));
-    } catch {
-      setTrustedContacts([]);
+      setTrustedContacts(contacts);
     } finally {
       setIsLoadingContacts(false);
     }
@@ -290,20 +252,14 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       userId: number,
       contact: Omit<TrustedContact, "id" | "addedAt">
     ): Promise<{ success: boolean; error?: string }> => {
-      if (trustedContacts.length >= 1) {
-        return {
-          success: false,
-          error: "You can only have one trusted contact at a time. Please remove the existing contact first.",
-        };
-      }
       const res = await GuardianService.addTrustedContact(userId, contact);
       if (res.success && res.contact) {
-        setTrustedContacts([res.contact!]);
+        setTrustedContacts((prev) => [...prev, res.contact!]);
         return { success: true };
       }
-      return { success: false, error: res.error || "Failed to save contact." };
+      return { success: false, error: res.error || "Failed to add trusted contact" };
     },
-    [trustedContacts]
+    []
   );
 
   const removeContact = useCallback(async (userId: number, contactId: string) => {
@@ -311,22 +267,8 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
     if (res.success) {
       setTrustedContacts((prev) => prev.filter((c) => c.id !== contactId));
     }
+  }, []);
 
-    if (activeRequest && activeRequest.status === "PENDING" && !resolvedRef.current) {
-      resolvedRef.current = true;
-      clearTimers();
-      setActiveRequest((prev) => (prev ? { ...prev, status: "EXPIRED", resolvedAt: Date.now() } : null));
-      setPaymentOutcome("EXPIRED");
-      setNotificationBadge(0);
-      setApprovalCard(null);
-      setCountdown(HOLD_SECONDS);
-    }
-  }, [clearTimers, activeRequest]);
-
-  // -------------------------------------------------------------------------
-  // Initiate guardian request — real POST /api/v1/guardian/requests, then
-  // poll the request's own status until it resolves or the hold expires.
-  // -------------------------------------------------------------------------
   const initiateGuardianRequest = useCallback(
     async (tx: UserTransaction) => {
       if (activeRequest && activeRequest.status === "PENDING") return;
@@ -338,14 +280,6 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       if (isNaN(txnId)) return;
 
       let contactId = trustedContacts[0]?.id ? parseInt(trustedContacts[0].id, 10) : undefined;
-      if (!contactId && session?.userId) {
-        const fetched = await GuardianService.getTrustedContacts(session.userId);
-        if (fetched.length > 0) {
-          setTrustedContacts(fetched.slice(0, 1));
-          contactId = parseInt(fetched[0].id, 10);
-        }
-      }
-
       const res = await GuardianService.createRequest(txnId, contactId);
       if (!res.success || !res.request) {
         setPaymentOutcome("EXPIRED");
@@ -358,11 +292,8 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
         riskLevel: tx.riskLevel,
       });
 
-      const initialRemaining =
-        typeof res.request.remainingSeconds === "number" && res.request.remainingSeconds > 0
-          ? res.request.remainingSeconds
-          : HOLD_SECONDS;
-      const expiresAtMs = Date.now() + initialRemaining * 1000;
+      const expiresAtMs = request.expiresAt;
+      const initialRemaining = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
 
       setActiveRequest(request);
       setCountdown(initialRemaining);
@@ -376,19 +307,19 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
             clearInterval(countdownIntervalRef.current);
             countdownIntervalRef.current = null;
           }
+          resolvedRef.current = true;
+          clearTimers();
+          setActiveRequest((prev) => (prev ? { ...prev, status: "EXPIRED", resolvedAt: Date.now() } : null));
+          PaymentService.updateTransactionStatus(tx.id, "Blocked");
+          setPaymentOutcome("EXPIRED");
+          setNotificationBadge(0);
+          setApprovalCard(null);
         }
       }, 1000);
 
-      // Poll the request's own status so an approval/rejection made from the
-      // guardian side of the flow (or another device) is reflected here.
       activePollHolderRef.current = setInterval(async () => {
         const latest = await GuardianService.getRequest(res.request!.id);
         if (!latest || resolvedRef.current) return;
-
-        // Keep countdown synchronized with authoritative backend remainingSeconds
-        if (typeof latest.remainingSeconds === "number") {
-          setCountdown(latest.remainingSeconds);
-        }
 
         if (latest.outcome && latest.outcome !== "PENDING") {
           resolvedRef.current = true;
@@ -405,7 +336,8 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
           return;
         }
 
-        if (latest.remainingSeconds <= 0) {
+        const rem = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+        if (rem <= 0 || latest.remainingSeconds <= 0) {
           resolvedRef.current = true;
           clearTimers();
           setActiveRequest((prev) => (prev ? { ...prev, status: "EXPIRED", resolvedAt: Date.now() } : null));
@@ -416,7 +348,7 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }, POLL_INTERVAL_MS);
     },
-    [activeRequest, clearTimers, trustedContacts, session?.userId]
+    [activeRequest, clearTimers, trustedContacts]
   );
 
   const syncActiveRequestForTransaction = useCallback(
@@ -425,38 +357,37 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       if (isNaN(numTxnId)) return;
 
       let contactId = trustedContacts[0]?.id ? parseInt(trustedContacts[0].id, 10) : undefined;
-      if (!contactId && session?.userId) {
-        const fetched = await GuardianService.getTrustedContacts(session.userId);
-        if (fetched.length > 0) {
-          setTrustedContacts(fetched.slice(0, 1));
-          contactId = parseInt(fetched[0].id, 10);
-        }
-      }
-
       let dto = await GuardianService.getRequestByTransactionId(numTxnId);
       
-      // If transaction is held / risk detected with high risk and trusted contacts exist, create request if not present
       if (!dto && isTrustedFeatureEnabled && (contactId || trustedContacts.length > 0) && (tx.status === "Risk detected" || tx.status === "Held") && (tx.riskLevel === "HIGH" || (tx.riskScore && tx.riskScore >= 60))) {
         const createRes = await GuardianService.createRequest(numTxnId, contactId);
-        if (createRes.success && createRes.request) {
-          dto = createRes.request;
-        }
+        if (createRes.success && createRes.request) dto = createRes.request;
       }
 
-      if (dto && dto.outcome === "PENDING" && dto.remainingSeconds > 0) {
+      if (dto && dto.outcome === "PENDING") {
         const request = toGuardianRequest(dto, {
           merchant: tx.merchant,
           paymentMethod: tx.paymentMethod,
           riskLevel: tx.riskLevel,
         });
 
-        const initialRemaining = dto.remainingSeconds;
-        const expiresAtMs = Date.now() + initialRemaining * 1000;
+        const expiresAtMs = request.expiresAt;
+        const currentRem = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+
+        if (currentRem <= 0) {
+          resolvedRef.current = true;
+          clearTimers();
+          setActiveRequest({ ...request, status: "EXPIRED", resolvedAt: Date.now() });
+          PaymentService.updateTransactionStatus(tx.id, "Blocked");
+          setPaymentOutcome("EXPIRED");
+          setCountdown(0);
+          return;
+        }
 
         clearTimers();
         resolvedRef.current = false;
         setActiveRequest(request);
-        setCountdown(initialRemaining);
+        setCountdown(currentRem);
         setPaymentOutcome(null);
 
         countdownIntervalRef.current = setInterval(() => {
@@ -467,6 +398,13 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
               clearInterval(countdownIntervalRef.current);
               countdownIntervalRef.current = null;
             }
+            resolvedRef.current = true;
+            clearTimers();
+            setActiveRequest((prev) => (prev ? { ...prev, status: "EXPIRED", resolvedAt: Date.now() } : null));
+            PaymentService.updateTransactionStatus(tx.id, "Blocked");
+            setPaymentOutcome("EXPIRED");
+            setNotificationBadge(0);
+            setApprovalCard(null);
           }
         }, 1000);
 
@@ -474,26 +412,20 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
           const latest = await GuardianService.getRequest(dto.id);
           if (!latest || resolvedRef.current) return;
 
-          if (typeof latest.remainingSeconds === "number") {
-            setCountdown(latest.remainingSeconds);
-          }
-
           if (latest.outcome && latest.outcome !== "PENDING") {
             resolvedRef.current = true;
             clearTimers();
             const finalStatus: GuardianStatus = latest.outcome === "APPROVED" ? "APPROVED" : "REJECTED";
             setActiveRequest((prev) => (prev ? { ...prev, status: finalStatus, resolvedAt: Date.now() } : null));
-            PaymentService.updateTransactionStatus(
-              tx.id,
-              latest.outcome === "APPROVED" ? "Approved by you" : "Blocked"
-            );
+            PaymentService.updateTransactionStatus(tx.id, latest.outcome === "APPROVED" ? "Approved by you" : "Blocked");
             setPaymentOutcome(latest.outcome === "APPROVED" ? "APPROVED" : "REJECTED");
             setNotificationBadge(0);
             setApprovalCard(null);
             return;
           }
 
-          if (latest.remainingSeconds <= 0) {
+          const rem = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+          if (rem <= 0 || latest.remainingSeconds <= 0) {
             resolvedRef.current = true;
             clearTimers();
             setActiveRequest((prev) => (prev ? { ...prev, status: "EXPIRED", resolvedAt: Date.now() } : null));
@@ -503,14 +435,21 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
             setApprovalCard(null);
           }
         }, POLL_INTERVAL_MS);
+      } else if (dto && (dto.outcome === "TIMEOUT" || dto.outcome === "REJECTED" || dto.remainingSeconds <= 0)) {
+        clearTimers();
+        const request = toGuardianRequest(dto, {
+          merchant: tx.merchant,
+          paymentMethod: tx.paymentMethod,
+          riskLevel: tx.riskLevel,
+        });
+        setActiveRequest({ ...request, status: "EXPIRED" });
+        setCountdown(0);
+        setPaymentOutcome("EXPIRED");
       }
     },
-    [clearTimers]
+    [clearTimers, isTrustedFeatureEnabled, session?.userId, trustedContacts]
   );
 
-  // -------------------------------------------------------------------------
-  // Respond to guardian request — real POST .../approve or .../reject.
-  // -------------------------------------------------------------------------
   const respondToRequest = useCallback(
     async (
       requestId: string,
@@ -558,7 +497,7 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       setNotificationBadge((prev) => Math.max(0, prev - 1));
       
       // Ensure resolved request ID is remembered so it never alerts again
-      seenPendingIdsRef.current.add(requestId);
+      knownPendingIdsRef.current.add(requestId);
 
       return { success: true };
     },

@@ -1,7 +1,7 @@
-import { UserTransaction, UserPaymentOverview } from "../services/payment-service";
-import { SecurityAlert } from "../types/alert";
-import { TrustedContact } from "../types/guardian";
-import { UserSession } from "../services/auth-service";
+import type { UserTransaction, UserPaymentOverview } from "../services/payment-service";
+import type { SecurityAlert } from "../types/alert";
+import type { TrustedContact } from "../types/guardian";
+import type { UserSession } from "../services/auth-service";
 import { getRiskLevelFromScore } from "../utils/risk-scoring";
 
 export const DEMO_USER_SESSION: UserSession = {
@@ -300,6 +300,315 @@ export const DEMO_USER_TRANSACTIONS: UserTransaction[] = [
     riskFactors: [],
     reasons: ["Standard transit recharge"],
     trustedApproval: { required: false },
+  },
+  // ── High-Risk Mock Transactions for Testing ──────────────────────────────────
+  {
+    id: "13",
+    title: "QuickLoan FinTech Solutions",
+    merchant: "QuickLoan FinTech Solutions",
+    amount: 24500,
+    date: "Today · 9:15 AM",
+    timestamp: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
+    paymentMethod: "PhonePe",
+    status: "Risk detected",
+    riskLevel: getRiskLevelFromScore(76.4),
+    riskScore: 76.4,
+    isCompleted: false,
+    authorizationRequired: true,
+    authorizationStatus: "PENDING",
+    riskFactors: [
+      {
+        factor_type: "threat_intel",
+        factor_name: "unregistered_nbfc_vpa",
+        contribution: 42.0,
+        explanation: "Recipient handle associated with unregistered instant lending app.",
+      },
+      {
+        factor_type: "behaviour",
+        factor_name: "clipboard_hijack_risk",
+        contribution: 24.4,
+        explanation: "UPI handle pasted from clipboard immediately after unverified SMS.",
+      },
+      {
+        factor_type: "amount",
+        factor_name: "velocity_spike",
+        contribution: 10.0,
+        explanation: "Amount is 5× higher than standard morning transfer baseline.",
+      },
+    ],
+    reasons: [
+      "Recipient handle flagged as high-risk unregistered lending entity",
+      "VPA handle copied from unverified SMS message",
+      "Abnormal transaction velocity detected",
+    ],
+    trustedApproval: {
+      required: true,
+      contactName: "Priya Sharma",
+    },
+  },
+  {
+    id: "14",
+    title: "CryptoX Global P2P Exchange",
+    merchant: "CryptoX Global P2P Exchange",
+    amount: 45000,
+    date: "Today · 8:45 AM",
+    timestamp: new Date(Date.now() - 1000 * 60 * 55).toISOString(),
+    paymentMethod: "Google Pay UPI",
+    status: "Held",
+    riskLevel: getRiskLevelFromScore(84.0),
+    riskScore: 84.0,
+    isCompleted: false,
+    authorizationRequired: true,
+    authorizationStatus: "PENDING",
+    riskFactors: [
+      {
+        factor_type: "device",
+        factor_name: "remote_desktop_active",
+        contribution: 48.0,
+        explanation: "Screen sharing / remote desktop tool active during payment initiation.",
+      },
+      {
+        factor_type: "network",
+        factor_name: "p2p_crypto_merchant",
+        contribution: 26.0,
+        explanation: "Unregulated P2P cryptocurrency gateway with high chargeback frequency.",
+      },
+      {
+        factor_type: "amount",
+        factor_name: "limit_threshold",
+        contribution: 10.0,
+        explanation: "High-value fund transfer to newly created UPI VPA.",
+      },
+    ],
+    reasons: [
+      "Active screen sharing or remote assistance app detected",
+      "P2P cryptocurrency transfer to unverified merchant",
+      "Large transfer amount exceeding regular profile threshold",
+    ],
+    trustedApproval: {
+      required: true,
+      contactName: "Priya Sharma",
+    },
+  },
+  {
+    id: "15",
+    title: "Electricity Dept Bill Desk (Urgent)",
+    merchant: "Electricity Dept Bill Desk (Urgent)",
+    amount: 18750,
+    date: "Today · 7:30 AM",
+    timestamp: new Date(Date.now() - 1000 * 60 * 130).toISOString(),
+    paymentMethod: "BHIM UPI",
+    status: "Risk detected",
+    riskLevel: getRiskLevelFromScore(91.5),
+    riskScore: 91.5,
+    isCompleted: false,
+    authorizationRequired: true,
+    authorizationStatus: "PENDING",
+    riskFactors: [
+      {
+        factor_type: "voice",
+        factor_name: "coercive_call_detected",
+        contribution: 52.0,
+        explanation: "Active phone call with high urgency / power disconnection coercion phrases detected.",
+      },
+      {
+        factor_type: "threat_intel",
+        factor_name: "utility_phishing_vpa",
+        contribution: 29.5,
+        explanation: "Personal VPA impersonating state electricity utility bill desk.",
+      },
+      {
+        factor_type: "network",
+        factor_name: "first_time_recipient",
+        contribution: 10.0,
+        explanation: "No historical record with genuine electricity distribution company.",
+      },
+    ],
+    reasons: [
+      "Coercive urgency keywords detected in simultaneous voice call",
+      "Personal UPI handle impersonating official electricity utility",
+      "Imminent disconnection threat pattern matching known scam campaign",
+    ],
+    trustedApproval: {
+      required: true,
+      contactName: "Priya Sharma",
+    },
+  },
+  {
+    id: "16",
+    title: "Global Tech Gadgets Hub",
+    merchant: "Global Tech Gadgets Hub",
+    amount: 34999,
+    date: "Yesterday · 11:20 PM",
+    timestamp: new Date(Date.now() - 1000 * 60 * 560).toISOString(),
+    paymentMethod: "Paytm Payments",
+    status: "Held",
+    riskLevel: getRiskLevelFromScore(69.8),
+    riskScore: 69.8,
+    isCompleted: false,
+    authorizationRequired: true,
+    authorizationStatus: "PENDING",
+    riskFactors: [
+      {
+        factor_type: "device",
+        factor_name: "unfamiliar_network",
+        contribution: 38.0,
+        explanation: "Payment requested from unfamiliar network subnet outside home state.",
+      },
+      {
+        factor_type: "merchant",
+        factor_name: "newly_registered_merchant",
+        contribution: 21.8,
+        explanation: "Merchant registered on UPI network less than 48 hours ago.",
+      },
+      {
+        factor_type: "amount",
+        factor_name: "high_value_electronics",
+        contribution: 10.0,
+        explanation: "High-value purchase from zero-reputation online storefront.",
+      },
+    ],
+    reasons: [
+      "Unfamiliar IP address and network subnet detected",
+      "Merchant account created less than 48 hours ago",
+      "High-value transaction to merchant with no verified reviews",
+    ],
+    trustedApproval: {
+      required: true,
+      contactName: "Priya Sharma",
+    },
+  },
+  {
+    id: "17",
+    title: "Direct Cash Gold Bullion VPA",
+    merchant: "Direct Cash Gold Bullion VPA",
+    amount: 62000,
+    date: "Yesterday · 9:10 PM",
+    timestamp: new Date(Date.now() - 1000 * 60 * 690).toISOString(),
+    paymentMethod: "Cred Pay UPI",
+    status: "Risk detected",
+    riskLevel: getRiskLevelFromScore(88.2),
+    riskScore: 88.2,
+    isCompleted: false,
+    authorizationRequired: true,
+    authorizationStatus: "PENDING",
+    riskFactors: [
+      {
+        factor_type: "threat_intel",
+        factor_name: "mule_account_cluster",
+        contribution: 50.0,
+        explanation: "Beneficiary VPA linked to known mule account ring reported by cyber police.",
+      },
+      {
+        factor_type: "behaviour",
+        factor_name: "rapid_transfer_pattern",
+        contribution: 25.2,
+        explanation: "Sudden large debit attempt following recent password update.",
+      },
+      {
+        factor_type: "amount",
+        factor_name: "near_account_drain",
+        contribution: 13.0,
+        explanation: "Transfer amount represents over 70% of usual monthly outflow.",
+      },
+    ],
+    reasons: [
+      "Beneficiary VPA linked to suspected money mule account network",
+      "Large debit attempt following recent credential modification",
+      "High risk score flagged by collective cyber defense network",
+    ],
+    trustedApproval: {
+      required: true,
+      contactName: "Priya Sharma",
+    },
+  },
+  {
+    id: "18",
+    title: "Premier Resort Bookings International",
+    merchant: "Premier Resort Bookings International",
+    amount: 29800,
+    date: "Yesterday · 6:45 PM",
+    timestamp: new Date(Date.now() - 1000 * 60 * 830).toISOString(),
+    paymentMethod: "Amazon Pay UPI",
+    status: "Held",
+    riskLevel: getRiskLevelFromScore(72.0),
+    riskScore: 72.0,
+    isCompleted: false,
+    authorizationRequired: true,
+    authorizationStatus: "PENDING",
+    riskFactors: [
+      {
+        factor_type: "network",
+        factor_name: "fake_booking_portal",
+        contribution: 40.0,
+        explanation: "Payment QR code routed through cloned luxury hospitality booking portal.",
+      },
+      {
+        factor_type: "device",
+        factor_name: "malicious_overlay_detected",
+        contribution: 22.0,
+        explanation: "Suspicious accessibility service overlay detected during QR scan.",
+      },
+      {
+        factor_type: "amount",
+        factor_name: "unusual_category_amount",
+        contribution: 10.0,
+        explanation: "Unusual high-value category spend inconsistent with profile.",
+      },
+    ],
+    reasons: [
+      "Payment link scanned from suspected cloned travel portal",
+      "Suspicious window overlay detected during payment preparation",
+      "Merchant name mismatch between QR payload and display name",
+    ],
+    trustedApproval: {
+      required: true,
+      contactName: "Priya Sharma",
+    },
+  },
+  {
+    id: "19",
+    title: "CBI Cyber Cell Fine Settlement",
+    merchant: "CBI Cyber Cell Fine Settlement",
+    amount: 50000,
+    date: "Yesterday · 4:15 PM",
+    timestamp: new Date(Date.now() - 1000 * 60 * 980).toISOString(),
+    paymentMethod: "Google Pay UPI",
+    status: "Risk detected",
+    riskLevel: getRiskLevelFromScore(95.0),
+    riskScore: 95.0,
+    isCompleted: false,
+    authorizationRequired: true,
+    authorizationStatus: "PENDING",
+    riskFactors: [
+      {
+        factor_type: "threat_intel",
+        factor_name: "police_impersonation_scam",
+        contribution: 58.0,
+        explanation: "Severe threat: recipient handle matches digital arrest extortion syndicate.",
+      },
+      {
+        factor_type: "voice",
+        factor_name: "intimidation_audio_signal",
+        contribution: 25.0,
+        explanation: "High confidence law enforcement impersonation & legal intimidation signals.",
+      },
+      {
+        factor_type: "behaviour",
+        factor_name: "panic_speed_checkout",
+        contribution: 12.0,
+        explanation: "Abnormal rapid navigation bypassing warning dialogs.",
+      },
+    ],
+    reasons: [
+      "Critical: 'Digital arrest' / law enforcement extortion pattern detected",
+      "Personal UPI handle fraudulently claiming to be CBI cyber crime division",
+      "Severe voice intimidation signals detected during transaction flow",
+    ],
+    trustedApproval: {
+      required: true,
+      contactName: "Priya Sharma",
+    },
   },
 ];
 

@@ -67,6 +67,21 @@ export interface UserTransaction {
   authorizationMethod?: string;
 }
 
+export const isTransactionTerminal = (
+  tx: UserTransaction | { status?: string; isCompleted?: boolean } | null | undefined
+): boolean => {
+  if (!tx) return false;
+  if (tx.isCompleted) return true;
+  const s = tx.status;
+  return s === "Completed" || s === "Safe" || s === "Blocked" || s === "Reported";
+};
+
+export const isTransactionPayable = (tx: UserTransaction | null | undefined): boolean => {
+  if (!tx) return false;
+  if (isTransactionTerminal(tx)) return false;
+  return tx.status === "Held" || tx.status === "Risk detected" || tx.status === "Approved by you";
+};
+
 const STATUS_MAP: Record<string, UserTransaction["status"]> = {
   PENDING: "Held",
   AWAITING_CONFIRMATION: "Held",
@@ -74,7 +89,7 @@ const STATUS_MAP: Record<string, UserTransaction["status"]> = {
   AUTHORIZED: "Held",
   PENDING_GUARDIAN_APPROVAL: "Held",
   ALLOWED: "Safe",
-  CONFIRMED: "Approved by you",
+  CONFIRMED: "Completed",
   GUARDIAN_APPROVED: "Approved by you",
   GUARDIAN_TIMEOUT_USER_OVERRODE: "Approved by you",
   CANCELLED: "Blocked",
@@ -111,6 +126,8 @@ const mapBackendTransaction = (t: any): UserTransaction => {
     ? ["Transaction amount exceeds usual baseline", "Unverified recipient profile"]
     : ["Standard verified transaction signature"];
 
+  const isTerminal = isTransactionTerminal({ status });
+
   return {
     id: String(t.id),
     title: t.merchant || "UPI Payment",
@@ -124,8 +141,8 @@ const mapBackendTransaction = (t: any): UserTransaction => {
     riskScore: rawRiskScore,
     riskFactors: factors,
     reasons: reasons,
-    isCompleted: status === "Approved by you" || status === "Safe" || status === "Completed",
-    completionTimestamp: status !== "Held" ? t.timestamp : undefined,
+    isCompleted: isTerminal,
+    completionTimestamp: isTerminal ? t.timestamp : undefined,
     authorizationRequired: authRequired,
     authorizationStatus: t.authorization_status || (authRequired ? "PENDING" : "NONE"),
     authorizedAt: t.authorized_at,
@@ -290,6 +307,7 @@ class CentralPaymentManager {
     transactionId: string,
     status: UserTransaction["status"]
   ): boolean {
+    const isTerminal = isTransactionTerminal({ status });
     let found = false;
     this.transactions = this.transactions.map((t) => {
       if (t.id === transactionId || String(t.id) === String(transactionId)) {
@@ -297,18 +315,15 @@ class CentralPaymentManager {
         return {
           ...t,
           status,
-          isCompleted: status === "Approved by you" || status === "Safe" || status === "Completed",
-          completionTimestamp:
-            status === "Approved by you" || status === "Safe" || status === "Completed"
-              ? new Date().toISOString()
-              : t.completionTimestamp,
+          isCompleted: isTerminal,
+          completionTimestamp: isTerminal ? new Date().toISOString() : t.completionTimestamp,
         };
       }
       return t;
     });
 
     if (found) {
-      if (status === "Approved by you" || status === "Safe" || status === "Completed") {
+      if (isTerminal) {
         AlertService.resolveAlertForTransaction(transactionId);
       }
       this.notify();
@@ -316,18 +331,27 @@ class CentralPaymentManager {
     return found;
   }
 
-  public completeTransaction(
+  public async completeTransaction(
     transactionId: string,
     paymentAppUsed?: string,
     trustedDetails?: TrustedApprovalAudit
-  ): boolean {
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!IS_DEMO_MODE) {
+      const res = await ApiClient.post<{ id: number; status: string; message?: string }>(
+        `/api/v1/transactions/${transactionId}/confirm`
+      );
+      if (res.error) {
+        return { success: false, error: res.error };
+      }
+    }
+
     let found = false;
     this.transactions = this.transactions.map((t) => {
       if (t.id === transactionId || String(t.id) === String(transactionId)) {
         found = true;
         return {
           ...t,
-          status: "Approved by you",
+          status: "Completed",
           isCompleted: true,
           paymentAppUsed: paymentAppUsed || t.paymentAppUsed || "Google Pay UPI",
           completionTimestamp: new Date().toISOString(),
@@ -341,7 +365,7 @@ class CentralPaymentManager {
       AlertService.resolveAlertForTransaction(transactionId);
       this.notify();
     }
-    return found;
+    return { success: found };
   }
 
   public async authorizeTransaction(
@@ -381,17 +405,7 @@ class CentralPaymentManager {
   }
 
   public async confirmTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    if (!IS_DEMO_MODE) {
-      const res = await ApiClient.post<{ status: string; message?: string }>(
-        `/api/v1/transactions/${transactionId}/confirm`
-      );
-      if (res.error) {
-        return { success: false, error: res.error };
-      }
-    }
-
-    const ok = this.updateTransactionStatus(transactionId, "Approved by you");
-    return { success: ok };
+    return this.completeTransaction(transactionId);
   }
 
   public async reportTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {

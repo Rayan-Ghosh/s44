@@ -24,7 +24,6 @@ import { StaggerRevealCard } from "../components/common/StaggerRevealCard";
 import { AnimatedAmount } from "../components/common/AnimatedAmount";
 import { AiScanBanner } from "../components/common/AiScanBanner";
 import { RiskContributionBar, ContributionItem } from "../components/common/RiskContributionBar";
-import { RiskTimeline } from "../components/common/RiskTimeline";
 import { Button } from "../components/common/Button";
 import { FloatingToast, ToastConfig } from "../components/common/FloatingToast";
 import { ChoosePaymentAppModal } from "../components/payment/ChoosePaymentAppModal";
@@ -37,6 +36,8 @@ import {
   UserTransaction,
   UserPaymentOverview,
   EMPTY_PAYMENT_OVERVIEW,
+  isTransactionTerminal,
+  isTransactionPayable,
 } from "../services/payment-service";
 import {
   getRiskLevelFromScore,
@@ -404,13 +405,8 @@ export const PaymentsScreen: React.FC = () => {
     if (isActing || isAuthorizing) return;
     if (!selectedTx) return;
 
-    if (
-      selectedTx.isCompleted ||
-      selectedTx.status === "Approved by you" ||
-      selectedTx.status === "Safe" ||
-      selectedTx.status === "Completed"
-    ) {
-      showToast("This payment has already been completed", "info");
+    if (isTransactionTerminal(selectedTx)) {
+      showToast("This payment has already been completed or finalized", "info");
       return;
     }
 
@@ -462,7 +458,7 @@ export const PaymentsScreen: React.FC = () => {
     setIsActing(false);
     if (res.success) {
       showToast("⚠ Fraud report submitted. Payment blocked.", "warning");
-      loadPayments();
+      await loadPayments();
     } else {
       showToast(res.error || "Unable to complete this action", "warning");
     }
@@ -472,13 +468,7 @@ export const PaymentsScreen: React.FC = () => {
     if (isActing) return;
     if (!selectedTx) return;
 
-    if (
-      selectedTx.isCompleted ||
-      selectedTx.status === "Blocked" ||
-      selectedTx.status === "Approved by you" ||
-      selectedTx.status === "Reported" ||
-      selectedTx.status === "Completed"
-    ) {
+    if (isTransactionTerminal(selectedTx)) {
       showToast("This payment is completed and cannot be cancelled", "info");
       return;
     }
@@ -488,13 +478,13 @@ export const PaymentsScreen: React.FC = () => {
     setIsActing(false);
     if (res.success) {
       showToast("Payment cancelled successfully", "info");
-      loadPayments();
+      await loadPayments();
     } else {
       showToast(res.error || "Unable to complete this action", "warning");
     }
   };
 
-  const handlePaymentCompleted = (txId: string) => {
+  const handlePaymentCompleted = async (txId: string): Promise<{ success: boolean; error?: string }> => {
     const trustedAudit = selectedTx?.trustedApproval?.required
       ? {
           required: true,
@@ -504,9 +494,14 @@ export const PaymentsScreen: React.FC = () => {
         }
       : { required: false };
 
-    PaymentService.completeTransaction(txId, "Google Pay UPI", trustedAudit);
-    showToast("✓ Payment completed and recorded in transaction history", "success");
-    loadPayments();
+    const res = await PaymentService.completeTransaction(txId, "Google Pay UPI", trustedAudit);
+    if (res.success) {
+      showToast("✓ Payment completed and recorded in transaction history", "success");
+      await loadPayments();
+    } else {
+      showToast(res.error || "Unable to complete payment on server", "warning");
+    }
+    return res;
   };
 
   const getDynamicContributions = (tx: UserTransaction): ContributionItem[] => {
@@ -526,22 +521,11 @@ export const PaymentsScreen: React.FC = () => {
     ];
   };
 
-  const isCurrentActiveTx =
-    selectedTx &&
-    !selectedTx.isCompleted &&
-    selectedTx.status !== "Safe" &&
-    selectedTx.status !== "Approved by you" &&
-    selectedTx.status !== "Reported" &&
-    selectedTx.status !== "Blocked" &&
-    selectedTx.status !== "Completed";
+  const isCurrentActiveTx = Boolean(selectedTx && isTransactionPayable(selectedTx) && !isTransactionTerminal(selectedTx));
 
   const allCount = transactions.length;
-  const reviewCount = transactions.filter(
-    (t) => t.status === "Risk detected" || t.status === "Held"
-  ).length;
-  const safeCount = transactions.filter(
-    (t) => t.status === "Safe" || t.status === "Approved by you" || t.status === "Completed"
-  ).length;
+  const reviewCount = transactions.filter((t) => isTransactionPayable(t)).length;
+  const safeCount = transactions.filter((t) => isTransactionTerminal(t)).length;
 
   const filterTabs = [
     { key: "all", label: "All", count: allCount, isAlert: false },
@@ -816,44 +800,9 @@ export const PaymentsScreen: React.FC = () => {
                   <RiskContributionBar contributions={getDynamicContributions(selectedTx)} />
                 </StaggerRevealCard>
 
-                {/* 4. RISK ASSESSMENT TIMELINE */}
+                {/* 4. CURRENT PAYMENT ACTIONS vs HISTORICAL SETTLED BANNER */}
                 <StaggerRevealCard
                   index={3}
-                  baseDelay={1350}
-                  staggerInterval={120}
-                  hasPlayed={hasPlayedRevealRef.current}
-                >
-                  <View style={styles.timelineBox}>
-                    <Text style={styles.timelineHeading}>Assessment timeline</Text>
-                    <RiskTimeline
-                      steps={[
-                        { label: "Payment initiated", detail: `${selectedTx.paymentMethod} · ${selectedTx.date || "Today"}` },
-                        { label: "Signal collection", detail: "Device Keystore, Geolocation, Velocity" },
-                        { label: "Feature engineering", detail: "Behavioral anomaly + Transaction delta" },
-                        { label: "Rule engine check", detail: "UPI Intent Interception & Threat Matrix" },
-                        { label: "ML risk scoring", detail: "XGBoost fraud classifier" },
-                        { label: "Anomaly detection", detail: "IsolationForest behavioral model" },
-                        {
-                          label: `Final outcome — ${
-                            selectedTx.isCompleted || selectedTx.status === "Approved by you" || selectedTx.status === "Safe" || selectedTx.status === "Completed"
-                              ? "COMPLETED & SECURED"
-                              : selectedTx.riskLevel === "HIGH"
-                              ? "HIGH RISK (APPROVAL REQUIRED)"
-                              : "READY TO PAY"
-                          }`,
-                          detail: `Status: ${selectedTx.status} · Score: ${
-                            selectedTx.riskScore ?? 0
-                          }/100`,
-                          isHighlighted: Boolean(selectedTx.riskLevel === "HIGH" && isCurrentActiveTx),
-                        },
-                      ]}
-                    />
-                  </View>
-                </StaggerRevealCard>
-
-                {/* 5. CURRENT PAYMENT ACTIONS vs HISTORICAL SETTLED BANNER */}
-                <StaggerRevealCard
-                  index={4}
                   baseDelay={1350}
                   staggerInterval={120}
                   hasPlayed={hasPlayedRevealRef.current}
@@ -861,7 +810,7 @@ export const PaymentsScreen: React.FC = () => {
                   {isCurrentActiveTx ? (
                     <View style={styles.decisionBlock}>
                       {/* 1. Guardian Waiting State (Active hold / countdown) */}
-                      {((selectedTx.riskLevel === "HIGH" || (selectedTx.riskScore && selectedTx.riskScore >= 60) || selectedTx.status === "Risk detected" || selectedTx.status === "Held") && isTrustedFeatureEnabled && (trustedContacts.length > 0 || selectedTx.status === "Held") && !selectedTx.isCompleted && selectedTx.status !== "Approved by you" && selectedTx.status !== "Safe" && selectedTx.status !== "Completed" && selectedTx.authorizationStatus === "AUTHORIZED" && !paymentOutcome) ||
+                      {((selectedTx.riskLevel === "HIGH" || (selectedTx.riskScore && selectedTx.riskScore >= 60) || selectedTx.status === "Risk detected" || selectedTx.status === "Held") && isTrustedFeatureEnabled && (trustedContacts.length > 0 || selectedTx.status === "Held") && !isTransactionTerminal(selectedTx) && selectedTx.status !== "Approved by you" && selectedTx.authorizationStatus === "AUTHORIZED" && !paymentOutcome) ||
                       (((awaitingGuardian && activeRequest) || (activeRequest && activeRequest.status === "PENDING" && String(activeRequest.transactionId) === String(selectedTx.id) && !paymentOutcome)) && !paymentOutcome) ? (
                         <View style={styles.guardianWaitBlock}>
                           <View style={styles.guardianWaitHeader}>
@@ -886,7 +835,7 @@ export const PaymentsScreen: React.FC = () => {
                           <View style={styles.guardianWaitDetails}>
                             <View style={styles.guardianWaitAmountRow}>
                               <Text style={styles.guardianWaitAmount}>
-                                ₹{selectedTx.amount.toLocaleString("en-IN")}
+                                ₹{(selectedTx.amount ?? 0).toLocaleString("en-IN")}
                               </Text>
                               <Text style={styles.guardianWaitMerchant}>
                                 To: {selectedTx.merchant}
@@ -924,7 +873,7 @@ export const PaymentsScreen: React.FC = () => {
                             <View style={{ flex: 1 }}>
                               <Text style={styles.approvedTitle}>Trusted contact approved your payment</Text>
                               <Text style={styles.approvedSubtitle}>
-                                ₹{selectedTx.amount.toLocaleString("en-IN")} payment to {selectedTx.merchant} is authorized and verified.
+                                ₹{(selectedTx.amount ?? 0).toLocaleString("en-IN")} payment to {selectedTx.merchant} is authorized and verified.
                               </Text>
                             </View>
                           </View>
@@ -949,7 +898,7 @@ export const PaymentsScreen: React.FC = () => {
                             <View style={{ flex: 1 }}>
                               <Text style={styles.rejectedTitle}>Payment rejected by trusted contact</Text>
                               <Text style={styles.rejectedSubtitle}>
-                                Your trusted contact declined this transaction of ₹{selectedTx.amount.toLocaleString("en-IN")} due to security risk. This payment cannot continue.
+                                Your trusted contact declined this transaction of ₹{(selectedTx.amount ?? 0).toLocaleString("en-IN")} due to security risk. This payment cannot continue.
                               </Text>
                             </View>
                           </View>
@@ -1445,20 +1394,6 @@ const styles = StyleSheet.create({
     ...typography.smallSemibold,
     color: colors.textPrimary,
     fontSize: 12,
-  },
-  timelineBox: {
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginVertical: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  timelineHeading: {
-    ...typography.smallSemibold,
-    color: colors.textPrimary,
-    fontSize: 13,
-    marginBottom: spacing.xs,
   },
   decisionBlock: {
     marginTop: spacing.md,

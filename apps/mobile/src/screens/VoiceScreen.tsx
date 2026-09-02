@@ -79,23 +79,28 @@ export const VoiceScreen: React.FC = () => {
           {realDetectionError && (
             <Text style={styles.realDetectionErrorText}>{realDetectionError}</Text>
           )}
-          {isCallGuardAvailable() && (
-            <Button
-              label={
-                isTogglingDetection
-                  ? "Please wait…"
-                  : isRealDetectionActive
-                  ? "Hang Up"
-                  : "Detect Current Call"
-              }
-              onPress={handleToggleRealDetection}
-              variant={isRealDetectionActive ? "destructive" : "primary"}
-              size="md"
-              icon={isRealDetectionActive ? "call-outline" : "mic"}
-              disabled={isTogglingDetection}
-              style={{ marginTop: spacing.sm, width: "100%" }}
-            />
-          )}
+          {/* Always rendered — never disappears — even when the native
+              module isn't present (web preview, Expo Go, or a build that
+              predates it). Disabled + relabeled instead of hidden, so the
+              control is never mistaken for a removed feature. Tapping it
+              is still the ONLY way real listening ever starts. */}
+          <Button
+            label={
+              !isCallGuardAvailable()
+                ? "Not Available On This Build"
+                : isTogglingDetection
+                ? "Please wait…"
+                : isRealDetectionActive
+                ? "Hang Up"
+                : "Detect Current Call"
+            }
+            onPress={handleToggleRealDetection}
+            variant={isRealDetectionActive ? "destructive" : "primary"}
+            size="md"
+            icon={isRealDetectionActive ? "call-outline" : "mic"}
+            disabled={isTogglingDetection || !isCallGuardAvailable()}
+            style={{ marginTop: spacing.sm, width: "100%" }}
+          />
         </View>
 
         {/* Call Status Indicator */}

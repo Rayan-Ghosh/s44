@@ -101,19 +101,27 @@ def test_risk_evaluation_and_transaction_actions():
         auth_res = client.post(f"/api/v1/transactions/{tx_id}/authorize", json={"method": "BIOMETRIC"})
         assert auth_res.status_code == 200
 
-    confirm_res = client.post(f"/api/v1/transactions/{tx_id}/confirm")
-    assert confirm_res.status_code == 200
-    assert confirm_res.json()["status"] == "CONFIRMED"
+        confirm_res = client.post(f"/api/v1/transactions/{tx_id}/confirm")
+        assert confirm_res.status_code == 200
+        assert confirm_res.json()["status"] == "CONFIRMED"
 
-    # 5. Cancel Transaction Action
-    cancel_res = client.post(f"/api/v1/transactions/{tx_id}/cancel")
-    assert cancel_res.status_code == 200
-    assert cancel_res.json()["status"] == "CANCELLED"
+        # 5. Duplicate Confirm / Cancel on Confirmed Transaction is rejected (Bug 2 fix)
+        dup_confirm = client.post(f"/api/v1/transactions/{tx_id}/confirm")
+        assert dup_confirm.status_code == 400
+        cancel_confirmed = client.post(f"/api/v1/transactions/{tx_id}/cancel")
+        assert cancel_confirmed.status_code == 400
 
-    # 6. Report Transaction Action
-    report_res = client.post(f"/api/v1/transactions/{tx_id}/report", params={"reason": "Scam victim"})
-    assert report_res.status_code == 200
-    assert report_res.json()["status"] == "REPORTED"
+        # 6. Cancel Action on a Pending Transaction
+        tx_cancel = client.post("/api/v1/transactions", json=tx_payload).json()["id"]
+        cancel_res = client.post(f"/api/v1/transactions/{tx_cancel}/cancel")
+        assert cancel_res.status_code == 200
+        assert cancel_res.json()["status"] == "CANCELLED"
+
+        # 7. Report Transaction Action
+        tx_report = client.post("/api/v1/transactions", json=tx_payload).json()["id"]
+        report_res = client.post(f"/api/v1/transactions/{tx_report}/report", params={"reason": "Scam victim"})
+        assert report_res.status_code == 200
+        assert report_res.json()["status"] == "REPORTED"
 
 
 def test_alerts_endpoint():

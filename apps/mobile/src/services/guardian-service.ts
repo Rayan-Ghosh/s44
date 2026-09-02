@@ -1,6 +1,6 @@
 import { ApiClient, IS_DEMO_MODE } from "./api-client";
 import { TrustedContact } from "../types/guardian";
-import { DEMO_TRUSTED_CONTACTS } from "../data/demo-data";
+import { DEMO_TRUSTED_CONTACTS, DEMO_USER_TRANSACTIONS } from "../data/demo-data";
 
 export interface GuardianRequestDto {
   id: number;
@@ -171,6 +171,7 @@ export class GuardianService {
     const now = new Date();
     const expires = new Date(now.getTime() + 120000);
     const mockId = Date.now();
+    const tx = DEMO_USER_TRANSACTIONS.find((t) => t.id === String(transactionId));
     const localReq: GuardianRequestDto = {
       id: mockId,
       transactionId,
@@ -180,13 +181,14 @@ export class GuardianService {
       resolvedAt: null,
       outcome: "PENDING",
       remainingSeconds: 120,
-      transactionAmount: 4890,
-      riskScore: 78,
-      riskReasons: [
+      transactionAmount: tx ? tx.amount : 4890,
+      riskScore: tx ? (tx.riskScore ?? 78) : 78,
+      riskReasons: tx && tx.reasons && tx.reasons.length > 0 ? tx.reasons : [
         "Coercive urgency keywords detected in utility scam",
         "Active phone call detected during payment flow",
         "Recipient VPA has no past interaction history",
       ],
+      recipientName: tx?.merchant,
     };
     this.localRequests.set(mockId, localReq);
     return { success: true, request: localReq };

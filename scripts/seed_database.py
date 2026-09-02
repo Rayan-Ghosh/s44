@@ -47,6 +47,139 @@ DEMO_USERS = [
         "device_identifier": "default-mobile-device",
         "transactions": [
             {
+                "recipient_identifier": "quickloan.vpa@okaxis",
+                "recipient_display_name": "QuickLoan FinTech Solutions",
+                "amount": Decimal("24500.00"),
+                "location": "Mumbai",
+                "payment_method": "PhonePe",
+                "status": TransactionStatus.PENDING_AUTHORIZATION,
+                "risk": {
+                    "score": 76.4,
+                    "level": RiskLevel.HIGH,
+                    "decision": RiskDecision.CONFIRM_OR_CANCEL,
+                    "factors": [
+                        {"type": "threat_intel", "name": "unregistered_nbfc_vpa", "contribution": 42.0, "explanation": "Recipient handle associated with unregistered instant lending app."},
+                        {"type": "behaviour", "name": "clipboard_hijack_risk", "contribution": 24.4, "explanation": "UPI handle pasted from clipboard immediately after unverified SMS."},
+                        {"type": "amount", "name": "velocity_spike", "contribution": 10.0, "explanation": "Amount is 5x higher than standard morning transfer baseline."}
+                    ],
+                    "alert": "High-risk transfer to unregistered instant lending entity."
+                }
+            },
+            {
+                "recipient_identifier": "cryptox.p2p.escrow@upi",
+                "recipient_display_name": "CryptoX Global P2P Exchange",
+                "amount": Decimal("45000.00"),
+                "location": "Mumbai",
+                "payment_method": "Google Pay",
+                "status": TransactionStatus.PENDING_AUTHORIZATION,
+                "risk": {
+                    "score": 84.0,
+                    "level": RiskLevel.HIGH,
+                    "decision": RiskDecision.CONFIRM_OR_CANCEL,
+                    "factors": [
+                        {"type": "device", "name": "remote_desktop_active", "contribution": 48.0, "explanation": "Screen sharing / remote desktop tool active during payment initiation."},
+                        {"type": "network", "name": "p2p_crypto_merchant", "contribution": 26.0, "explanation": "Unregulated P2P cryptocurrency gateway with high chargeback frequency."},
+                        {"type": "amount", "name": "limit_threshold", "contribution": 10.0, "explanation": "High-value fund transfer to newly created UPI VPA."}
+                    ],
+                    "alert": "High-risk transaction detected during active remote desktop session."
+                }
+            },
+            {
+                "recipient_identifier": "urgent.power.billdesk@upi",
+                "recipient_display_name": "Electricity Dept Bill Desk (Urgent)",
+                "amount": Decimal("18750.00"),
+                "location": "Mumbai",
+                "payment_method": "BHIM UPI",
+                "status": TransactionStatus.PENDING_AUTHORIZATION,
+                "risk": {
+                    "score": 91.5,
+                    "level": RiskLevel.HIGH,
+                    "decision": RiskDecision.CONFIRM_OR_CANCEL,
+                    "factors": [
+                        {"type": "voice", "name": "coercive_call_detected", "contribution": 52.0, "explanation": "Active phone call with high urgency / power disconnection coercion phrases detected."},
+                        {"type": "threat_intel", "name": "utility_phishing_vpa", "contribution": 29.5, "explanation": "Personal VPA impersonating state electricity utility bill desk."},
+                        {"type": "network", "name": "first_time_recipient", "contribution": 10.0, "explanation": "No historical record with genuine electricity distribution company."}
+                    ],
+                    "alert": "Critical urgency coercion pattern matching fake utility bill fraud."
+                }
+            },
+            {
+                "recipient_identifier": "globaltech.gadgets@paytm",
+                "recipient_display_name": "Global Tech Gadgets Hub",
+                "amount": Decimal("34999.00"),
+                "location": "Mumbai",
+                "payment_method": "Paytm",
+                "status": TransactionStatus.PENDING_AUTHORIZATION,
+                "risk": {
+                    "score": 69.8,
+                    "level": RiskLevel.HIGH,
+                    "decision": RiskDecision.CONFIRM_OR_CANCEL,
+                    "factors": [
+                        {"type": "device", "name": "unfamiliar_network", "contribution": 38.0, "explanation": "Payment requested from unfamiliar network subnet outside home state."},
+                        {"type": "merchant", "name": "newly_registered_merchant", "contribution": 21.8, "explanation": "Merchant registered on UPI network less than 48 hours ago."},
+                        {"type": "amount", "name": "high_value_electronics", "contribution": 10.0, "explanation": "High-value purchase from zero-reputation online storefront."}
+                    ],
+                    "alert": "High-value payment to unverified merchant from unfamiliar subnet."
+                }
+            },
+            {
+                "recipient_identifier": "directcash.goldbullion@cred",
+                "recipient_display_name": "Direct Cash Gold Bullion VPA",
+                "amount": Decimal("62000.00"),
+                "location": "Mumbai",
+                "payment_method": "Cred Pay",
+                "status": TransactionStatus.PENDING_AUTHORIZATION,
+                "risk": {
+                    "score": 88.2,
+                    "level": RiskLevel.HIGH,
+                    "decision": RiskDecision.CONFIRM_OR_CANCEL,
+                    "factors": [
+                        {"type": "threat_intel", "name": "mule_account_cluster", "contribution": 50.0, "explanation": "Beneficiary VPA linked to known mule account ring reported by cyber police."},
+                        {"type": "behaviour", "name": "rapid_transfer_pattern", "contribution": 25.2, "explanation": "Sudden large debit attempt following recent password update."},
+                        {"type": "amount", "name": "near_account_drain", "contribution": 13.0, "explanation": "Transfer amount represents over 70% of usual monthly outflow."}
+                    ],
+                    "alert": "Severe threat: beneficiary linked to suspected mule account cluster."
+                }
+            },
+            {
+                "recipient_identifier": "premier.resorts.booking@upi",
+                "recipient_display_name": "Premier Resort Bookings International",
+                "amount": Decimal("29800.00"),
+                "location": "Mumbai",
+                "payment_method": "Amazon Pay",
+                "status": TransactionStatus.PENDING_AUTHORIZATION,
+                "risk": {
+                    "score": 72.0,
+                    "level": RiskLevel.HIGH,
+                    "decision": RiskDecision.CONFIRM_OR_CANCEL,
+                    "factors": [
+                        {"type": "network", "name": "fake_booking_portal", "contribution": 40.0, "explanation": "Payment QR code routed through cloned luxury hospitality booking portal."},
+                        {"type": "device", "name": "malicious_overlay_detected", "contribution": 22.0, "explanation": "Suspicious accessibility service overlay detected during QR scan."},
+                        {"type": "amount", "name": "unusual_category_amount", "contribution": 10.0, "explanation": "Unusual high-value category spend inconsistent with profile."}
+                    ],
+                    "alert": "Suspected phishing QR code and malicious screen overlay."
+                }
+            },
+            {
+                "recipient_identifier": "cbi.cybercell.recovery@sbi",
+                "recipient_display_name": "CBI Cyber Cell Fine Settlement",
+                "amount": Decimal("50000.00"),
+                "location": "Mumbai",
+                "payment_method": "Google Pay",
+                "status": TransactionStatus.PENDING_AUTHORIZATION,
+                "risk": {
+                    "score": 95.0,
+                    "level": RiskLevel.HIGH,
+                    "decision": RiskDecision.CONFIRM_OR_CANCEL,
+                    "factors": [
+                        {"type": "threat_intel", "name": "police_impersonation_scam", "contribution": 58.0, "explanation": "Severe threat: recipient handle matches digital arrest extortion syndicate."},
+                        {"type": "voice", "name": "intimidation_audio_signal", "contribution": 25.0, "explanation": "High confidence law enforcement impersonation & legal intimidation signals."},
+                        {"type": "behaviour", "name": "panic_speed_checkout", "contribution": 12.0, "explanation": "Abnormal rapid navigation bypassing warning dialogs."}
+                    ],
+                    "alert": "Critical: Digital arrest scam and fake law enforcement extortion attempt."
+                }
+            },
+            {
                 "recipient_identifier": "urgent.tax.clearance@axis",
                 "recipient_display_name": "Unknown High-Risk Recipient",
                 "amount": Decimal("52000.00"),

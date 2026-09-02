@@ -208,6 +208,7 @@ def confirm_transaction(transaction_id: int, db: Session = Depends(get_db)) -> d
         raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} not found.")
 
     if txn.status in (
+        TransactionStatus.CONFIRMED,
         TransactionStatus.CANCELLED,
         TransactionStatus.REPORTED,
         TransactionStatus.GUARDIAN_REJECTED,
@@ -280,6 +281,18 @@ def cancel_transaction(transaction_id: int, db: Session = Depends(get_db)) -> di
     txn = transaction_repository.get_transaction(db, transaction_id)
     if txn is None:
         raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} not found.")
+
+    if txn.status in (
+        TransactionStatus.CONFIRMED,
+        TransactionStatus.CANCELLED,
+        TransactionStatus.REPORTED,
+        TransactionStatus.GUARDIAN_REJECTED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel a transaction in terminal status {txn.status.value}.",
+        )
+
     transaction_repository.update_transaction_status(db, transaction_id, TransactionStatus.CANCELLED)
     return {
         "transaction_id": transaction_id,

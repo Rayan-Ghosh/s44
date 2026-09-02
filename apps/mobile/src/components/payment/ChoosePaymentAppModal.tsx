@@ -31,7 +31,7 @@ interface ChoosePaymentAppModalProps {
   visible: boolean;
   transaction: UserTransaction | null;
   onClose: () => void;
-  onPaymentCompleted: (transactionId: string) => void;
+  onPaymentCompleted: (transactionId: string) => Promise<{ success: boolean; error?: string } | any> | any;
   onShowToast: (message: string, type?: "info" | "success" | "warning") => void;
 }
 
@@ -59,6 +59,7 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
   const [launchingAppId, setLaunchingAppId] = useState<string | null>(null);
   const [isAwaitingReturn, setIsAwaitingReturn] = useState<boolean>(false);
   const [selectedApp, setSelectedApp] = useState<CombinedPaymentAppOption | null>(null);
+  const [isConfirmingCompletion, setIsConfirmingCompletion] = useState<boolean>(false);
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const hasLaunchedExternalAppRef = useRef<boolean>(false);
@@ -112,7 +113,7 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
     };
   }, [visible]);
 
-  // AppState listener to detect return from external payment application
+  // AppState & Web window focus/visibility listeners to detect return from external payment application
   useEffect(() => {
     if (!visible) return;
 
@@ -122,21 +123,48 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
         nextAppState === "active" &&
         hasLaunchedExternalAppRef.current
       ) {
-        // User returned to AVARAN from the external payment application
         setIsAwaitingReturn(true);
       }
       appStateRef.current = nextAppState;
     });
 
+    let handleVisibilityChange: (() => void) | undefined;
+    let handleWindowFocus: (() => void) | undefined;
+
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      handleVisibilityChange = () => {
+        if (!document.hidden && hasLaunchedExternalAppRef.current) {
+          setIsAwaitingReturn(true);
+        }
+      };
+      handleWindowFocus = () => {
+        if (hasLaunchedExternalAppRef.current) {
+          setIsAwaitingReturn(true);
+        }
+      };
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      window.addEventListener("focus", handleWindowFocus);
+    }
+
     return () => {
       subscription.remove();
+      if (Platform.OS === "web" && typeof document !== "undefined") {
+        if (handleVisibilityChange) {
+          document.removeEventListener("visibilitychange", handleVisibilityChange);
+        }
+        if (handleWindowFocus) {
+          window.removeEventListener("focus", handleWindowFocus);
+        }
+      }
     };
   }, [visible]);
 
   if (!transaction) return null;
 
   const upiDetails: UPIPaymentDetails = {
-    payeeUpiId: `${transaction.merchant.toLowerCase().replace(/[^a-z0-9]/g, "")}@upi`,
+    payeeUpiId: transaction.paymentMethod?.includes("@")
+      ? transaction.paymentMethod
+      : `${transaction.merchant.toLowerCase().replace(/[^a-z0-9]/g, "")}@upi`,
     payeeName: transaction.merchant,
     amount: transaction.amount,
     currency: "INR",
@@ -183,10 +211,23 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
     }
   };
 
-  const handleConfirmCompletion = () => {
-    onPaymentCompleted(transaction.id);
-    onShowToast("✓ Payment verified & marked as completed", "success");
-    onClose();
+  const handleConfirmCompletion = async () => {
+    if (isConfirmingCompletion || !transaction) return;
+    setIsConfirmingCompletion(true);
+    try {
+      const res = await onPaymentCompleted(transaction.id);
+      if (res && typeof res === "object" && (res as any).success === false) {
+        onShowToast((res as any).error || "Failed to confirm payment on server", "warning");
+        setIsConfirmingCompletion(false);
+        return;
+      }
+      onShowToast("✓ Payment verified & marked as completed", "success");
+      onClose();
+    } catch (err: any) {
+      onShowToast(err?.message || "Failed to confirm payment", "warning");
+    } finally {
+      setIsConfirmingCompletion(false);
+    }
   };
 
   const handleCancelCompletion = () => {
