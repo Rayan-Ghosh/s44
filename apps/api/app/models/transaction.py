@@ -66,6 +66,20 @@ class Transaction(Base):
         String(64), nullable=True
     )  # Cryptographic hash bound at Guardian approval
 
+    # AVARAN PAY spec additions (spec §3, §8, §9): unified payment-intake
+    # source tag, idempotency dedupe key, dynamic-demo flag, and UPI-handoff
+    # bookkeeping. Additive/nullable so existing rows and callers are
+    # unaffected.
+    source: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+    )  # "QR" | "UPI_ID" | "MOBILE" | "PAYMENT_REQUEST" | "LINK"
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    upi_app: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    upi_launch_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    upi_launch_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    utr_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     user: Mapped["User"] = relationship(back_populates="transactions")
     recipient: Mapped["Recipient"] = relationship(back_populates="transactions")
     device: Mapped["Device"] = relationship(back_populates="transactions")

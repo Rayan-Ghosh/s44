@@ -8,16 +8,66 @@ controlled phases per CLAUDE.md. Schema is owned by Alembic
 (apps/api/alembic/) — this module does not create tables itself.
 """
 
+import asyncio
+import contextlib
+import logging
+
 from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.routers import alerts, auth, guardian, institution, risk, simulator, transactions, users, voice_stream
+from app.api.routers import (
+    alerts,
+    auth,
+    demo,
+    guardian,
+    institution,
+    notifications,
+    payments,
+    risk,
+    simulator,
+    transactions,
+    users,
+    voice_stream,
+)
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
+from app.services import guardian_service
 
-app = FastAPI(title=settings.app_name)
+logger = logging.getLogger(__name__)
+
+
+async def _guardian_expiry_worker() -> None:
+    """AVARAN PAY spec §6: proactively expire Guardian requests past their
+    120s deadline, independent of whether the frontend is polling."""
+    while True:
+        try:
+            await asyncio.sleep(settings.guardian_expiry_sweep_interval_seconds)
+            db = SessionLocal()
+            try:
+                guardian_service.sweep_expired_requests(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Guardian expiry sweep failed; will retry on next interval.")
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    task = asyncio.create_task(_guardian_expiry_worker()) if settings.enable_guardian_expiry_worker else None
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 @app.middleware("http")
 async def security_headers_and_https_middleware(request: Request, call_next):
@@ -72,6 +122,9 @@ app.include_router(guardian.router)
 app.include_router(institution.router)
 app.include_router(simulator.router)
 app.include_router(voice_stream.router)
+app.include_router(payments.router)
+app.include_router(demo.router)
+app.include_router(notifications.router)
 
 
 

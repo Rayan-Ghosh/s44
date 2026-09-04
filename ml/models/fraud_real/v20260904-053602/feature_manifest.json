@@ -1,0 +1,15 @@
+{
+  "manifest_version": "recipient-1.0.0",
+  "feature_count": 9,
+  "features": [
+    "amount",
+    "amount_log",
+    "recipient_amount_zscore",
+    "recipient_amount_vs_average",
+    "recipient_prior_count",
+    "new_recipient",
+    "recipient_transactions_last_10m",
+    "recipient_transactions_last_1h",
+    "recipient_time_of_day_deviation"
+  ]
+}

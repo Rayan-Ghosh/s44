@@ -93,7 +93,7 @@ def test_low_risk_transaction_proceeds_without_authorization(
     # Confirm directly without authorization
     confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
     assert confirm_resp.status_code == 200
-    assert confirm_resp.json()["status"] == TransactionStatus.CONFIRMED.value
+    assert confirm_resp.json()["status"] == TransactionStatus.COMPLETED.value
 
 
 def test_high_risk_transaction_blocks_confirmation_without_authorization(
@@ -148,7 +148,7 @@ def test_high_risk_transaction_authorizes_and_completes(
     # Now confirm the authorized transaction
     confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
     assert confirm_resp.status_code == 200
-    assert confirm_resp.json()["status"] == TransactionStatus.CONFIRMED.value
+    assert confirm_resp.json()["status"] == TransactionStatus.COMPLETED.value
 
 
 def test_authorization_isolation_between_transactions(

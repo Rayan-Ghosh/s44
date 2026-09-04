@@ -11,13 +11,13 @@ from app.core.database import get_db
 from app.core.security import hash_identifier, mask_phone
 from app.models.enums import GuardianOutcome, TransactionStatus
 from app.repositories import guardian_repository, risk_repository, transaction_repository, user_repository
+from app.services import guardian_service, notification_service
 from app.schemas.guardian import (
     GuardianActionRequest,
     GuardianRequestCreate,
     GuardianRequestRead,
     TrustedContactCreate,
     TrustedContactRead,
-    UserOverrideRequest,
 )
 
 router = APIRouter(prefix="/api/v1/guardian", tags=["guardian"])
@@ -65,6 +65,14 @@ def trigger_guardian_request(payload: GuardianRequestCreate, db: Session = Depen
         db, transaction_id=txn.id, trusted_contact_id=contact_id, expires_in_seconds=120
     )
     transaction_repository.update_transaction_status(db, txn.id, TransactionStatus.PENDING_GUARDIAN_APPROVAL)
+    notification_service.notify(
+        db,
+        user_id=txn.user_id,
+        type="GUARDIAN_REQUESTED",
+        title="Guardian approval requested",
+        body=f"A guardian approval request was sent for ₹{txn.amount}.",
+        transaction_id=txn.id,
+    )
     return _serialize_pending_requests(db, [req])[0]
 
 def _get_sender_masked_phone(db: Session, sender) -> Optional[str]:
@@ -84,23 +92,10 @@ def _get_sender_masked_phone(db: Session, sender) -> Optional[str]:
 
 
 def _check_and_expire_request(db: Session, req) -> bool:
-    """Check if a PENDING guardian request has passed its authoritative expires_at timestamp.
-    If expired, atomically transition to TIMEOUT and mark the transaction as GUARDIAN_REJECTED.
-    """
-    if req is None or req.outcome != GuardianOutcome.PENDING:
-        return False
-    now = datetime.now(timezone.utc)
-    exp = req.expires_at.replace(tzinfo=timezone.utc) if req.expires_at.tzinfo is None else req.expires_at
-    if now >= exp:
-        req.outcome = GuardianOutcome.TIMEOUT
-        req.resolved_at = now
-        req.resolution_notes = "Guardian approval window expired after 120 seconds."
-        if req.transaction and req.transaction.status == TransactionStatus.PENDING_GUARDIAN_APPROVAL:
-            req.transaction.status = TransactionStatus.GUARDIAN_REJECTED
-        db.commit()
-        db.refresh(req)
-        return True
-    return False
+    """Thin wrapper kept for call-site compatibility — see
+    app/services/guardian_service.py for the shared implementation also
+    used by the background expiry worker (app/main.py's lifespan task)."""
+    return guardian_service.check_and_expire_request(db, req)
 
 
 def _serialize_pending_requests(db: Session, reqs: list) -> list[GuardianRequestRead]:
@@ -274,9 +269,18 @@ def approve_guardian_request(request_id: int, payload: Optional[GuardianActionRe
         "GUARDIAN_APPROVED",
         transaction_id=req.transaction_id,
         details={"trusted_contact_id": req.trusted_contact_id},
+        db=db,
     )
 
     transaction_repository.update_transaction_status(db, req.transaction_id, TransactionStatus.GUARDIAN_APPROVED)
+    notification_service.notify(
+        db,
+        user_id=req.transaction.user_id,
+        type="GUARDIAN_APPROVED",
+        title="Guardian approved your payment",
+        body="Your family guardian approved the payment. You can now proceed.",
+        transaction_id=req.transaction_id,
+    )
     return {"request_id": request_id, "outcome": GuardianOutcome.APPROVED.value, "message": "Transaction approved by family guardian."}
 
 
@@ -301,19 +305,23 @@ def reject_guardian_request(request_id: int, payload: Optional[GuardianActionReq
         "GUARDIAN_REJECTED",
         transaction_id=req.transaction_id,
         details={"trusted_contact_id": req.trusted_contact_id},
+        db=db,
     )
 
     transaction_repository.update_transaction_status(db, req.transaction_id, TransactionStatus.GUARDIAN_REJECTED)
+    notification_service.notify(
+        db,
+        user_id=req.transaction.user_id,
+        type="GUARDIAN_REJECTED",
+        title="Guardian rejected your payment",
+        body="Your family guardian blocked this payment as unsafe.",
+        transaction_id=req.transaction_id,
+    )
     return {"request_id": request_id, "outcome": GuardianOutcome.REJECTED.value, "message": "Transaction blocked and cancelled by guardian."}
 
 
-@router.post("/requests/{request_id}/user-override")
-def user_override_timeout(request_id: int, payload: UserOverrideRequest, db: Session = Depends(get_db)) -> dict:
-    """User friction override with PIN re-entry if 2-min guardian window expires (spec §6.3)."""
-    req = guardian_repository.get_guardian_request(db, request_id)
-    if req is None:
-        raise HTTPException(status_code=404, detail=f"Guardian request {request_id} not found.")
-
-    guardian_repository.resolve_guardian_request(db, request_id, GuardianOutcome.TIMEOUT, "User overrode via PIN")
-    transaction_repository.update_transaction_status(db, req.transaction_id, TransactionStatus.GUARDIAN_TIMEOUT_USER_OVERRODE)
-    return {"request_id": request_id, "status": TransactionStatus.GUARDIAN_TIMEOUT_USER_OVERRODE.value, "message": "Override verified with PIN. Payment proceeds under user confirmation."}
+# NOTE: the former POST /requests/{id}/user-override endpoint (PIN-bypass
+# of a timed-out/rejected Guardian hold) has been removed. AVARAN PAY spec
+# §6 requires Guardian rejection or expiry to stop the payment
+# unconditionally; there is no override path. Verified before removal that
+# no mobile client code calls this endpoint.

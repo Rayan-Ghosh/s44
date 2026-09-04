@@ -1,0 +1,136 @@
+{
+  "model_name": "s40_behaviour_anomaly_real",
+  "model_version": "v20260904-054147",
+  "trained_at": "2026-09-04T05:41:47.423426+00:00",
+  "seed": 40,
+  "datasets": [
+    "indian_online_scam",
+    "paysim",
+    "s40_synthetic"
+  ],
+  "dataset_notes": "Real-data retraining pass (2026-09-04). Same blended dataset and recipient-centric feature framing as s40_transaction_fraud_real \u2014 see ml/training/train_fraud_real.py and ml/features/recipient_features.py.",
+  "split_report": {
+    "sources": {
+      "indian_online_scam": 1092,
+      "paysim": 150000,
+      "s40_synthetic": 26661
+    },
+    "total_rows": 177753,
+    "target_synthetic_fraction": 0.15,
+    "achieved_synthetic_fraction": 0.14998902972101738,
+    "per_source_fraud_rate": {
+      "indian_online_scam": 0.3131868131868132,
+      "paysim": 0.00086,
+      "s40_synthetic": 0.03751000382755141
+    },
+    "split_sizes": {
+      "train": 128144,
+      "validation": 41402,
+      "test": 8207
+    },
+    "note": "Each source split chronologically (70/15/15) independently, then concatenated \u2014 a single chronological axis across unrelated data sources would be meaningless."
+  },
+  "training_config": {
+    "blend": {
+      "seed": 40,
+      "synthetic_fraction": 0.15,
+      "paysim_row_cap": 150000,
+      "ratios": {
+        "train": 0.7,
+        "validation": 0.15,
+        "test": 0.15
+      },
+      "synthetic_users": 800,
+      "synthetic_history_per_user": 25
+    },
+    "forest": {
+      "n_estimators": 300,
+      "max_samples": "auto",
+      "contamination": "auto",
+      "seed": 40
+    }
+  },
+  "hyperparameters": {
+    "n_estimators": 300,
+    "max_samples": "auto",
+    "contamination": "auto",
+    "seed": 40
+  },
+  "scale_pos_weight": null,
+  "best_iteration": null,
+  "feature_manifest_version": "recipient-anomaly-1.0.0",
+  "feature_names": [
+    "amount_log",
+    "recipient_amount_zscore",
+    "recipient_amount_vs_average"
+  ],
+  "metrics": {
+    "validation": {
+      "split": "validation",
+      "rows": 41402,
+      "scorable_rows": 2888,
+      "unscorable_rows": 38514,
+      "mean_score": 0.2652782924110762,
+      "positives_among_scorable": 154,
+      "roc_auc": 0.7880323772789024,
+      "pr_auc": 0.1975227525276644,
+      "mean_score_fraud": 0.46921447775172315,
+      "mean_score_normal": 0.2537910310568481
+    },
+    "test": {
+      "split": "test",
+      "rows": 8207,
+      "scorable_rows": 2644,
+      "unscorable_rows": 5563,
+      "mean_score": 0.3024289834949906,
+      "positives_among_scorable": 181,
+      "roc_auc": 0.735654537990996,
+      "pr_auc": 0.2313309291662333,
+      "mean_score_fraud": 0.4542254975738421,
+      "mean_score_normal": 0.2912738194477831
+    },
+    "test_per_source": {
+      "indian_online_scam": {
+        "split": "test/indian_online_scam",
+        "rows": 165,
+        "scorable_rows": 140,
+        "unscorable_rows": 25,
+        "mean_score": 0.3366308117696603,
+        "positives_among_scorable": 35,
+        "roc_auc": 0.46612244897959176,
+        "pr_auc": 0.24988256811450882,
+        "mean_score_fraud": 0.33091199279767974,
+        "mean_score_normal": 0.3385370847603205
+      },
+      "paysim": {
+        "split": "test/paysim",
+        "rows": 4042,
+        "scorable_rows": 286,
+        "unscorable_rows": 3756,
+        "mean_score": 0.15893406344730357,
+        "positives_among_scorable": 0
+      },
+      "s40_synthetic": {
+        "split": "test/s40_synthetic",
+        "rows": 4000,
+        "scorable_rows": 2218,
+        "unscorable_rows": 1782,
+        "mean_score": 0.31877311838010547,
+        "positives_among_scorable": 146,
+        "roc_auc": 0.7530197149203999,
+        "pr_auc": 0.266929685285053,
+        "mean_score_fraud": 0.4837869541982645,
+        "mean_score_normal": 0.30714569558596877
+      }
+    }
+  },
+  "hyperparameter_search": {
+    "skipped": "unsupervised detector; no search performed"
+  },
+  "calibration": {},
+  "selected_threshold": -1.0,
+  "git_commit": "4fd0b14",
+  "python_version": "3.13.6",
+  "xgboost_version": "3.4.1",
+  "caveats": "PROTOTYPE. Unsupervised \u2014 labels used only to exclude fraud rows before fitting and to check separation afterwards, never to fit the model. Same real+synthetic blend and recipient-centric framing caveats as s40_transaction_fraud_real."
+}
