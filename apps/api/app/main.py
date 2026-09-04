@@ -13,6 +13,7 @@ import contextlib
 import logging
 
 from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -130,6 +131,12 @@ app.include_router(payments.router)
 app.include_router(demo.router)
 app.include_router(notifications.router)
 
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Redirect root to Swagger documentation UI."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")

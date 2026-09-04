@@ -96,6 +96,7 @@ def test_production_secret_validation_succeeds_with_hardened_config():
         contact_info_encryption_key="s40_production_real_fernet_key_placeholder_val=",
         otp_delivery_provider="twilio",
         enable_dev_otp_inspection=False,
+        enable_demo_endpoints=False,
     )
 
     # Should not raise exception
