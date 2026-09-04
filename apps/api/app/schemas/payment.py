@@ -7,7 +7,8 @@ app/schemas/transaction.py) rather than internal FK ids — the caller knows
 """
 
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
+
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -32,6 +33,18 @@ class PaymentPrepareRequest(BaseModel):
         default=None, max_length=120, description="Idempotency key for POST /payments/prepare."
     )
     location: Optional[str] = Field(default=None, max_length=255)
+    # Persisted pre-payment evaluation details (Part 2)
+    evaluation_id: Optional[str] = Field(default=None, max_length=120)
+    risk_score: Optional[float] = Field(default=None, ge=0, le=100)
+    risk_level: Optional[str] = Field(default=None, max_length=20)
+    decision: Optional[str] = Field(default=None, max_length=50)
+    risk_factors: Optional[list[Any]] = Field(default=None)
+    plain_language_reasons: Optional[list[str]] = Field(default=None)
+    recipient_type: Optional[str] = Field(default=None, max_length=20)
+    resolution_status: Optional[str] = Field(default=None, max_length=20)
+    evaluation_timestamp: Optional[str] = Field(default=None)
+    evaluation_expires_at: Optional[str] = Field(default=None)
+    guardian_required: Optional[bool] = Field(default=None)
 
     @model_validator(mode="after")
     def _validate_source_fields(self) -> "PaymentPrepareRequest":
@@ -40,6 +53,7 @@ class PaymentPrepareRequest(BaseModel):
         if not self.upi_id and not self.phone_number:
             raise ValueError("Either upi_id or phone_number is required to identify a recipient.")
         return self
+
 
 
 class LaunchUpiRequest(BaseModel):

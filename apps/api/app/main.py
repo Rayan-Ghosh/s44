@@ -106,8 +106,12 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:19006",
         "http://127.0.0.1:19006",
+        "http://10.160.81.164:8081",
+        "http://10.160.81.164:8000",
+        "http://192.168.137.1:8081",
+        "http://192.168.137.1:8000",
     ],
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -136,6 +140,7 @@ def health() -> dict:
 
 
 @app.get("/health/db")
+@app.get("/api/v1/health/db")
 def health_db(db: Session = Depends(get_db)) -> dict:
     """Readiness check: the application can round-trip a query against Avaran.db."""
     db.execute(text("SELECT 1"))

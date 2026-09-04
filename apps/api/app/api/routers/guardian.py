@@ -23,8 +23,22 @@ from app.services.payment_workflow_guard import (
     enforce_guardian_stage,
     resolve_candidate_stage,
 )
+from app.services.transaction_state_machine import (
+    InvalidTransactionTransition,
+    is_terminal,
+    transition,
+)
 
 router = APIRouter(prefix="/api/v1/guardian", tags=["guardian"])
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    parts = authorization.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1]
+    return authorization
 
 
 @router.post("/trusted-contacts", response_model=TrustedContactRead, status_code=status.HTTP_201_CREATED)
@@ -56,6 +70,8 @@ def get_user_trusted_contacts(user_id: int, db: Session = Depends(get_db)) -> li
 def trigger_guardian_request(
     payload: GuardianRequestCreate,
     x_workflow_stage: Optional[str] = Header(None, alias="X-Workflow-Stage"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_device_id: Optional[str] = Header(None, alias="X-Device-Id"),
     db: Session = Depends(get_db),
 ) -> GuardianRequestRead:
     body_stage_provided = payload is not None and "stage" in payload.model_fields_set
@@ -79,17 +95,99 @@ def trigger_guardian_request(
     if txn is None:
         raise HTTPException(status_code=404, detail=f"Transaction {payload.transaction_id} not found.")
 
+    # 1. User authentication & ownership validation
+    raw_token = _extract_bearer_token(authorization)
+    if raw_token:
+        from app.services.session_service import SessionService
+        is_valid, session, err_msg = SessionService.validate_session_token(
+            db=db, raw_token=raw_token, device_id=x_device_id
+        )
+        if not is_valid or not session:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=err_msg or "Invalid session token.",
+            )
+        if session.user_id != txn.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not authorized to trigger Guardian requests for another user.",
+            )
+
+    if payload.user_id is not None and payload.user_id != txn.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied: Transaction {txn.id} does not belong to user {payload.user_id}.",
+        )
+
+    # 2. Terminal state check
+    if is_terminal(txn.status):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot initiate Guardian approval for a transaction in terminal status {txn.status.value}.",
+        )
+
+    # 3. Already approved Guardian check
+    if txn.status == TransactionStatus.GUARDIAN_APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Guardian approval has already been granted for this transaction.",
+        )
+
+    # 4. In-flight duplicate pending check
+    existing_pending = guardian_repository.get_pending_request_for_transaction(db, txn.id)
+    if existing_pending:
+        if _check_and_expire_request(db, existing_pending):
+            existing_pending = None
+        else:
+            now_utc = datetime.now(timezone.utc)
+            exp = (
+                existing_pending.expires_at.replace(tzinfo=timezone.utc)
+                if existing_pending.expires_at.tzinfo is None
+                else existing_pending.expires_at
+            )
+            remaining = max(0, int((exp - now_utc).total_seconds()))
+            if remaining > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"A guardian request is already pending for this transaction (remaining: {remaining}s).",
+                )
+
+    # 5. Risk score / risk level check - ONLY HIGH RISK ALLOWED
+    from app.api.routers.users import _get_or_compute_risk_score, get_risk_level_from_score
+
+    latest_risk = _get_or_compute_risk_score(db, txn)
+    final_sc = float(latest_risk.final_score) if latest_risk else 0.0
+    risk_level = get_risk_level_from_score(final_sc)
+    if risk_level != "HIGH":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Guardian approval can only be triggered for HIGH-risk transactions (current risk level: {risk_level}).",
+        )
+
+    # 6. Trusted contact validation
     contact_id = payload.trusted_contact_id
-    if not contact_id:
+    if contact_id:
+        contact = guardian_repository.get_trusted_contact(db, contact_id)
+        if not contact or contact.user_id != txn.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Specified trusted contact does not belong to the transaction user.",
+            )
+    else:
         contacts = guardian_repository.get_trusted_contacts_by_user(db, txn.user_id)
         if not contacts:
             raise HTTPException(status_code=400, detail="User has no enrolled trusted contacts.")
         contact_id = contacts[0].id
 
+    # 7. Create request & transition state
     req = guardian_repository.create_guardian_request(
         db, transaction_id=txn.id, trusted_contact_id=contact_id, expires_in_seconds=120
     )
-    transaction_repository.update_transaction_status(db, txn.id, TransactionStatus.PENDING_GUARDIAN_APPROVAL)
+    try:
+        transition(db, txn, TransactionStatus.PENDING_GUARDIAN_APPROVAL, idempotent_ok=True)
+    except InvalidTransactionTransition as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     notification_service.notify(
         db,
         user_id=txn.user_id,

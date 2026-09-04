@@ -7,18 +7,215 @@ change for the existing endpoint.
 """
 
 import logging
+import re
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.security import hash_identifier
 from app.models.alert import Alert
-from app.models.enums import AlertStatus, RiskDecision, RiskLevel
+from app.models.enums import AlertStatus, PaymentWorkflowStage, RiskDecision, RiskLevel
 from app.models.enums import TransactionStatus as S
+from app.models.recipient import Recipient
 from app.models.transaction import Transaction
+from app.models.user import User
 from app.repositories import risk_repository, transaction_repository
 from ml.inference.predict import get_predictor
 
 logger = logging.getLogger(__name__)
+
+UPI_REGEX = re.compile(r"^[a-zA-Z0-9.\-_]{1,256}@[a-zA-Z0-9.\-_]{2,64}$")
+PHONE_REGEX = re.compile(r"^[6-9]\d{9}$")
+
+
+def parse_and_validate_recipient(recipient_raw: Any) -> tuple[str, str]:
+    """Validates recipient format. Returns (normalized_recipient, recipient_type).
+
+    Recipient must be either a valid UPI ID (e.g. name@bank) or a 10-digit Indian mobile number.
+    Raises HTTPException(422) if format is invalid.
+    """
+    if not recipient_raw or not isinstance(recipient_raw, str):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid recipient: must be a valid UPI ID (e.g. name@bank) or 10-digit Indian mobile number.",
+        )
+
+    trimmed = recipient_raw.strip()
+    if not trimmed:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid recipient: must be a valid UPI ID (e.g. name@bank) or 10-digit Indian mobile number.",
+        )
+
+    if "@" in trimmed:
+        if UPI_REGEX.fullmatch(trimmed) and not re.search(r"\s", trimmed):
+            return trimmed.lower(), "UPI_ID"
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid recipient: must be a valid UPI ID (e.g. name@bank) or 10-digit Indian mobile number.",
+        )
+
+    clean_phone = re.sub(r"[\s\-\(\)]", "", trimmed)
+    if clean_phone.startswith("+91"):
+        clean_phone = clean_phone[3:]
+    elif clean_phone.startswith("91") and len(clean_phone) == 12:
+        clean_phone = clean_phone[2:]
+
+    if PHONE_REGEX.fullmatch(clean_phone):
+        return clean_phone, "PHONE"
+
+    raise HTTPException(
+        status_code=422,
+        detail="Invalid recipient: must be a valid UPI ID (e.g. name@bank) or 10-digit Indian mobile number.",
+    )
+
+
+def resolve_recipient_details(
+    db: Session, normalized: str, rec_type: str, user_id: Optional[int] = None
+) -> tuple[Optional[str], str]:
+    """Resolves recipient against Recipient and User tables using hashed identifiers.
+
+    Returns (display_name, resolution_status).
+    Never fabricates names or mutates handles.
+    """
+    h = hash_identifier(normalized)
+
+    if rec_type == "UPI_ID":
+        query = db.query(Recipient).filter(Recipient.recipient_hash == h)
+        if user_id is not None:
+            user_rec = query.filter(Recipient.user_id == user_id).first()
+            if user_rec and user_rec.display_name:
+                return user_rec.display_name, "RESOLVED"
+        rec = query.first()
+        if rec and rec.display_name:
+            return rec.display_name, "RESOLVED"
+        return None, "UNVERIFIED"
+
+    # rec_type == "PHONE"
+    u = db.query(User).filter(User.phone_hash == h).first()
+    if u and u.name:
+        return u.name, "RESOLVED"
+
+    query = db.query(Recipient).filter(Recipient.recipient_hash == h)
+    if user_id is not None:
+        user_rec = query.filter(Recipient.user_id == user_id).first()
+        if user_rec and user_rec.display_name:
+            return user_rec.display_name, "RESOLVED"
+    rec = query.first()
+    if rec and rec.display_name:
+        return rec.display_name, "RESOLVED"
+
+    return None, "UNRESOLVED"
+
+
+def evaluate_prepayment(db: Session, payload: dict) -> dict:
+    """Authoritative pre-payment evaluation endpoint logic.
+
+    Evaluates a payment draft BEFORE transaction creation:
+    1. Validates recipient format (UPI ID or Indian mobile) and amount (> 0).
+    2. Resolves recipient against DB (never invents names or appends @upi).
+    3. Runs ML prediction engine with feature extraction.
+    4. Returns stage: EVALUATION_COMPLETED, risk score, risk level, decision, reasons.
+    5. Purely advisory: guarantees NO transaction is created or mutated, NO alert is created,
+       and NO guardian approval is triggered.
+    """
+    recipient_raw = payload.get("recipient")
+    normalized_recipient, rec_type = parse_and_validate_recipient(recipient_raw)
+
+    raw_amount = payload.get("amount")
+    if raw_amount is None:
+        raise HTTPException(status_code=422, detail="Amount is required.")
+    try:
+        amount = float(raw_amount)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Amount must be a valid number.")
+
+    if amount <= 0:
+        raise HTTPException(status_code=422, detail="Amount must be greater than zero.")
+
+    user_id = payload.get("user_id")
+    user_id_int = int(user_id) if (user_id is not None and str(user_id).isdigit()) else None
+
+    display_name, resolution_status = resolve_recipient_details(
+        db, normalized_recipient, rec_type, user_id=user_id_int
+    )
+
+    user = db.query(User).filter(User.id == user_id_int).first() if user_id_int else None
+    user_profile = dict(user.risk_profile) if (user and user.risk_profile) else {}
+
+    if resolution_status == "RESOLVED":
+        frequent = user_profile.get("frequent_recipients", [])
+        if isinstance(frequent, list) and normalized_recipient not in frequent:
+            frequent = list(frequent) + [normalized_recipient]
+        user_profile["frequent_recipients"] = frequent
+
+    predictor = get_predictor()
+    inference_input = {
+        "transaction": {
+            "transaction_id": "PREPAYMENT_EVAL",
+            "amount": amount,
+            "recipient_id": normalized_recipient,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "device_id": "MOBILE_APP",
+            "location": "",
+            "voice_transcript": "",
+            "note": payload.get("note") or "",
+        },
+        "user_profile": user_profile,
+    }
+
+    try:
+        decision_package = predictor.predict(inference_input)
+    except Exception:
+        logger.exception("ML pre-payment risk scoring failed for recipient=%s", normalized_recipient)
+        raise HTTPException(
+            status_code=503,
+            detail="Risk scoring is temporarily unavailable. Please try again.",
+        )
+
+    # Advisory-only check: determine if Guardian would be required if payment were authorized/submitted
+    guardian_required = False
+    if str(decision_package["risk_level"]) == "HIGH" and user_id_int:
+        from app.repositories import guardian_repository
+        contacts = guardian_repository.get_trusted_contacts_by_user(db, user_id_int)
+        if contacts:
+            guardian_required = True
+
+    eval_time = datetime.now(timezone.utc)
+    expires_at = eval_time + timedelta(minutes=15)
+    eval_id = f"EVAL-{uuid.uuid4().hex[:12]}"
+
+    return {
+        "evaluation_id": eval_id,
+        "stage": PaymentWorkflowStage.EVALUATION_COMPLETED.value,
+        "risk_score": float(decision_package["risk_score"]),
+        "risk_level": str(decision_package["risk_level"]),
+        "decision": str(decision_package["decision"]),
+        "plain_language_reasons": decision_package.get("plain_language_reasons", []),
+        "risk_factors": decision_package.get("risk_factors", []),
+        "risk_contributions_pct": decision_package.get("risk_contributions_pct", {}),
+        "sub_scores": decision_package.get("sub_scores", {}),
+        "recipient": {
+            "raw_input": str(recipient_raw),
+            "normalized": normalized_recipient,
+            "recipient_type": rec_type,
+            "display_name": display_name,
+            "resolution_status": resolution_status,
+        },
+        "amount": amount,
+        "note": payload.get("note"),
+        "qr_data": payload.get("qr_data"),
+        "latency_ms": decision_package.get("latency_ms", 0.0),
+        "timestamp": eval_time.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "guardian_required": guardian_required,
+        "disclaimer": "Advisory pre-payment evaluation only. No payment authorized or initiated.",
+    }
+
 
 
 def evaluate(db: Session, txn_id: Optional[int], raw_payload: Optional[dict] = None) -> dict:

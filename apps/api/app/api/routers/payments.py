@@ -6,16 +6,19 @@ app/services/payment_lifecycle_service.py and app/services/risk_service.py
 for the shared implementation.
 """
 
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+
 from app.core.database import get_db
 from app.core.security import hash_identifier
-from app.models.enums import RiskLevel
+from app.models.enums import RiskDecision, RiskLevel
 from app.models.enums import TransactionStatus as S
 from app.repositories import guardian_repository, risk_repository, transaction_repository
 from app.schemas.payment import ConfirmPaymentRequest, LaunchUpiRequest, PaymentPrepareRequest
 from app.schemas.transaction import TransactionCreate, TransactionRead
+
 from app.services import notification_service, payment_lifecycle_service, risk_service, transaction_service
 from app.services.exceptions import TransactionNotFoundError, UserNotFoundError
 from app.services.payment_lifecycle_service import (
@@ -36,6 +39,19 @@ def prepare_payment(payload: PaymentPrepareRequest, db: Session = Depends(get_db
     """Canonical payment intake (spec §3): normalizes QR / UPI_ID / MOBILE /
     PAYMENT_REQUEST / LINK input into one transaction, deduped by
     `client_request_id` (idempotency key) when provided."""
+    # Expiration check if evaluation was supplied
+    if payload.evaluation_expires_at:
+        try:
+            exp_dt = datetime.fromisoformat(payload.evaluation_expires_at.replace("Z", "+00:00"))
+            if exp_dt < datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="Pre-payment evaluation has expired. Please evaluate again.",
+                )
+        except (ValueError, TypeError):
+            pass
+
+    recipient_identifier = payload.upi_id or payload.phone_number
     if payload.client_request_id:
         existing = (
             db.query(transaction_repository.Transaction)
@@ -46,40 +62,170 @@ def prepare_payment(payload: PaymentPrepareRequest, db: Session = Depends(get_db
             .first()
         )
         if existing:
-            return existing
+            txn = existing
+        else:
+            try:
+                txn = transaction_service.create_transaction(
+                    db,
+                    TransactionCreate(
+                        user_id=payload.user_id,
+                        recipient_identifier=recipient_identifier,
+                        recipient_display_name=payload.recipient_name,
+                        device_identifier=payload.device_identifier,
+                        device_name=payload.device_name,
+                        device_type=payload.device_type,
+                        amount=payload.amount,
+                        location=payload.location,
+                        payment_method="UPI",
+                    ),
+                )
+            except UserNotFoundError as exc:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+            txn.source = payload.source
+            txn.idempotency_key = payload.client_request_id
+            db.commit()
+            db.refresh(txn)
 
-    recipient_identifier = payload.upi_id or payload.phone_number
-    try:
-        txn = transaction_service.create_transaction(
-            db,
-            TransactionCreate(
-                user_id=payload.user_id,
-                recipient_identifier=recipient_identifier,
-                recipient_display_name=payload.recipient_name,
-                device_identifier=payload.device_identifier,
-                device_name=payload.device_name,
-                device_type=payload.device_type,
-                amount=payload.amount,
-                location=payload.location,
-                payment_method="UPI",
-            ),
+            SecurityAuditService.log_event(
+                "PAYMENT_INITIATED", user_id=txn.user_id, transaction_id=txn.id, details={"source": payload.source}, db=db
+            )
+            SecurityAuditService.log_event(
+                "PAYMENT_DATA_VALIDATED", user_id=txn.user_id, transaction_id=txn.id, db=db
+            )
+    else:
+        try:
+            txn = transaction_service.create_transaction(
+                db,
+                TransactionCreate(
+                    user_id=payload.user_id,
+                    recipient_identifier=recipient_identifier,
+                    recipient_display_name=payload.recipient_name,
+                    device_identifier=payload.device_identifier,
+                    device_name=payload.device_name,
+                    device_type=payload.device_type,
+                    amount=payload.amount,
+                    location=payload.location,
+                    payment_method="UPI",
+                ),
+            )
+        except UserNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        txn.source = payload.source
+        txn.idempotency_key = payload.client_request_id
+        db.commit()
+        db.refresh(txn)
+
+        SecurityAuditService.log_event(
+            "PAYMENT_INITIATED", user_id=txn.user_id, transaction_id=txn.id, details={"source": payload.source}, db=db
         )
-    except UserNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        SecurityAuditService.log_event(
+            "PAYMENT_DATA_VALIDATED", user_id=txn.user_id, transaction_id=txn.id, db=db
+        )
 
-    txn.source = payload.source
-    txn.idempotency_key = payload.client_request_id
-    db.commit()
-    db.refresh(txn)
+    # If pre-payment evaluation details were supplied, save RiskScore record if not already saved
+    final_score = float(payload.risk_score) if payload.risk_score is not None else None
+    level_map = {"LOW": RiskLevel.LOW, "MEDIUM": RiskLevel.MEDIUM, "HIGH": RiskLevel.HIGH}
+    decision_map = {
+        "ALLOW": RiskDecision.ALLOW,
+        "WARN": RiskDecision.WARN,
+        "WARN_CHOICE": RiskDecision.WARN,
+        "CONFIRM_OR_CANCEL": RiskDecision.CONFIRM_OR_CANCEL,
+    }
 
-    SecurityAuditService.log_event(
-        "PAYMENT_INITIATED", user_id=txn.user_id, transaction_id=txn.id, details={"source": payload.source}, db=db
+    if final_score is not None and payload.risk_level:
+        existing_score = db.query(risk_repository.RiskScore).filter(risk_repository.RiskScore.transaction_id == txn.id).first()
+        if not existing_score:
+            r_level = level_map.get(payload.risk_level.upper(), RiskLevel.LOW)
+            r_dec = decision_map.get(str(payload.decision or "ALLOW").upper(), RiskDecision.ALLOW)
+            factors_to_save = []
+            if payload.risk_factors and isinstance(payload.risk_factors, list):
+                for rf in payload.risk_factors:
+                    if isinstance(rf, dict):
+                        factors_to_save.append({
+                            "factor_type": rf.get("factor_type", "ml_signal"),
+                            "name": rf.get("name") or rf.get("factor_name") or "Signal",
+                            "contribution": float(rf.get("contribution", 0.0)),
+                            "explanation": rf.get("explanation") or rf.get("name") or "Signal",
+                        })
+                    elif isinstance(rf, str):
+                        factors_to_save.append({
+                            "factor_type": "ml_signal",
+                            "name": rf,
+                            "contribution": 0.0,
+                            "explanation": rf.replace("_", " ").title(),
+                        })
+
+            risk_repository.save_risk_evaluation(
+                db,
+                transaction_id=txn.id,
+                fraud_probability=final_score / 100.0,
+                final_score=final_score,
+                risk_level=r_level,
+                decision=r_dec,
+                risk_factors=factors_to_save,
+            )
+            db.commit()
+            db.refresh(txn)
+
+    # Fetch latest evaluation record for response
+    from app.api.routers.users import _get_or_compute_risk_score, get_risk_level_from_score
+    latest_risk = _get_or_compute_risk_score(db, txn)
+    factors = []
+    if latest_risk and latest_risk.risk_factors:
+        for rf in latest_risk.risk_factors:
+            factors.append({
+                "factor_type": getattr(rf, "factor_type", "rule"),
+                "factor_name": getattr(rf, "factor_name", "Risk Factor"),
+                "contribution": float(rf.contribution),
+                "explanation": rf.explanation,
+            })
+
+    computed_score = float(latest_risk.final_score) if latest_risk else (final_score or 0.0)
+    risk_level_str = get_risk_level_from_score(computed_score)
+    rec_display = payload.recipient_name or (txn.recipient.display_name if txn.recipient else None)
+
+    # Check advisory guardian requirement
+    guardian_req = False
+    if payload.guardian_required is not None:
+        guardian_req = bool(payload.guardian_required)
+    elif risk_level_str == "HIGH":
+        contacts = guardian_repository.get_trusted_contacts_by_user(db, txn.user_id)
+        if contacts:
+            guardian_req = True
+
+    return TransactionRead(
+        id=txn.id,
+        user_id=txn.user_id,
+        recipient_id=txn.recipient_id,
+        device_id=txn.device_id,
+        amount=txn.amount,
+        timestamp=txn.timestamp,
+        location=txn.location,
+        payment_method=txn.payment_method or "UPI",
+        status=txn.status,
+        authorization_required=txn.authorization_required,
+        authorization_status=txn.authorization_status or "NONE",
+        authorized_at=txn.authorized_at,
+        authorization_method=txn.authorization_method,
+        merchant=rec_display or "UPI Merchant",
+        risk_level=risk_level_str,
+        risk_score=computed_score,
+        risk_factors=factors,
+        reasons=[f["explanation"] for f in factors if f.get("explanation")] or (payload.plain_language_reasons or []),
+        # Goal 2 fields
+        evaluation_id=payload.evaluation_id or f"EVAL-TXN-{txn.id}",
+        recipient_input=payload.upi_id or payload.phone_number or rec_display or f"recipient_{txn.recipient_id}",
+        recipient_type=payload.recipient_type or ("UPI_ID" if payload.upi_id else "PHONE"),
+        normalized_recipient=recipient_identifier,
+        display_name=rec_display,
+        resolution_status=payload.resolution_status or ("RESOLVED" if rec_display else "UNVERIFIED"),
+        note=payload.note,
+        decision=payload.decision or (latest_risk.decision.value if latest_risk and hasattr(latest_risk.decision, "value") else "ALLOW"),
+        evaluation_timestamp=payload.evaluation_timestamp or (txn.timestamp.isoformat() if txn.timestamp else ""),
+        workflow_stage="EVALUATION_COMPLETED",
+        guardian_required=guardian_req,
     )
-    SecurityAuditService.log_event(
-        "PAYMENT_DATA_VALIDATED", user_id=txn.user_id, transaction_id=txn.id, db=db
-    )
 
-    return txn
 
 
 @router.post("/{transaction_id}/analyse")

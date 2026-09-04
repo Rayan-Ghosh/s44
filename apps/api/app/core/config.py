@@ -80,6 +80,22 @@ class Settings(BaseSettings):
     enforce_https: bool = False
     trusted_proxy_ips: list[str] = ["127.0.0.1", "::1"]
 
+    # CORS Configuration
+    cors_origins: list[str] = [
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:19006",
+        "http://127.0.0.1:19006",
+    ]
+    cors_origin_regex: str | None = r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?"
+
+    # Demo & Simulator Endpoint Controls
+    enable_demo_endpoints: bool = True
+
     # Session Security & Expiration
     session_absolute_expiry_days: int = 30
     session_inactivity_expiry_hours: int = 72
@@ -156,7 +172,25 @@ def validate_production_configuration(cfg: Settings) -> None:
                 "Production configuration error: enable_dev_otp_inspection must be set to False in production."
             )
 
+        # 5. Demo & Simulator Gating
+        if cfg.enable_demo_endpoints:
+            raise ValueError(
+                "Production configuration error: enable_demo_endpoints must be set to False in production."
+            )
+
+        # 6. CORS Safety in Production
+        if not cfg.cors_origins or "*" in cfg.cors_origins:
+            raise ValueError(
+                "Production configuration error: cors_origins must be explicitly configured and cannot contain wildcard '*' in production."
+            )
+
+        if cfg.cors_origin_regex and ("10." in cfg.cors_origin_regex or "192.168" in cfg.cors_origin_regex or "172." in cfg.cors_origin_regex):
+            raise ValueError(
+                "Production configuration error: cors_origin_regex cannot use development private LAN patterns in production."
+            )
+
 
 settings = Settings()
 validate_production_configuration(settings)
+
 

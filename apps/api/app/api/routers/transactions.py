@@ -61,9 +61,19 @@ def create_transaction(
 
 
 @router.get("/{transaction_id}")
-def get_transaction(transaction_id: int, db: Session = Depends(get_db)) -> dict:
+def get_transaction(
+    transaction_id: int,
+    user_id: Optional[int] = Query(None, description="Optional user_id to enforce ownership isolation"),
+    db: Session = Depends(get_db),
+) -> dict:
     try:
         txn = transaction_service.get_transaction(db, transaction_id)
+        if user_id is not None and txn.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: Transaction {transaction_id} does not belong to user {user_id}.",
+            )
+
         from app.api.routers.users import _get_or_compute_risk_score
         latest_risk = _get_or_compute_risk_score(db, txn)
         factors = []
@@ -78,6 +88,18 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db)) -> dict:
 
         final_sc = float(latest_risk.final_score) if latest_risk else 0.0
         from app.api.routers.users import get_risk_level_from_score
+        risk_level = get_risk_level_from_score(final_sc)
+
+        guardian_req = False
+        if risk_level == "HIGH":
+            from app.repositories import guardian_repository
+            contacts = guardian_repository.get_trusted_contacts_by_user(db, txn.user_id)
+            if contacts:
+                guardian_req = True
+
+        rec_display = txn.recipient.display_name if (txn.recipient and txn.recipient.display_name) else None
+        res_status = "RESOLVED" if rec_display else "UNVERIFIED"
+
         return {
             "id": txn.id,
             "user_id": txn.user_id,
@@ -87,22 +109,34 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db)) -> dict:
             "timestamp": txn.timestamp.isoformat() if txn.timestamp else "",
             "location": txn.location,
             "payment_method": txn.payment_method or "UPI",
-            "merchant": txn.recipient.display_name if (txn.recipient and txn.recipient.display_name) else "UPI Merchant",
+            "merchant": rec_display or "UPI Merchant",
             "status": txn.status.value if hasattr(txn.status, "value") else str(txn.status),
             "authorization_required": txn.authorization_required,
             "authorization_status": txn.authorization_status or "NONE",
             "authorized_at": txn.authorized_at.isoformat() if txn.authorized_at else None,
             "authorization_method": txn.authorization_method,
-            "risk_level": get_risk_level_from_score(final_sc),
+            "risk_level": risk_level,
             "risk_score": final_sc,
             "risk_factors": factors,
             "reasons": [f["explanation"] for f in factors if f.get("explanation")],
+            # Goal 2 persisted card fields
+            "evaluation_id": f"EVAL-TXN-{txn.id}",
+            "recipient_input": rec_display or f"recipient_{txn.recipient_id}",
+            "recipient_type": "UPI_ID" if txn.payment_method == "UPI" else "PHONE",
+            "normalized_recipient": rec_display or f"recipient_{txn.recipient_id}",
+            "display_name": rec_display,
+            "resolution_status": res_status,
+            "decision": latest_risk.decision.value if (latest_risk and hasattr(latest_risk.decision, "value")) else ("ALLOW" if risk_level == "LOW" else "WARN"),
+            "evaluation_timestamp": txn.timestamp.isoformat() if txn.timestamp else "",
+            "workflow_stage": "EVALUATION_COMPLETED",
+            "guardian_required": guardian_req,
         }
     except TransactionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+
 
 
 @router.post("/{transaction_id}/authorize")

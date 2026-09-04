@@ -93,7 +93,20 @@ export interface UserTransaction {
   authorizedAt?: string;
   authorizationMethod?: string;
   note?: string;
+  // AVARAN PAY Part 2 Goal 2 persisted card fields
+
+  evaluationId?: string;
+  recipientInput?: string;
+  recipientType?: "UPI_ID" | "PHONE" | "UNKNOWN" | string;
+  normalizedRecipient?: string;
+  displayName?: string | null;
+  resolutionStatus?: "RESOLVED" | "UNVERIFIED" | "UNRESOLVED" | string;
+  decision?: string;
+  evaluationTimestamp?: string;
+  workflowStage?: "EVALUATION_COMPLETED" | string;
+  guardianRequired?: boolean;
 }
+
 
 export interface CreateTransactionInput {
   recipient: string;
@@ -161,11 +174,78 @@ export interface RiskEvaluationFailure {
 
 export type RiskEvaluationResult = RiskEvaluationSuccess | RiskEvaluationFailure;
 
+export interface PrePaymentRecipientInfo {
+  raw_input: string;
+  normalized: string;
+  recipient_type: "UPI_ID" | "PHONE" | string;
+  display_name?: string | null;
+  resolution_status: "RESOLVED" | "UNVERIFIED" | "UNRESOLVED" | string;
+}
+
+export interface PaymentEvaluationRequest {
+  recipient: string;
+  recipient_type?: string;
+  amount: number;
+  note?: string;
+  qr_data?: string;
+  contact_phone?: string;
+  user_id?: number;
+}
+
+export interface PaymentEvaluationData {
+  evaluation_id?: string;
+  stage: "EVALUATION_COMPLETED";
+  risk_score: number;
+  risk_level: "LOW" | "MEDIUM" | "HIGH";
+  decision: "ALLOW" | "WARN_CHOICE" | "CONFIRM_OR_CANCEL" | string;
+  plain_language_reasons: string[];
+  risk_factors?: string[];
+  risk_contributions_pct?: Record<string, number>;
+  sub_scores?: Record<string, number>;
+  recipient?: PrePaymentRecipientInfo;
+  amount?: number;
+  note?: string;
+  qr_data?: string;
+  latency_ms?: number;
+  timestamp?: string;
+  expires_at?: string;
+  guardian_required?: boolean;
+  disclaimer?: string;
+  isAuthorized: false;
+  isApproved: false;
+  isCompleted: false;
+  isSubmitted: false;
+}
+
+
+export interface PaymentEvaluationSuccess {
+  success: true;
+  data: PaymentEvaluationData;
+}
+
+export interface PaymentEvaluationFailure {
+  success: false;
+  error: string;
+}
+
+export type PaymentEvaluationResult = PaymentEvaluationSuccess | PaymentEvaluationFailure;
+
 export const isTransactionTerminal = (
-  tx: UserTransaction | { status?: string; isCompleted?: boolean } | null | undefined
+  tx: UserTransaction | { status?: string; isCompleted?: boolean; canonicalStatus?: string } | null | undefined
 ): boolean => {
   if (!tx) return false;
   if (tx.isCompleted) return true;
+  const cs = (tx as any).canonicalStatus;
+  if (
+    cs === "GUARDIAN_REJECTED" ||
+    cs === "GUARDIAN_TIMEOUT" ||
+    cs === "COMPLETED" ||
+    cs === "CANCELLED" ||
+    cs === "REPORTED" ||
+    cs === "BLOCKED"
+  ) {
+    return true;
+  }
   const s = tx.status;
   return s === "Completed" || s === "Safe" || s === "Blocked" || s === "Reported";
 };
@@ -257,8 +337,21 @@ export const mapBackendTransaction = (t: any): UserTransaction => {
     authorizationStatus: t.authorization_status || (authRequired ? "PENDING" : "NONE"),
     authorizedAt: t.authorized_at,
     authorizationMethod: t.authorization_method,
+    note: t.note,
+    // Goal 2 card fields
+    evaluationId: t.evaluation_id || `EVAL-TXN-${t.id}`,
+    recipientInput: t.recipient_input || t.merchant || (t.recipient && t.recipient.display_name) || "UPI Payment",
+    recipientType: t.recipient_type || (t.payment_method === "UPI" ? "UPI_ID" : "PHONE"),
+    normalizedRecipient: t.normalized_recipient || t.recipient_input || t.merchant,
+    displayName: t.display_name || (t.recipient && t.recipient.display_name) || null,
+    resolutionStatus: t.resolution_status || (t.display_name || (t.recipient && t.recipient.display_name) ? "RESOLVED" : "UNVERIFIED"),
+    decision: t.decision || (riskLevel === "LOW" ? "ALLOW" : riskLevel === "MEDIUM" ? "WARN" : "CONFIRM_OR_CANCEL"),
+    evaluationTimestamp: t.evaluation_timestamp || t.timestamp,
+    workflowStage: t.workflow_stage || "EVALUATION_COMPLETED",
+    guardianRequired: Boolean(t.guardian_required),
   };
 };
+
 
 type PaymentSubscriber = (overview: UserPaymentOverview, transactions: UserTransaction[]) => void;
 
@@ -367,7 +460,7 @@ class CentralPaymentManager {
     limit?: number,
     offset?: number
   ): Promise<{ items: UserTransaction[]; total: number }> {
-    if (IS_DEMO_MODE) {
+    if (isDemoMode()) {
       let items = [...this.transactions];
       if (filter === "review") {
         items = items.filter((t) => t.status === "Risk detected" || t.status === "Held");
@@ -393,16 +486,18 @@ class CentralPaymentManager {
         `/api/v1/users/${userId}/transactions${qs ? `?${qs}` : ""}`
       );
       if (res.data && Array.isArray(res.data.items)) {
-        let items = res.data.items.map(mapBackendTransaction);
-        this.transactions = items;
+        let backendItems = res.data.items.map(mapBackendTransaction);
+        this.transactions = [...backendItems];
+        let items = [...this.transactions];
         if (filter === "review") {
           items = items.filter((t) => t.status === "Risk detected" || t.status === "Held");
         } else if (filter === "safe" || filter === "completed") {
           items = items.filter((t) => t.status === "Safe" || t.status === "Approved by you" || t.status === "Completed");
         }
         this.notify();
-        return { items, total: res.data.total };
+        return { items, total: items.length };
       }
+
     } catch {
       // Fallback
     }
@@ -511,11 +606,324 @@ class CentralPaymentManager {
   }
 
   /**
+   * Pre-payment risk evaluation connected directly to the real backend.
+   *
+   * Calls POST /api/v1/risk/evaluate with recipient, amount, note, and optional context.
+   * Purely advisory: creates NO transaction, changes NO transaction status,
+   * creates NO alert, and initiates NO payment authorization.
+   */
+  public async evaluatePayment(request: PaymentEvaluationRequest): Promise<PaymentEvaluationResult> {
+    if (!request || typeof request !== "object") {
+      return {
+        success: false,
+        error: "Payment evaluation request must provide valid parameters.",
+      };
+    }
+
+    const { recipient, amount } = request;
+    if (typeof recipient !== "string" || !recipient.trim()) {
+      return {
+        success: false,
+        error: "Payment evaluation request must provide a valid recipient.",
+      };
+    }
+
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+      return {
+        success: false,
+        error: "Payment evaluation request must have a valid positive amount.",
+      };
+    }
+
+    if (isDemoMode()) {
+      return this.evaluatePaymentOffline(request);
+    }
+
+    try {
+      const res = await ApiClient.post<any>("/api/v1/risk/evaluate", {
+        recipient: recipient.trim(),
+        recipient_type: request.recipient_type,
+        amount,
+        note: request.note,
+        qr_data: request.qr_data,
+        contact_phone: request.contact_phone,
+        user_id: request.user_id,
+      });
+
+      if (res.error && (!res.data || res.status >= 400)) {
+        if (res.isNetworkError && isDemoMode()) {
+          return this.evaluatePaymentOffline(request);
+        }
+        return {
+          success: false,
+          error: res.error,
+        };
+      }
+
+      if (res.data) {
+        const d = res.data;
+        const score = typeof d.risk_score === "number" ? d.risk_score : 0;
+        const level: "LOW" | "MEDIUM" | "HIGH" =
+          d.risk_level === "HIGH" || d.risk_level === "MEDIUM" || d.risk_level === "LOW"
+            ? d.risk_level
+            : getRiskLevelFromScore(score);
+
+        return {
+          success: true,
+          data: {
+            evaluation_id: d.evaluation_id,
+            stage: "EVALUATION_COMPLETED",
+            risk_score: score,
+            risk_level: level,
+            decision: d.decision || "ALLOW",
+            plain_language_reasons: Array.isArray(d.plain_language_reasons) ? d.plain_language_reasons : [],
+            risk_factors: Array.isArray(d.risk_factors) ? d.risk_factors : [],
+            risk_contributions_pct: d.risk_contributions_pct || {},
+            sub_scores: d.sub_scores || {},
+            recipient: d.recipient,
+            amount: typeof d.amount === "number" ? d.amount : amount,
+            note: d.note ?? request.note,
+            qr_data: d.qr_data ?? request.qr_data,
+            latency_ms: d.latency_ms,
+            timestamp: d.timestamp || new Date().toISOString(),
+            expires_at: d.expires_at,
+            guardian_required: Boolean(d.guardian_required),
+            disclaimer: d.disclaimer || "Advisory pre-payment evaluation only. No payment authorized or initiated.",
+            isAuthorized: false,
+            isApproved: false,
+            isCompleted: false,
+            isSubmitted: false,
+          },
+        };
+      }
+
+      if (res.isNetworkError && isDemoMode()) {
+        return this.evaluatePaymentOffline(request);
+      }
+
+      return {
+        success: false,
+        error: res.error || "Server returned an empty evaluation response.",
+      };
+    } catch (err: any) {
+      if (isDemoMode()) {
+        return this.evaluatePaymentOffline(request);
+      }
+      const detail = err?.response?.data?.detail || err?.message || "Failed to evaluate payment draft";
+      return {
+        success: false,
+        error: typeof detail === "string" ? detail : JSON.stringify(detail),
+      };
+    }
+  }
+
+
+  /**
+   * Deterministic offline / demo pre-payment evaluation fallback.
+   */
+  public evaluatePaymentOffline(request: PaymentEvaluationRequest): PaymentEvaluationResult {
+    const raw = request.recipient.trim();
+    const isUpi = raw.includes("@");
+    const recType = isUpi ? "UPI_ID" : "PHONE";
+    let score = 15;
+    if (request.amount > 20000) {
+      score = 75;
+    } else if (request.amount > 5000) {
+      score = 45;
+    }
+    const level: "LOW" | "MEDIUM" | "HIGH" = score > 60 ? "HIGH" : score > 30 ? "MEDIUM" : "LOW";
+    const decision = level === "HIGH" ? "CONFIRM_OR_CANCEL" : level === "MEDIUM" ? "WARN_CHOICE" : "ALLOW";
+    const reasons =
+      level === "HIGH"
+        ? ["High amount transfer deviates from normal baseline", "Unverified recipient profile"]
+        : level === "MEDIUM"
+        ? ["Moderate amount transaction", "First-time transfer to this recipient"]
+        : ["Standard verified payment signature", "Known device and location pattern"];
+
+    return {
+      success: true,
+      data: {
+        stage: "EVALUATION_COMPLETED",
+        risk_score: score,
+        risk_level: level,
+        decision,
+        plain_language_reasons: reasons,
+        risk_factors: ["amount_deviation", "recipient_novelty"],
+        risk_contributions_pct: { amount_deviation: 60, recipient_novelty: 40 },
+        recipient: {
+          raw_input: raw,
+          normalized: isUpi ? raw.toLowerCase() : raw.replace(/[\s\-\(\)]/g, "").replace(/^(\+91|91)/, ""),
+          recipient_type: recType,
+          display_name: null,
+          resolution_status: isUpi ? "UNVERIFIED" : "UNRESOLVED",
+        },
+        amount: request.amount,
+        note: request.note,
+        qr_data: request.qr_data,
+        latency_ms: 12.5,
+        timestamp: new Date().toISOString(),
+        disclaimer: "Advisory pre-payment evaluation only. No payment authorized or initiated.",
+        isAuthorized: false,
+        isApproved: false,
+        isCompleted: false,
+        isSubmitted: false,
+      },
+    };
+  }
+
+  /**
+
+   * Persists an evaluated payment draft as an advisory card / transaction using the backend (Part 2).
+   *
+   * Purely advisory:
+   * - Creates transaction with status PENDING.
+   * - Does NOT authorize payment.
+   * - Does NOT submit payment.
+   * - Does NOT confirm payment.
+   * - Does NOT trigger Guardian approval.
+   * - Does NOT mark completed.
+   * - Does NOT redirect to UPI app.
+   */
+  public async persistPaymentDraftCard(
+    evalData: PaymentEvaluationData,
+    draft: PaymentDraft,
+    userId: number = 1,
+    clientRequestId?: string
+  ): Promise<{ success: boolean; transaction?: UserTransaction; error?: string }> {
+    if (!evalData || !draft) {
+      return { success: false, error: "Evaluation data and draft are required for persistence." };
+    }
+
+    const idempotencyKey = clientRequestId || `idem-${evalData.evaluation_id || Date.now()}`;
+    const rawRecipient = (evalData.recipient?.raw_input || draft.recipient).trim();
+    const isUpi = rawRecipient.includes("@");
+
+    // Demo Mode: Local Persistence
+    if (isDemoMode()) {
+      const existing = this.transactions.find((t) => t.evaluationId === evalData.evaluation_id);
+      if (existing) {
+        return { success: true, transaction: existing };
+      }
+
+      const txId = `demo-${Date.now()}`;
+      const recDisplay = evalData.recipient?.display_name || null;
+      const resStatus = evalData.recipient?.resolution_status || (recDisplay ? "RESOLVED" : "UNVERIFIED");
+
+      const demoCard: UserTransaction = {
+        id: txId,
+        title: recDisplay || rawRecipient,
+        merchant: recDisplay || rawRecipient,
+        amount: draft.amount,
+        date: "Today",
+        timestamp: evalData.timestamp || new Date().toISOString(),
+        paymentMethod: "UPI",
+        status: evalData.risk_level === "HIGH" ? "Risk detected" : "Held",
+        riskLevel: evalData.risk_level,
+        riskScore: evalData.risk_score,
+        riskFactors: (evalData.risk_factors || []).map((name) => ({
+          factor_type: "ml_signal",
+          factor_name: name,
+          contribution: evalData.risk_contributions_pct?.[name] || 0,
+          explanation: name.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+        })),
+        reasons: evalData.plain_language_reasons || [],
+        isCompleted: false,
+        authorizationRequired: evalData.risk_level === "HIGH",
+        authorizationStatus: "NONE",
+        note: draft.note,
+        evaluationId: evalData.evaluation_id || `EVAL-DEMO-${Date.now()}`,
+        recipientInput: rawRecipient,
+        recipientType: evalData.recipient?.recipient_type || (isUpi ? "UPI_ID" : "PHONE"),
+        normalizedRecipient: evalData.recipient?.normalized || rawRecipient,
+        displayName: recDisplay,
+        resolutionStatus: resStatus,
+        decision: evalData.decision,
+        evaluationTimestamp: evalData.timestamp || new Date().toISOString(),
+        workflowStage: "EVALUATION_COMPLETED",
+        guardianRequired: Boolean(evalData.guardian_required),
+      };
+
+      this.transactions = [demoCard, ...this.transactions];
+      this.notify();
+      return { success: true, transaction: demoCard };
+    }
+
+    // Production Mode: Live Backend Persistence
+    try {
+      const payload: any = {
+        user_id: userId,
+        source: isUpi ? "UPI_ID" : "MOBILE",
+        amount: draft.amount,
+        note: draft.note,
+        device_identifier: "mobile-device-app",
+        device_name: "Mobile App",
+        device_type: "SMARTPHONE",
+        client_request_id: idempotencyKey,
+        evaluation_id: evalData.evaluation_id,
+        risk_score: evalData.risk_score,
+        risk_level: evalData.risk_level,
+        decision: evalData.decision,
+        risk_factors: evalData.risk_factors,
+        plain_language_reasons: evalData.plain_language_reasons,
+        recipient_type: evalData.recipient?.recipient_type || (isUpi ? "UPI_ID" : "PHONE"),
+        resolution_status: evalData.recipient?.resolution_status,
+        evaluation_timestamp: evalData.timestamp,
+        evaluation_expires_at: evalData.expires_at,
+        guardian_required: evalData.guardian_required,
+      };
+
+      if (isUpi) {
+        payload.upi_id = rawRecipient;
+      } else {
+        payload.phone_number = rawRecipient;
+      }
+
+      if (evalData.recipient?.display_name) {
+        payload.recipient_name = evalData.recipient.display_name;
+      }
+
+      const res = await ApiClient.post<any>("/api/v1/payments/prepare", payload);
+
+      if (res.error && (!res.data || res.status >= 400)) {
+        return {
+          success: false,
+          error: res.error || "Failed to persist payment card on backend.",
+        };
+      }
+
+      if (res.data) {
+        const persistedTx = mapBackendTransaction(res.data);
+        // Dedupe locally if already present
+        const idx = this.transactions.findIndex((t) => String(t.id) === String(persistedTx.id));
+        if (idx >= 0) {
+          this.transactions[idx] = persistedTx;
+        } else {
+          this.transactions = [persistedTx, ...this.transactions];
+        }
+        this.notify();
+        return { success: true, transaction: persistedTx };
+      }
+
+      return {
+        success: false,
+        error: "Server returned empty response when creating payment card.",
+      };
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || "Failed to persist payment card.";
+      return {
+        success: false,
+        error: typeof detail === "string" ? detail : JSON.stringify(detail),
+      };
+    }
+  }
+
+  /**
    * Parses a raw UPI payment payload using the centralized parser contract.
    */
   public parseUpiPayload(payload: string): ParsedUpiPaymentResult {
     return parseUpiPaymentPayload(payload);
   }
+
 
   public addTransaction(newTx: UserTransaction) {
     this.transactions = [newTx, ...this.transactions];
@@ -524,9 +932,10 @@ class CentralPaymentManager {
 
   public updateTransactionStatus(
     transactionId: string,
-    status: UserTransaction["status"]
+    status: UserTransaction["status"],
+    canonicalStatus?: CanonicalTransactionStatus
   ): boolean {
-    const isTerminal = isTransactionTerminal({ status });
+    const isTerminal = isTransactionTerminal({ status, canonicalStatus });
     let found = false;
     this.transactions = this.transactions.map((t) => {
       if (t.id === transactionId || String(t.id) === String(transactionId)) {
@@ -534,6 +943,7 @@ class CentralPaymentManager {
         return {
           ...t,
           status,
+          ...(canonicalStatus ? { canonicalStatus } : {}),
           isCompleted: isTerminal,
           completionTimestamp: isTerminal ? new Date().toISOString() : t.completionTimestamp,
         };
@@ -985,6 +1395,18 @@ export const createPaymentDraft = (input: CreateTransactionInput): CreatePayment
 export const evaluatePaymentDraft = (request: RiskEvaluationRequest): RiskEvaluationResult => {
   return PaymentService.evaluatePaymentDraft(request);
 };
+export const evaluatePayment = (request: PaymentEvaluationRequest): Promise<PaymentEvaluationResult> => {
+  return PaymentService.evaluatePayment(request);
+};
+export const persistPaymentDraftCard = (
+  evalData: PaymentEvaluationData,
+  draft: PaymentDraft,
+  userId: number = 1,
+  clientRequestId?: string
+): Promise<{ success: boolean; transaction?: UserTransaction; error?: string }> => {
+  return PaymentService.persistPaymentDraftCard(evalData, draft, userId, clientRequestId);
+};
+
 export const authorizePaymentTransaction = (
   transactionId: string,
   methodOrStage?: string | { stage?: any },
@@ -1007,6 +1429,14 @@ export const completePaymentTransaction = (
   options?: { hasActiveContext?: boolean }
 ): Promise<{ success: boolean; error?: string }> => {
   return PaymentService.completeTransaction(transactionId, paymentAppUsed, trustedDetails, stage, options);
+};
+
+export const updateTransactionStatus = (
+  transactionId: string,
+  status: UserTransaction["status"],
+  canonicalStatus?: CanonicalTransactionStatus
+): boolean => {
+  return PaymentService.updateTransactionStatus(transactionId, status, canonicalStatus);
 };
 
 export const buildPaymentAuthorizationPayload = CentralPaymentManager.buildAuthorizationPayload;

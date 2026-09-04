@@ -33,6 +33,7 @@ class GuardianRequestCreate(BaseModel):
     transaction_id: int
     trusted_contact_id: Optional[int] = None
     stage: Optional[str] = Field(default=None, description="Workflow stage: cannot be EVALUATION_COMPLETED")
+    user_id: Optional[int] = Field(default=None, description="Optional user_id for caller ownership enforcement")
 
 
 class GuardianRequestRead(BaseModel):

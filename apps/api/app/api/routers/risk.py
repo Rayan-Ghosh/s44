@@ -35,25 +35,27 @@ def get_risk_score(transaction_id: int, db: Session = Depends(get_db)) -> RiskSc
 
 @router.post("/evaluate")
 def evaluate_risk(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Executes live multi-signal ML scoring (<20ms) for an existing transaction or pre-payment draft.
+
+    When transaction_id is provided, scores the existing transaction and persists RiskScore.
+    When recipient and amount are provided, performs pre-payment evaluation (advisory only, no DB mutations).
     """
-    Executes live multi-signal ML scoring (<20ms) for an existing transaction or raw payload.
-    Persists RiskScore and RiskFactor rows if backed by DB and returns the authoritative RiskDecisionPackage.
+    if "transaction_id" in payload:
+        txn_id = payload.get("transaction_id")
+        if txn_id is None or not str(txn_id).isdigit():
+            raise HTTPException(status_code=422, detail="transaction_id must be a valid integer.")
+        txn_id_int = int(txn_id)
 
-    Delegates to app/services/risk_service.py, shared with the new
-    POST /api/v1/payments/{id}/analyse surface.
-    """
-    txn_id = payload.get("transaction_id")
-    txn_id_int = int(txn_id) if (txn_id and str(txn_id).isdigit()) else None
+        try:
+            decision_package = risk_service.evaluate(db, txn_id_int, raw_payload=payload)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail="Risk scoring is temporarily unavailable. Please try again.",
+            )
 
-    try:
-        decision_package = risk_service.evaluate(db, txn_id_int, raw_payload=payload)
-    except Exception:
-        raise HTTPException(
-            status_code=503,
-            detail="Risk scoring is temporarily unavailable. Please try again.",
-        )
-
-    if txn_id_int:
         SecurityAuditService.log_event(
             "RISK_EVALUATED",
             transaction_id=txn_id_int,
@@ -61,15 +63,16 @@ def evaluate_risk(payload: dict, db: Session = Depends(get_db)) -> dict:
             db=db,
         )
 
-    # Tags the response with the workflow stage this endpoint produces, so
-    # the client's next call (authorize/submit/confirm) can be validated by
-    # app/services/payment_workflow_guard.py — an evaluation result must
-    # never itself be usable as an authorization/submission/completion
-    # stage. Status transitions and Alert creation for this decision are
-    # handled inside risk_service.evaluate() itself (shared with
-    # POST /api/v1/payments/{id}/analyse).
-    decision_package["stage"] = PaymentWorkflowStage.EVALUATION_COMPLETED.value
-    return decision_package
+        decision_package["stage"] = PaymentWorkflowStage.EVALUATION_COMPLETED.value
+        return decision_package
+
+    if "recipient" in payload or "amount" in payload:
+        return risk_service.evaluate_prepayment(db, payload)
+
+    raise HTTPException(
+        status_code=422,
+        detail="Either transaction_id or recipient and amount must be provided.",
+    )
 
 
 @router.post("/{transaction_id}/recipient-evaluate")
