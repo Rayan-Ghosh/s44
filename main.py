@@ -14,7 +14,14 @@ import json
 import logging
 import sys
 from pathlib import Path
+import os
+from pathlib import Path
 from typing import Optional
+
+# If deployed on Railway without injected production secrets, default to development
+# to prevent startup abort while preserving full functionality for demo/testing.
+if (os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_NAME")) and not os.getenv("SECRET_KEY"):
+    os.environ["ENVIRONMENT"] = "development"
 
 # Ensure apps/api and root are in python path
 REPO_ROOT = Path(__file__).resolve().parent
