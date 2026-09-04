@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import { ApiClient, setAuthToken, IS_DEMO_MODE } from "./api-client";
+import { ApiClient, setAuthToken, IS_DEMO_MODE, isDemoMode } from "./api-client";
 import { getDevicePayload } from "./device-info-service";
 
 export interface UserSession {
@@ -133,7 +133,7 @@ export class AuthService {
       return { success: false, error: "Please enter your email address or mobile number." };
     }
 
-    if (IS_DEMO_MODE) {
+    if (isDemoMode()) {
       const session = buildDemoSession({
         name: id.includes("@") ? id.split("@")[0].replace(".", " ") : "Demo User",
         email: id.includes("@") ? id : "demo@avaran.app",

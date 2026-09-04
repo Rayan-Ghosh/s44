@@ -32,6 +32,7 @@ class TrustedContactRead(BaseModel):
 class GuardianRequestCreate(BaseModel):
     transaction_id: int
     trusted_contact_id: Optional[int] = None
+    stage: Optional[str] = Field(default=None, description="Workflow stage: cannot be EVALUATION_COMPLETED")
 
 
 class GuardianRequestRead(BaseModel):
@@ -57,6 +58,7 @@ class GuardianRequestRead(BaseModel):
 
 class GuardianActionRequest(BaseModel):
     notes: Optional[str] = None
+    stage: Optional[str] = Field(default=None, description="Workflow stage: cannot be EVALUATION_COMPLETED")
 
 
 class UserOverrideRequest(BaseModel):

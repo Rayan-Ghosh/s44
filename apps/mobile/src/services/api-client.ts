@@ -105,12 +105,107 @@ export const resetApiBaseUrl = (): void => {
  */
 export const API_BASE_URL = getApiBaseUrl();
 
+export interface DemoModeAudit {
+  isDemoMode: boolean;
+  source: "runtime_override" | "env_var" | "expo_extra" | "default_production";
+  rawValue: unknown;
+  isExplicitDemo: boolean;
+}
+
+let _runtimeDemoMode: boolean | null = null;
+
 /**
- * Demo mode.
+ * Explicitly set or override demo mode at runtime (strictly for testing).
+ * In ordinary application runtime, this should never be called.
  */
-export const IS_DEMO_MODE =
-  typeof process !== "undefined" &&
-  process?.env?.EXPO_PUBLIC_DEMO_MODE === "true";
+export const setDemoMode = (enabled: boolean | null): void => {
+  _runtimeDemoMode = enabled;
+};
+
+/**
+ * Resets the runtime demo mode override, returning configuration resolution to env/extra defaults.
+ */
+export const resetDemoMode = (): void => {
+  _runtimeDemoMode = null;
+};
+
+/**
+ * Centralized, hardened configuration resolver for demo mode.
+ *
+ * Strict Production Guarantees:
+ * 1. Live/production is the default: if no explicit intentional configuration is found,
+ *    demo mode is strictly FALSE.
+ * 2. Strict evaluation of environment variables:
+ *    - ONLY exact string "true" (case-sensitive) enables demo mode.
+ *    - All other values ("1", "yes", "TRUE", "True", "true ", "0", "false", "", arbitrary)
+ *      are treated as invalid / non-demo and evaluate to FALSE.
+ * 3. Strict evaluation of Expo extra configuration:
+ *    - ONLY boolean true or exact string "true" enables demo mode.
+ *    - Missing, falsy, or malformed extra (numbers, objects, arrays, "yes", "1", "TRUE")
+ *      evaluate to FALSE.
+ * 4. Runtime override:
+ *    - Only active when _runtimeDemoMode is explicitly non-null (set in tests).
+ */
+export const resolveDemoModeConfiguration = (): DemoModeAudit => {
+  if (_runtimeDemoMode !== null) {
+    return {
+      isDemoMode: _runtimeDemoMode === true,
+      source: "runtime_override",
+      rawValue: _runtimeDemoMode,
+      isExplicitDemo: _runtimeDemoMode === true,
+    };
+  }
+
+  // 1. Check EXPO_PUBLIC_DEMO_MODE environment variable
+  const rawEnv =
+    typeof process !== "undefined" && process?.env
+      ? process.env.EXPO_PUBLIC_DEMO_MODE
+      : undefined;
+
+  if (rawEnv !== undefined && rawEnv !== null) {
+    const isExplicitTrue = typeof rawEnv === "string" && rawEnv === "true";
+    return {
+      isDemoMode: isExplicitTrue,
+      source: "env_var",
+      rawValue: rawEnv,
+      isExplicitDemo: isExplicitTrue,
+    };
+  }
+
+  // 2. Check Expo Constants extra
+  const expoConfig =
+    Constants?.expoConfig ?? (Constants as any)?.default?.expoConfig;
+  const rawExtra = expoConfig?.extra?.demoMode;
+  if (rawExtra !== undefined && rawExtra !== null) {
+    const isExplicitTrue = rawExtra === true || rawExtra === "true";
+    return {
+      isDemoMode: isExplicitTrue,
+      source: "expo_extra",
+      rawValue: rawExtra,
+      isExplicitDemo: isExplicitTrue,
+    };
+  }
+
+  // 3. Default fallback: Live / Production mode
+  return {
+    isDemoMode: false,
+    source: "default_production",
+    rawValue: undefined,
+    isExplicitDemo: false,
+  };
+};
+
+/**
+ * Determines whether the application is operating in explicit demo/test mode.
+ */
+export const isDemoMode = (): boolean => {
+  return resolveDemoModeConfiguration().isDemoMode;
+};
+
+/**
+ * Demo mode indicator. Evaluates dynamically via isDemoMode().
+ */
+export const IS_DEMO_MODE = isDemoMode();
 
 /**
  * Authentication token.

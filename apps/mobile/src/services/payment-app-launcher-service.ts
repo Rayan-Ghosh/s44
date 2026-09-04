@@ -1,4 +1,5 @@
 import { Linking, Platform } from "react-native";
+import { PaymentWorkflowStage, validatePaymentSubmissionStage } from "../types/transaction";
 
 export interface TargetPaymentApp {
   id: string;
@@ -163,8 +164,20 @@ class PaymentAppLauncher {
    */
   public async launchPaymentApp(
     app: TargetPaymentApp,
-    details: UPIPaymentDetails
+    details: UPIPaymentDetails,
+    stage?: PaymentWorkflowStage | { stage?: any } | string | null
   ): Promise<{ success: boolean; uri: string; error?: string }> {
+    if (stage !== undefined) {
+      const validation = validatePaymentSubmissionStage(stage);
+      if (!validation.valid) {
+        return {
+          success: false,
+          uri: "",
+          error: validation.error || "Stage is not valid for payment submission",
+        };
+      }
+    }
+
     const uri = this.buildUpiUri(details, app.scheme);
 
     if (Platform.OS === "web") {

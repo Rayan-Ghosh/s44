@@ -91,3 +91,13 @@ class FraudCaseStatus(str, enum.Enum):
     CONFIRMED_FRAUD = "CONFIRMED_FRAUD"
     FALSE_POSITIVE = "FALSE_POSITIVE"
     CLOSED = "CLOSED"
+
+
+class PaymentWorkflowStage(str, enum.Enum):
+    """Canonical payment workflow stages matching mobile contract (Part 4R)."""
+
+    EVALUATION_COMPLETED = "EVALUATION_COMPLETED"
+    PAYMENT_AUTHORIZED = "PAYMENT_AUTHORIZED"
+    PAYMENT_SUBMITTED = "PAYMENT_SUBMITTED"
+    PAYMENT_COMPLETED = "PAYMENT_COMPLETED"
+

@@ -3,6 +3,7 @@ import { PaymentService, UserTransaction, RiskFactorItem } from "./payment-servi
 import { RiskService } from "./risk-service";
 import { AlertService } from "./alert-service";
 import { getDeviceIdentifier, getDeviceName, getDeviceType } from "./device-info-service";
+import { getRiskLevelFromScore } from "../utils/risk-scoring";
 
 export interface PaymentRequest {
   id: string;
@@ -116,7 +117,16 @@ class PaymentLinkManager {
 
     const txnId: number = createRes.data.id;
     const risk = await RiskService.evaluateTransaction(txnId);
-    const isHigh = risk?.riskLevel === "HIGH";
+    const riskLevel: "LOW" | "MEDIUM" | "HIGH" =
+      risk?.riskLevel || getRiskLevelFromScore(risk?.riskScore);
+    const isHigh = riskLevel === "HIGH";
+
+    const txStatus: UserTransaction["status"] =
+      riskLevel === "HIGH"
+        ? "Risk detected"
+        : riskLevel === "MEDIUM"
+        ? "Held"
+        : "Safe";
 
     const newTx: UserTransaction = {
       id: String(txnId),
@@ -126,9 +136,9 @@ class PaymentLinkManager {
       date: "Just now",
       timestamp: new Date().toISOString(),
       paymentMethod: "UPI Direct",
-      status: isHigh ? "Risk detected" : risk ? "Safe" : "Held",
-      riskLevel: risk?.riskLevel,
-      riskScore: risk?.riskScore,
+      status: txStatus,
+      riskLevel: riskLevel,
+      riskScore: risk?.riskScore ?? 0,
       riskFactors: [],
       reasons: risk?.reasons || [],
     };

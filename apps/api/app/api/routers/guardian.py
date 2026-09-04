@@ -4,7 +4,7 @@
 
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -18,6 +18,10 @@ from app.schemas.guardian import (
     TrustedContactCreate,
     TrustedContactRead,
     UserOverrideRequest,
+)
+from app.services.payment_workflow_guard import (
+    enforce_guardian_stage,
+    resolve_candidate_stage,
 )
 
 router = APIRouter(prefix="/api/v1/guardian", tags=["guardian"])
@@ -49,7 +53,28 @@ def get_user_trusted_contacts(user_id: int, db: Session = Depends(get_db)) -> li
 
 
 @router.post("/requests", response_model=GuardianRequestRead, status_code=status.HTTP_201_CREATED)
-def trigger_guardian_request(payload: GuardianRequestCreate, db: Session = Depends(get_db)) -> GuardianRequestRead:
+def trigger_guardian_request(
+    payload: GuardianRequestCreate,
+    x_workflow_stage: Optional[str] = Header(None, alias="X-Workflow-Stage"),
+    db: Session = Depends(get_db),
+) -> GuardianRequestRead:
+    body_stage_provided = payload is not None and "stage" in payload.model_fields_set
+    body_stage = payload.stage if payload is not None else None
+
+    candidate_stage, stage_provided, conflict_err = resolve_candidate_stage(
+        body_stage=body_stage,
+        header_stage=x_workflow_stage,
+        body_stage_provided=body_stage_provided,
+    )
+    if conflict_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=conflict_err,
+        )
+
+    if stage_provided:
+        enforce_guardian_stage(candidate_stage)
+
     txn = transaction_repository.get_transaction(db, payload.transaction_id)
     if txn is None:
         raise HTTPException(status_code=404, detail=f"Transaction {payload.transaction_id} not found.")
@@ -246,7 +271,29 @@ def get_guardian_request_detail(request_id: int, db: Session = Depends(get_db)) 
 
 
 @router.post("/requests/{request_id}/approve")
-def approve_guardian_request(request_id: int, payload: Optional[GuardianActionRequest] = None, db: Session = Depends(get_db)) -> dict:
+def approve_guardian_request(
+    request_id: int,
+    payload: Optional[GuardianActionRequest] = None,
+    x_workflow_stage: Optional[str] = Header(None, alias="X-Workflow-Stage"),
+    db: Session = Depends(get_db),
+) -> dict:
+    body_stage_provided = payload is not None and "stage" in payload.model_fields_set
+    body_stage = payload.stage if payload is not None else None
+
+    candidate_stage, stage_provided, conflict_err = resolve_candidate_stage(
+        body_stage=body_stage,
+        header_stage=x_workflow_stage,
+        body_stage_provided=body_stage_provided,
+    )
+    if conflict_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=conflict_err,
+        )
+
+    if stage_provided:
+        enforce_guardian_stage(candidate_stage)
+
     req = guardian_repository.get_guardian_request(db, request_id)
     if req is None:
         raise HTTPException(status_code=404, detail=f"Guardian request {request_id} not found.")

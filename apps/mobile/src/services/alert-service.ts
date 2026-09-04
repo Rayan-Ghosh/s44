@@ -1,4 +1,4 @@
-import { ApiClient, IS_DEMO_MODE } from "./api-client";
+import { ApiClient, IS_DEMO_MODE, isDemoMode } from "./api-client";
 import { DEMO_ALERTS } from "../data/demo-data";
 import { AlertCategory } from "../types/alert";
 
@@ -63,7 +63,7 @@ class AlertManager {
 
   /** GET Alerts (Demo mode or API mode) */
   public async getAlerts(): Promise<SecurityAlert[]> {
-    if (IS_DEMO_MODE) {
+    if (isDemoMode()) {
       return [...this.alerts];
     }
 

@@ -53,3 +53,19 @@ class TransactionRead(BaseModel):
     risk_score: Optional[float] = 0.0
     risk_factors: Optional[list] = []
     reasons: Optional[list[str]] = []
+
+
+class AuthorizeTransactionRequest(BaseModel):
+    method: Optional[str] = Field(default="BIOMETRIC", description="Authorization method: BIOMETRIC or DEVICE_CREDENTIAL")
+    stage: Optional[str] = Field(default=None, description="Workflow stage: must be PAYMENT_AUTHORIZED")
+
+
+class SubmitTransactionRequest(BaseModel):
+    stage: Optional[str] = Field(default=None, description="Workflow stage: must be PAYMENT_SUBMITTED")
+    payment_app_used: Optional[str] = Field(default=None, description="Payment app used for dispatch, e.g. Google Pay UPI")
+
+
+class ConfirmTransactionRequest(BaseModel):
+    stage: Optional[str] = Field(default=None, description="Workflow stage: must be PAYMENT_COMPLETED")
+    payment_app_used: Optional[str] = Field(default=None, description="Payment app used, e.g. Google Pay UPI")
+

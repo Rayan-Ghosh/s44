@@ -1,5 +1,6 @@
 import { ApiClient } from "./api-client";
 import { DetectorResult, RiskLevel, RiskResult } from "../types/risk";
+import { PaymentWorkflowStage, PaymentWorkflowStageEnum } from "../types/transaction";
 
 /**
  * Real POST /api/v1/risk/evaluate — the authoritative fusion/decision engine
@@ -8,14 +9,30 @@ import { DetectorResult, RiskLevel, RiskResult } from "../types/risk";
  * before it can be evaluated.
  */
 export class RiskService {
-  static async evaluateTransaction(transactionId: number): Promise<RiskResult | null> {
-    const res = await ApiClient.post<any>("/api/v1/risk/evaluate", {
+  /**
+   * Builds the canonical payload for the risk evaluation API endpoint.
+   * Required stage: "EVALUATION_COMPLETED".
+   */
+  static buildEvaluationPayload(transactionId: number): {
+    transaction_id: number;
+    stage: PaymentWorkflowStage;
+  } {
+    return {
       transaction_id: transactionId,
-    });
+      stage: PaymentWorkflowStageEnum.EVALUATION_COMPLETED,
+    };
+  }
+
+  static async evaluateTransaction(transactionId: number): Promise<RiskResult | null> {
+    const payload = this.buildEvaluationPayload(transactionId);
+    const res = await ApiClient.post<any>("/api/v1/risk/evaluate", payload);
     if (!res.data) return null;
     return mapDecisionPackage(res.data);
   }
 }
+
+export const buildRiskEvaluationPayload = (transactionId: number) =>
+  RiskService.buildEvaluationPayload(transactionId);
 
 function mapDecisionPackage(pkg: any): RiskResult {
   const riskLevel: RiskLevel = pkg.risk_level || "LOW";
@@ -47,5 +64,7 @@ function mapDecisionPackage(pkg: any): RiskResult {
     detectors,
     reasons: pkg.plain_language_reasons || [],
     contributionsPct,
+    stage: (pkg.stage as PaymentWorkflowStage) || PaymentWorkflowStageEnum.EVALUATION_COMPLETED,
   };
 }
+

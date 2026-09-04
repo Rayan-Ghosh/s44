@@ -95,18 +95,18 @@ def test_risk_evaluation_and_transaction_actions():
     # 4. Confirm Transaction Action
     if risk_data.get("risk_level") == "HIGH":
         # Authoritative security check: un-authorized confirm must return 403
-        unauth_confirm = client.post(f"/api/v1/transactions/{tx_id}/confirm")
+        unauth_confirm = client.post(f"/api/v1/transactions/{tx_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
         assert unauth_confirm.status_code == 403
         # Authorize transaction with biometrics
         auth_res = client.post(f"/api/v1/transactions/{tx_id}/authorize", json={"method": "BIOMETRIC"})
         assert auth_res.status_code == 200
 
-        confirm_res = client.post(f"/api/v1/transactions/{tx_id}/confirm")
+        confirm_res = client.post(f"/api/v1/transactions/{tx_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
         assert confirm_res.status_code == 200
         assert confirm_res.json()["status"] == "CONFIRMED"
 
         # 5. Duplicate Confirm / Cancel on Confirmed Transaction is rejected (Bug 2 fix)
-        dup_confirm = client.post(f"/api/v1/transactions/{tx_id}/confirm")
+        dup_confirm = client.post(f"/api/v1/transactions/{tx_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
         assert dup_confirm.status_code == 400
         cancel_confirmed = client.post(f"/api/v1/transactions/{tx_id}/cancel")
         assert cancel_confirmed.status_code == 400

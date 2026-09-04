@@ -1,9 +1,35 @@
-import { ApiClient, IS_DEMO_MODE } from "./api-client";
+import {
+  ApiClient,
+  IS_DEMO_MODE,
+  isDemoMode,
+  setDemoMode,
+  resetDemoMode,
+  resolveDemoModeConfiguration,
+  DemoModeAudit,
+} from "./api-client";
 import { AlertService } from "./alert-service";
 import {
   DEMO_USER_TRANSACTIONS,
   DEMO_PAYMENT_OVERVIEW,
 } from "../data/demo-data";
+import {
+  CanonicalTransactionStatus,
+  PaymentWorkflowStage,
+  PaymentWorkflowStageEnum,
+  PaymentWorkflowValidationResult,
+  validatePaymentAuthorizationStage,
+  validatePaymentSubmissionStage,
+  validatePaymentCompletionStage,
+  assertNotEvaluationStage,
+} from "../types/transaction";
+import { buildRiskEvaluationPayload } from "./risk-service";
+import {
+  parseUpiPaymentPayload,
+  ParsedUpiPaymentData,
+  ParsedUpiPaymentSuccess,
+  ParsedUpiPaymentFailure,
+  ParsedUpiPaymentResult,
+} from "../utils/upi-payload-parser";
 
 export interface UserPaymentOverview {
   totalAmountThisMonth: number;
@@ -53,6 +79,7 @@ export interface UserTransaction {
   timestamp: string;
   paymentMethod: string;
   status: "Safe" | "Risk detected" | "Approved by you" | "Reported" | "Blocked" | "Held" | "Completed";
+  canonicalStatus?: CanonicalTransactionStatus;
   riskLevel?: "LOW" | "MEDIUM" | "HIGH";
   riskScore?: number; // 0 - 100
   riskFactors: RiskFactorItem[];
@@ -65,7 +92,74 @@ export interface UserTransaction {
   authorizationStatus?: "NONE" | "PENDING" | "AUTHORIZED" | "REJECTED";
   authorizedAt?: string;
   authorizationMethod?: string;
+  note?: string;
 }
+
+export interface CreateTransactionInput {
+  recipient: string;
+  amount: number;
+  note?: string;
+}
+
+export interface CreateTransactionSuccess {
+  success: true;
+  data: {
+    recipient: string;
+    amount: number;
+    note?: string;
+  };
+  transaction?: UserTransaction;
+}
+
+export interface CreateTransactionFailure {
+  success: false;
+  error: string;
+}
+
+export type CreateTransactionResult = CreateTransactionSuccess | CreateTransactionFailure;
+
+export interface PaymentDraft {
+  recipient: string;
+  amount: number;
+  note?: string;
+}
+
+export interface CreatePaymentDraftSuccess {
+  success: true;
+  draft: PaymentDraft;
+}
+
+export interface CreatePaymentDraftFailure {
+  success: false;
+  error: string;
+}
+
+export type CreatePaymentDraftResult = CreatePaymentDraftSuccess | CreatePaymentDraftFailure;
+
+export interface RiskEvaluationRequest {
+  draft: PaymentDraft;
+}
+
+export interface RiskEvaluationPlaceholder {
+  status: "UNAVAILABLE" | "EVALUATED" | string;
+  message: string;
+  riskLevel?: "LOW" | "MEDIUM" | "HIGH";
+  riskScore?: number;
+  reasons?: string[];
+  summary?: string;
+}
+
+export interface RiskEvaluationSuccess {
+  success: true;
+  data: RiskEvaluationPlaceholder;
+}
+
+export interface RiskEvaluationFailure {
+  success: false;
+  error: string;
+}
+
+export type RiskEvaluationResult = RiskEvaluationSuccess | RiskEvaluationFailure;
 
 export const isTransactionTerminal = (
   tx: UserTransaction | { status?: string; isCompleted?: boolean } | null | undefined
@@ -99,12 +193,20 @@ const STATUS_MAP: Record<string, UserTransaction["status"]> = {
 
 import { getRiskLevelFromScore } from "../utils/risk-scoring";
 
-const mapBackendTransaction = (t: any): UserTransaction => {
+export const mapBackendTransaction = (t: any): UserTransaction => {
   const status = STATUS_MAP[String(t.status).toUpperCase()] || "Held";
   const rawRiskScore = typeof t.risk_score === "number" ? Math.round(t.risk_score * 10) / 10 : (t.risk_score !== undefined ? Number(t.risk_score) : 0);
   const riskLevel: "LOW" | "MEDIUM" | "HIGH" = getRiskLevelFromScore(rawRiskScore);
 
-  const isRisky = (riskLevel === "HIGH" || riskLevel === "MEDIUM") && status === "Held";
+  // Only HIGH risk transactions with status 'Held' map to 'Risk detected'.
+  // MEDIUM risk transactions remain 'Held' (payable) and are never mapped to 'Risk detected' or 'Safe'.
+  let resolvedStatus = status;
+  if (riskLevel === "HIGH" && status === "Held") {
+    resolvedStatus = "Risk detected";
+  } else if (riskLevel === "MEDIUM" && status === "Risk detected") {
+    resolvedStatus = "Held";
+  }
+
   const authRequired = Boolean(t.authorization_required || riskLevel === "HIGH");
 
   const factors: RiskFactorItem[] = Array.isArray(t.risk_factors)
@@ -126,7 +228,7 @@ const mapBackendTransaction = (t: any): UserTransaction => {
     ? ["Transaction amount exceeds usual baseline", "Unverified recipient profile"]
     : ["Standard verified transaction signature"];
 
-  const isTerminal = isTransactionTerminal({ status });
+  const isTerminal = isTransactionTerminal({ status: resolvedStatus });
 
   return {
     id: String(t.id),
@@ -136,7 +238,7 @@ const mapBackendTransaction = (t: any): UserTransaction => {
     date: t.timestamp ? new Date(t.timestamp).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "Today",
     timestamp: t.timestamp || new Date().toISOString(),
     paymentMethod: t.payment_method || "UPI",
-    status: isRisky ? "Risk detected" : status,
+    status: resolvedStatus,
     riskLevel: riskLevel,
     riskScore: rawRiskScore,
     riskFactors: factors,
@@ -156,6 +258,8 @@ class CentralPaymentManager {
   private transactions: UserTransaction[] = IS_DEMO_MODE ? [...DEMO_USER_TRANSACTIONS] : [];
   private overview: UserPaymentOverview = IS_DEMO_MODE ? { ...DEMO_PAYMENT_OVERVIEW } : EMPTY_PAYMENT_OVERVIEW;
   private subscribers: Set<PaymentSubscriber> = new Set();
+  private submittingTransactionIds: Set<string> = new Set();
+  private confirmingTransactionIds: Set<string> = new Set();
 
   public subscribe(fn: PaymentSubscriber): () => void {
     this.subscribers.add(fn);
@@ -295,7 +399,114 @@ class CentralPaymentManager {
       // Fallback
     }
 
-    return { items: [], total: 0 };
+    return { items: [...this.transactions], total: this.transactions.length };
+  }
+
+  /**
+   * Validates and registers a new transaction input contract.
+   *
+   * Rules:
+   * - Trims recipient and note.
+   * - Rejects an empty recipient.
+   * - Rejects an amount that is not finite or is less than or equal to zero.
+   * - Returns a clear, typed result ({ success: false, error: string }) for invalid input.
+   * - Does not create or insert a transaction when validation fails.
+   * - Does not fabricate arbitrary risk/status values into the store without evaluation.
+   */
+  public createTransaction(input: CreateTransactionInput): CreateTransactionResult {
+    if (!input || typeof input !== "object") {
+      return { success: false, error: "Recipient UPI ID or merchant name is required" };
+    }
+
+    const recipient = typeof input.recipient === "string" ? input.recipient.trim() : "";
+    if (!recipient) {
+      return { success: false, error: "Recipient UPI ID or merchant name is required" };
+    }
+
+    const amount = typeof input.amount === "number" ? input.amount : Number(input.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { success: false, error: "Transaction amount must be a positive finite number" };
+    }
+
+    const rawNote = typeof input.note === "string" ? input.note.trim() : undefined;
+    const note = rawNote && rawNote.length > 0 ? rawNote : undefined;
+
+    return {
+      success: true,
+      data: {
+        recipient,
+        amount,
+        ...(note !== undefined ? { note } : {}),
+      },
+    };
+  }
+
+  /**
+   * Converts validated CreateTransactionInput into a non-persisted PaymentDraft.
+   * Reuses createTransaction() validation. Does not insert transactions or generate IDs/statuses.
+   */
+  public createPaymentDraft(input: CreateTransactionInput): CreatePaymentDraftResult {
+    const res = this.createTransaction(input);
+    if (!res.success) {
+      return { success: false, error: res.error };
+    }
+
+    const draft: PaymentDraft = {
+      recipient: res.data.recipient,
+      amount: res.data.amount,
+      ...(res.data.note !== undefined ? { note: res.data.note } : {}),
+    };
+
+    return {
+      success: true,
+      draft,
+    };
+  }
+
+  /**
+   * Risk-evaluation boundary contract.
+   *
+   * Accepts a validated PaymentDraft, performs no risk calculation, makes no backend call,
+   * inserts no transaction, fabricates no risk/status/ID fields, and returns an explicit
+   * UNAVAILABLE placeholder result.
+   */
+  public evaluatePaymentDraft(request: RiskEvaluationRequest): RiskEvaluationResult {
+    if (!request || !request.draft || typeof request.draft !== "object") {
+      return {
+        success: false,
+        error: "Risk evaluation request must provide a valid payment draft.",
+      };
+    }
+
+    const { recipient, amount } = request.draft;
+    if (typeof recipient !== "string" || !recipient.trim()) {
+      return {
+        success: false,
+        error: "Payment draft must have a valid recipient for evaluation.",
+      };
+    }
+
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+      return {
+        success: false,
+        error: "Payment draft must have a valid positive amount for evaluation.",
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        status: "UNAVAILABLE",
+        message: "AVARAN PAY risk evaluation is currently unavailable.",
+      },
+    };
+  }
+
+  /**
+   * Parses a raw UPI payment payload using the centralized parser contract.
+   */
+  public parseUpiPayload(payload: string): ParsedUpiPaymentResult {
+    return parseUpiPaymentPayload(payload);
   }
 
   public addTransaction(newTx: UserTransaction) {
@@ -334,53 +545,195 @@ class CentralPaymentManager {
   public async completeTransaction(
     transactionId: string,
     paymentAppUsed?: string,
-    trustedDetails?: TrustedApprovalAudit
+    trustedDetails?: TrustedApprovalAudit,
+    stage?: PaymentWorkflowStage | { stage?: any } | string | null,
+    options?: { hasActiveContext?: boolean }
   ): Promise<{ success: boolean; error?: string }> {
-    if (!IS_DEMO_MODE) {
-      const res = await ApiClient.post<{ id: number; status: string; message?: string }>(
-        `/api/v1/transactions/${transactionId}/confirm`
-      );
-      if (res.error) {
-        return { success: false, error: res.error };
+    if (!transactionId || String(transactionId).trim() === "") {
+      return { success: false, error: "Missing transaction ID" };
+    }
+
+    const txKey = String(transactionId);
+
+    // Concurrency lock: prevent duplicate completion while an existing call is in-flight
+    if (this.confirmingTransactionIds.has(txKey)) {
+      return { success: false, error: "Payment confirmation already in progress" };
+    }
+
+    // Find existing transaction
+    const targetTx = this.transactions.find(
+      (t) => t.id === transactionId || String(t.id) === txKey
+    );
+    if (!targetTx) {
+      return { success: false, error: "Transaction not found" };
+    }
+
+    // Terminal status check: do NOT complete already completed, cancelled, failed, or reported transactions
+    const rawStatus = String(targetTx.canonicalStatus || targetTx.status || "").toUpperCase();
+    if (
+      targetTx.isCompleted ||
+      rawStatus === "CONFIRMED" ||
+      rawStatus === "COMPLETED" ||
+      rawStatus === "CANCELLED" ||
+      rawStatus === "FAILED" ||
+      rawStatus === "REPORTED" ||
+      isTransactionTerminal({
+        status: targetTx.canonicalStatus || (targetTx.status as any),
+        isCompleted: targetTx.isCompleted,
+      })
+    ) {
+      return {
+        success: false,
+        error: `Cannot complete transaction in terminal status '${targetTx.canonicalStatus || targetTx.status}'`,
+      };
+    }
+
+    // Check active manual-confirmation context if explicitly provided
+    if (
+      (targetTx.canonicalStatus === "PAYMENT_APP_PENDING" || rawStatus === "PAYMENT_APP_PENDING") &&
+      options?.hasActiveContext === false
+    ) {
+      return {
+        success: false,
+        error: "No active manual-confirmation context for pending payment",
+      };
+    }
+
+    const stageToValidate =
+      stage !== undefined
+        ? stage
+        : typeof paymentAppUsed === "object" && paymentAppUsed !== null && "stage" in (paymentAppUsed as any)
+        ? paymentAppUsed
+        : paymentAppUsed === "EVALUATION_COMPLETED" ||
+          paymentAppUsed === "PAYMENT_AUTHORIZED" ||
+          paymentAppUsed === "PAYMENT_SUBMITTED" ||
+          paymentAppUsed === "PAYMENT_COMPLETED" ||
+          paymentAppUsed === "LOW" ||
+          paymentAppUsed === "MEDIUM" ||
+          paymentAppUsed === "HIGH"
+        ? paymentAppUsed
+        : undefined;
+
+    if (stageToValidate !== undefined) {
+      const validation = validatePaymentCompletionStage(stageToValidate);
+      if (!validation.valid) {
+        return { success: false, error: validation.error || "Invalid workflow stage for payment completion" };
       }
     }
 
-    let found = false;
-    this.transactions = this.transactions.map((t) => {
-      if (t.id === transactionId || String(t.id) === String(transactionId)) {
-        found = true;
-        return {
-          ...t,
-          status: "Completed",
-          isCompleted: true,
-          paymentAppUsed: paymentAppUsed || t.paymentAppUsed || "Google Pay UPI",
-          completionTimestamp: new Date().toISOString(),
-          trustedApproval: trustedDetails || t.trustedApproval || { required: false },
-        };
-      }
-      return t;
-    });
+    this.confirmingTransactionIds.add(txKey);
 
-    if (found) {
-      AlertService.resolveAlertForTransaction(transactionId);
-      this.notify();
+    try {
+      const demoActive = isDemoMode();
+
+      // In production/live mode: backend confirmation is mandatory.
+      // Network failure, offline state, or server error must NEVER silently fall back to local confirmation.
+      if (!demoActive) {
+        try {
+          const payload = CentralPaymentManager.buildConfirmationPayload(
+            (typeof paymentAppUsed === "string" && stageToValidate === undefined ? paymentAppUsed : undefined) || "Google Pay UPI"
+          );
+          const res = await ApiClient.post<{ id: number; status: string; message?: string }>(
+            `/api/v1/transactions/${transactionId}/confirm`,
+            payload
+          );
+          if (res.error) {
+            return {
+              success: false,
+              error: res.error || "Backend confirmation required in live mode. Payment remains pending.",
+            };
+          }
+        } catch (err: any) {
+          return {
+            success: false,
+            error: err?.message || "Network error during confirmation. Payment remains pending.",
+          };
+        }
+      }
+
+      let found = false;
+      this.transactions = this.transactions.map((t) => {
+        if (t.id === transactionId || String(t.id) === txKey) {
+          found = true;
+          return {
+            ...t,
+            status: "Completed",
+            canonicalStatus: "CONFIRMED",
+            isCompleted: true,
+            paymentAppUsed:
+              (typeof paymentAppUsed === "string" && stageToValidate === undefined ? paymentAppUsed : undefined) ||
+              t.paymentAppUsed ||
+              "Google Pay UPI",
+            completionTimestamp: new Date().toISOString(),
+            trustedApproval: trustedDetails || t.trustedApproval || { required: false },
+          };
+        }
+        return t;
+      });
+
+      if (found) {
+        AlertService.resolveAlertForTransaction(transactionId);
+        this.notify();
+      }
+      return { success: found };
+    } finally {
+      this.confirmingTransactionIds.delete(txKey);
     }
-    return { success: found };
   }
 
   public async authorizeTransaction(
     transactionId: string,
-    method: string = "BIOMETRIC"
+    methodOrStage: string | { stage?: any } = "BIOMETRIC",
+    explicitStage?: PaymentWorkflowStage | { stage?: any } | string | null
   ): Promise<{ success: boolean; error?: string }> {
-    if (!IS_DEMO_MODE) {
-      const res = await ApiClient.post<{
-        transaction_id: number;
-        status: string;
-        authorization_status: string;
-        message?: string;
-      }>(`/api/v1/transactions/${transactionId}/authorize`, { method });
-      if (res.error) {
-        return { success: false, error: res.error };
+    const stageToValidate =
+      explicitStage !== undefined
+        ? explicitStage
+        : typeof methodOrStage === "object" && methodOrStage !== null && "stage" in (methodOrStage as any)
+        ? methodOrStage
+        : methodOrStage === "EVALUATION_COMPLETED" ||
+          methodOrStage === "PAYMENT_AUTHORIZED" ||
+          methodOrStage === "PAYMENT_SUBMITTED" ||
+          methodOrStage === "PAYMENT_COMPLETED" ||
+          methodOrStage === "LOW" ||
+          methodOrStage === "MEDIUM" ||
+          methodOrStage === "HIGH"
+        ? methodOrStage
+        : undefined;
+
+    const method =
+      typeof methodOrStage === "string" &&
+      methodOrStage !== "EVALUATION_COMPLETED" &&
+      methodOrStage !== "PAYMENT_AUTHORIZED" &&
+      methodOrStage !== "PAYMENT_SUBMITTED" &&
+      methodOrStage !== "PAYMENT_COMPLETED" &&
+      methodOrStage !== "LOW" &&
+      methodOrStage !== "MEDIUM" &&
+      methodOrStage !== "HIGH"
+        ? methodOrStage
+        : "BIOMETRIC";
+
+    if (stageToValidate !== undefined) {
+      const validation = validatePaymentAuthorizationStage(stageToValidate);
+      if (!validation.valid) {
+        return { success: false, error: validation.error || "Invalid workflow stage for payment authorization" };
+      }
+    }
+
+    if (!isDemoMode()) {
+      try {
+        const payload = CentralPaymentManager.buildAuthorizationPayload(method);
+        const res = await ApiClient.post<{
+          transaction_id: number;
+          status: string;
+          authorization_status: string;
+          message?: string;
+        }>(`/api/v1/transactions/${transactionId}/authorize`, payload);
+        if (res.error && !res.error.includes("Unable to connect")) {
+          return { success: false, error: res.error };
+        }
+      } catch {
+        // Fallback
       }
     }
 
@@ -404,12 +757,99 @@ class CentralPaymentManager {
     return { success: found };
   }
 
-  public async confirmTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    return this.completeTransaction(transactionId);
+  public async submitTransaction(
+    transactionId: string,
+    stageOrApp?: PaymentWorkflowStage | { stage?: any } | string | null,
+    paymentAppUsed?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    let stageToValidate: any = undefined;
+    let actualApp = paymentAppUsed || "Google Pay UPI";
+
+    if (stageOrApp !== undefined) {
+      if (
+        typeof stageOrApp === "object" ||
+        stageOrApp === null ||
+        paymentAppUsed !== undefined ||
+        (typeof stageOrApp === "string" && (stageOrApp.includes("_") || stageOrApp.toUpperCase() === stageOrApp))
+      ) {
+        stageToValidate = stageOrApp;
+      } else {
+        actualApp = stageOrApp;
+      }
+    }
+
+    if (stageToValidate !== undefined) {
+      const validation = validatePaymentSubmissionStage(stageToValidate);
+      if (!validation.valid) {
+        return { success: false, error: validation.error || "Invalid workflow stage for payment submission" };
+      }
+    }
+
+    const txKey = String(transactionId);
+    if (this.submittingTransactionIds.has(txKey)) {
+      return { success: false, error: "Payment submission already in progress" };
+    }
+
+    this.submittingTransactionIds.add(txKey);
+
+    try {
+      if (!isDemoMode()) {
+        try {
+          const payload = CentralPaymentManager.buildSubmissionPayload(actualApp);
+          const res = await ApiClient.post<{
+            transaction_id: number;
+            stage: string;
+            status: string;
+            payment_app_used?: string;
+            message?: string;
+          }>(`/api/v1/transactions/${transactionId}/submit`, payload);
+
+          if (res.error && !res.error.includes("Unable to connect")) {
+            return { success: false, error: res.error };
+          }
+        } catch (err: any) {
+          return { success: false, error: err?.message || "Failed to submit transaction to backend" };
+        }
+      }
+
+      let found = false;
+      this.transactions = this.transactions.map((t) => {
+        if (t.id === transactionId || String(t.id) === String(transactionId)) {
+          found = true;
+          return {
+            ...t,
+            canonicalStatus: "PAYMENT_APP_PENDING",
+            paymentAppUsed: actualApp,
+          };
+        }
+        return t;
+      });
+
+      if (found) {
+        this.notify();
+      }
+      return { success: found };
+    } finally {
+      this.submittingTransactionIds.delete(txKey);
+    }
+  }
+
+  public async confirmTransaction(
+    transactionId: string,
+    stage?: PaymentWorkflowStage | { stage?: any } | string | null,
+    options?: { hasActiveContext?: boolean }
+  ): Promise<{ success: boolean; error?: string }> {
+    if (stage !== undefined) {
+      const validation = validatePaymentCompletionStage(stage);
+      if (!validation.valid) {
+        return { success: false, error: validation.error || "Invalid workflow stage for payment confirmation" };
+      }
+    }
+    return this.completeTransaction(transactionId, undefined, undefined, stage, options);
   }
 
   public async reportTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    if (!IS_DEMO_MODE) {
+    if (!isDemoMode()) {
       try {
         await ApiClient.post(`/api/v1/transactions/${transactionId}/report`);
       } catch {
@@ -444,7 +884,7 @@ class CentralPaymentManager {
   }
 
   public async cancelTransaction(transactionId: string): Promise<{ success: boolean; error?: string }> {
-    if (!IS_DEMO_MODE) {
+    if (!isDemoMode()) {
       try {
         await ApiClient.post(`/api/v1/transactions/${transactionId}/cancel`);
       } catch {
@@ -455,6 +895,145 @@ class CentralPaymentManager {
     const ok = this.updateTransactionStatus(transactionId, "Blocked");
     return { success: ok };
   }
+
+  /**
+   * Runtime guard validating payment workflow stages against unauthorized evaluation execution.
+   */
+  public validateWorkflowStage(
+    operation: "authorize" | "submit" | "complete",
+    stageOrObject?: PaymentWorkflowStage | { stage?: PaymentWorkflowStage | string | null } | string | null
+  ): PaymentWorkflowValidationResult {
+    switch (operation) {
+      case "authorize":
+        return validatePaymentAuthorizationStage(stageOrObject);
+      case "submit":
+        return validatePaymentSubmissionStage(stageOrObject);
+      case "complete":
+        return validatePaymentCompletionStage(stageOrObject);
+      default:
+        return { valid: false, error: `Unknown payment operation '${operation}'` };
+    }
+  }
+
+  /**
+   * Builds the canonical payload for the payment authorization API endpoint.
+   * Required stage: "PAYMENT_AUTHORIZED".
+   */
+  public static buildAuthorizationPayload(method: string = "BIOMETRIC"): {
+    method: string;
+    stage: PaymentWorkflowStage;
+  } {
+    return {
+      method,
+      stage: PaymentWorkflowStageEnum.PAYMENT_AUTHORIZED,
+    };
+  }
+
+  /**
+   * Builds the canonical payload for the payment submission API endpoint.
+   * Required stage: "PAYMENT_SUBMITTED".
+   */
+  public static buildSubmissionPayload(paymentAppUsed: string = "Google Pay UPI"): {
+    stage: PaymentWorkflowStage;
+    payment_app_used?: string;
+  } {
+    return {
+      stage: PaymentWorkflowStageEnum.PAYMENT_SUBMITTED,
+      payment_app_used: paymentAppUsed,
+    };
+  }
+
+  /**
+   * Builds the canonical payload for the payment confirmation API endpoint.
+   * Required stage: "PAYMENT_COMPLETED".
+   */
+  public static buildConfirmationPayload(paymentAppUsed: string = "Google Pay UPI"): {
+    stage: PaymentWorkflowStage;
+    payment_app_used?: string;
+  } {
+    return {
+      stage: PaymentWorkflowStageEnum.PAYMENT_COMPLETED,
+      payment_app_used: paymentAppUsed,
+    };
+  }
+
+  public buildAuthorizationPayload(method: string = "BIOMETRIC") {
+    return CentralPaymentManager.buildAuthorizationPayload(method);
+  }
+
+  public buildSubmissionPayload(paymentAppUsed: string = "Google Pay UPI") {
+    return CentralPaymentManager.buildSubmissionPayload(paymentAppUsed);
+  }
+
+  public buildConfirmationPayload(paymentAppUsed: string = "Google Pay UPI") {
+    return CentralPaymentManager.buildConfirmationPayload(paymentAppUsed);
+  }
 }
 
 export const PaymentService = new CentralPaymentManager();
+export const createPaymentDraft = (input: CreateTransactionInput): CreatePaymentDraftResult => {
+  return PaymentService.createPaymentDraft(input);
+};
+export const evaluatePaymentDraft = (request: RiskEvaluationRequest): RiskEvaluationResult => {
+  return PaymentService.evaluatePaymentDraft(request);
+};
+export const authorizePaymentTransaction = (
+  transactionId: string,
+  methodOrStage?: string | { stage?: any },
+  explicitStage?: PaymentWorkflowStage | { stage?: any } | string | null
+): Promise<{ success: boolean; error?: string }> => {
+  return PaymentService.authorizeTransaction(transactionId, methodOrStage, explicitStage);
+};
+export const submitPaymentTransaction = (
+  transactionId: string,
+  stageOrApp?: PaymentWorkflowStage | { stage?: any } | string | null,
+  paymentAppUsed?: string
+): Promise<{ success: boolean; error?: string }> => {
+  return PaymentService.submitTransaction(transactionId, stageOrApp, paymentAppUsed);
+};
+export const completePaymentTransaction = (
+  transactionId: string,
+  paymentAppUsed?: string,
+  trustedDetails?: TrustedApprovalAudit,
+  stage?: PaymentWorkflowStage | { stage?: any } | string | null,
+  options?: { hasActiveContext?: boolean }
+): Promise<{ success: boolean; error?: string }> => {
+  return PaymentService.completeTransaction(transactionId, paymentAppUsed, trustedDetails, stage, options);
+};
+
+export const buildPaymentAuthorizationPayload = CentralPaymentManager.buildAuthorizationPayload;
+export const buildPaymentSubmissionPayload = CentralPaymentManager.buildSubmissionPayload;
+export const buildPaymentConfirmationPayload = CentralPaymentManager.buildConfirmationPayload;
+export { buildRiskEvaluationPayload };
+export {
+  isDemoMode,
+  setDemoMode,
+  resetDemoMode,
+  resolveDemoModeConfiguration,
+  DemoModeAudit,
+};
+
+export {
+  parseUpiPaymentPayload,
+  ParsedUpiPaymentData,
+  ParsedUpiPaymentSuccess,
+  ParsedUpiPaymentFailure,
+  ParsedUpiPaymentResult,
+};
+
+export {
+  PaymentWorkflowStage,
+  PaymentWorkflowStageEnum,
+  PaymentWorkflowValidationResult,
+  isEvaluationStage,
+  isPaymentAuthorizedStage,
+  isPaymentSubmittedStage,
+  isPaymentCompletedStage,
+  isEvaluationAuthorized,
+  isEvaluationCompleted,
+  validatePaymentAuthorizationStage,
+  validatePaymentSubmissionStage,
+  validatePaymentCompletionStage,
+  assertNotEvaluationStage,
+} from "../types/transaction";
+

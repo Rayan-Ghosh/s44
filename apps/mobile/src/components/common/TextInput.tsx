@@ -17,6 +17,7 @@ import { spacing, radii } from "../../theme/layout";
 export interface TextInputProps extends RNTextInputProps {
   label?: string;
   icon?: keyof typeof Ionicons.glyphMap;
+  prefix?: string;
   rightIcon?: keyof typeof Ionicons.glyphMap;
   onRightIconPress?: () => void;
   error?: string;
@@ -27,6 +28,7 @@ export interface TextInputProps extends RNTextInputProps {
 export const TextInput: React.FC<TextInputProps> = ({
   label,
   icon,
+  prefix,
   rightIcon,
   onRightIconPress,
   error,
@@ -58,6 +60,11 @@ export const TextInput: React.FC<TextInputProps> = ({
             color={isFocused ? colors.textPrimary : colors.textMuted}
             style={styles.leftIcon}
           />
+        )}
+        {prefix && (
+          <Text style={[styles.prefixText, isFocused && styles.prefixTextFocused]}>
+            {prefix}
+          </Text>
         )}
         <RNTextInput
           style={[styles.input, style]}
@@ -128,6 +135,17 @@ const styles = StyleSheet.create({
   },
   leftIcon: {
     marginRight: spacing.sm,
+  },
+  prefixText: {
+    ...typography.bodySemibold,
+    fontSize: 16,
+    color: colors.textSecondary,
+    marginRight: 6,
+    lineHeight: 20,
+    alignSelf: "center",
+  },
+  prefixTextFocused: {
+    color: colors.textPrimary,
   },
   input: {
     flex: 1,

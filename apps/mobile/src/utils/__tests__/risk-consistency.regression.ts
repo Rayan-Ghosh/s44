@@ -77,18 +77,53 @@ function runCase(score: number, expectedLevel: RiskLevel) {
 // never HIGH on any card.
 runCase(32, "MEDIUM");
 
-// Boundary and representative cases, including two values that were
-// previously hardcoded wrong in apps/mobile/src/data/demo-data.ts
-// (62.5 mislabeled MEDIUM, 38 mislabeled LOW) before this fix.
-runCase(0, "LOW");
-runCase(30, "LOW");
-runCase(31, "MEDIUM");
-runCase(38, "MEDIUM");
-runCase(60, "MEDIUM");
-runCase(61, "HIGH");
-runCase(62.5, "HIGH");
-runCase(78, "HIGH");
-runCase(100, "HIGH");
+// =========================================================================
+// PART 1: EXACT RISK THRESHOLD BOUNDARY TESTS
+// Rules:
+//   0–30   = LOW
+//   31–60  = MEDIUM
+//   61–100 = HIGH
+// The HIGH threshold must be 61, not 60.
+// =========================================================================
+console.log("\n================ PART 1 BOUNDARY CHECKS ================");
+runCase(0, "LOW");      // Boundary: minimum LOW
+runCase(30, "LOW");     // Boundary: maximum LOW (score 30 -> LOW)
+runCase(31, "MEDIUM");  // Boundary: minimum MEDIUM (score 31 -> MEDIUM)
+runCase(38, "MEDIUM");  // Representative MEDIUM
+runCase(60, "MEDIUM");  // Boundary: maximum MEDIUM (score 60 -> MEDIUM)
+runCase(61, "HIGH");    // Boundary: minimum HIGH (score 61 -> HIGH, not 60)
+runCase(62.5, "HIGH");  // Representative HIGH
+runCase(78, "HIGH");    // Representative HIGH
+runCase(100, "HIGH");   // Boundary: maximum HIGH (score 100 -> HIGH)
+
+// =========================================================================
+// PART 4A: HISTORY DETAIL RISK CLASSIFICATION CHECKS
+// Rules:
+//   Score 30 → LOW
+//   Score 31 → MEDIUM
+//   Score 60 → MEDIUM
+//   Score 61 → HIGH
+//   Score 75 → HIGH (previously hardcoded >= 75 cutoff now uses getRiskLevelFromScore)
+// =========================================================================
+console.log("\n================ PART 4A HISTORY DETAIL CHECKS ================");
+function historyRiskEngineDecision(score: number): "Confirm / Cancel Flag" | "Standard Allow" {
+  return getRiskLevelFromScore(score) === "HIGH" ? "Confirm / Cancel Flag" : "Standard Allow";
+}
+
+assertEqual(getRiskLevelFromScore(30), "LOW", "History Score 30 -> LOW");
+assertEqual(historyRiskEngineDecision(30), "Standard Allow", "History Score 30 Decision -> Standard Allow");
+
+assertEqual(getRiskLevelFromScore(31), "MEDIUM", "History Score 31 -> MEDIUM");
+assertEqual(historyRiskEngineDecision(31), "Standard Allow", "History Score 31 Decision -> Standard Allow");
+
+assertEqual(getRiskLevelFromScore(60), "MEDIUM", "History Score 60 -> MEDIUM");
+assertEqual(historyRiskEngineDecision(60), "Standard Allow", "History Score 60 Decision -> Standard Allow");
+
+assertEqual(getRiskLevelFromScore(61), "HIGH", "History Score 61 -> HIGH");
+assertEqual(historyRiskEngineDecision(61), "Confirm / Cancel Flag", "History Score 61 Decision -> Confirm / Cancel Flag");
+
+assertEqual(getRiskLevelFromScore(75), "HIGH", "History Score 75 -> HIGH");
+assertEqual(historyRiskEngineDecision(75), "Confirm / Cancel Flag", "History Score 75 Decision -> Confirm / Cancel Flag");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
 if (failures > 0) {

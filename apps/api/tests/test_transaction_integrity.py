@@ -95,7 +95,7 @@ def test_unchanged_transaction_authorizes_and_confirms(client: TestClient, integ
     assert "integrity_hash" in auth_resp.json()
 
     # 2. Confirm without modifications -> must succeed
-    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
+    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm_resp.status_code == 200
     assert confirm_resp.json()["status"] == TransactionStatus.CONFIRMED.value
 
@@ -123,7 +123,7 @@ def test_amount_tamper_detected_and_invalidates_authorization(client: TestClient
     db_session.commit()
 
     # 3. Confirmation attempt must be rejected with 409 Conflict
-    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
+    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm_resp.status_code == 409
     assert "Transaction details changed after security approval" in confirm_resp.json()["detail"]
 
@@ -156,7 +156,7 @@ def test_recipient_tamper_detected(client: TestClient, integrity_setup: dict, db
     db_session.commit()
 
     # Confirm fails
-    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
+    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm_resp.status_code == 409
 
 
@@ -180,7 +180,7 @@ def test_payment_method_tamper_detected(client: TestClient, integrity_setup: dic
     txn.payment_method = "IMPS_DIRECT"
     db_session.commit()
 
-    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
+    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm_resp.status_code == 409
 
 
@@ -218,7 +218,7 @@ def test_cross_transaction_replay_prevention(client: TestClient, integrity_setup
     db_session.commit()
 
     # Confirming Tx 2 must fail with 409
-    confirm2 = client.post(f"/api/v1/transactions/{txn2.id}/confirm")
+    confirm2 = client.post(f"/api/v1/transactions/{txn2.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm2.status_code == 409
 
 

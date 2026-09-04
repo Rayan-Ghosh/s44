@@ -1,3 +1,5 @@
+import type { PaymentWorkflowStage } from "./transaction";
+
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
 export type Decision = "ALLOW" | "WARN" | "CONFIRM_OR_CANCEL";
@@ -26,4 +28,6 @@ export interface RiskResult {
   detectors: DetectorResult[];
   reasons: string[];
   contributionsPct: Record<string, number>;
+  stage?: PaymentWorkflowStage;
 }
+

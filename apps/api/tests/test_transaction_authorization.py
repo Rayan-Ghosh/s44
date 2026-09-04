@@ -91,7 +91,7 @@ def test_low_risk_transaction_proceeds_without_authorization(
     db_session.refresh(txn)
 
     # Confirm directly without authorization
-    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
+    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm_resp.status_code == 200
     assert confirm_resp.json()["status"] == TransactionStatus.CONFIRMED.value
 
@@ -114,7 +114,7 @@ def test_high_risk_transaction_blocks_confirmation_without_authorization(
     db_session.refresh(txn)
 
     # Attempt to confirm without prior authorization -> MUST return HTTP 403 Forbidden
-    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
+    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm_resp.status_code == 403
     assert "High-risk transaction requires biometric authorization" in confirm_resp.json()["detail"]
 
@@ -146,7 +146,7 @@ def test_high_risk_transaction_authorizes_and_completes(
     assert data["status"] == TransactionStatus.AUTHORIZED.value
 
     # Now confirm the authorized transaction
-    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm")
+    confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm_resp.status_code == 200
     assert confirm_resp.json()["status"] == TransactionStatus.CONFIRMED.value
 
@@ -180,10 +180,10 @@ def test_authorization_isolation_between_transactions(
     client.post(f"/api/v1/transactions/{txn1.id}/authorize", json={"method": "BIOMETRIC"})
 
     # Tx 1 confirms successfully
-    assert client.post(f"/api/v1/transactions/{txn1.id}/confirm").status_code == 200
+    assert client.post(f"/api/v1/transactions/{txn1.id}/confirm", json={"stage": "PAYMENT_COMPLETED"}).status_code == 200
 
     # Tx 2 must STILL be blocked (cannot reuse Tx 1's authorization)
-    assert client.post(f"/api/v1/transactions/{txn2.id}/confirm").status_code == 403
+    assert client.post(f"/api/v1/transactions/{txn2.id}/confirm", json={"stage": "PAYMENT_COMPLETED"}).status_code == 403
 
 
 def test_terminal_transaction_rejects_authorization(

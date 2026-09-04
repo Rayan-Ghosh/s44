@@ -70,7 +70,7 @@ const TAB_CONFIGS: TabConfig[] = [
   },
   {
     name: "Payments",
-    label: "Payments",
+    label: "AVARAN PAY",
     iconName: "card",
     outlineIconName: "card-outline",
   },

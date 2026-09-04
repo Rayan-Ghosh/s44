@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   AppState,
   AppStateStatus,
+  Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../theme/colors";
@@ -25,14 +26,26 @@ import {
   ConnectedAppsService,
   ConnectedApp,
 } from "../../services/connected-apps-service";
-import { UserTransaction } from "../../services/payment-service";
+import {
+  UserTransaction,
+  PaymentWorkflowStage,
+  validatePaymentSubmissionStage,
+  validatePaymentCompletionStage,
+  PaymentService,
+} from "../../services/payment-service";
+import {
+  GlobalUpiReturnManager,
+  UPI_RETURN_PROMPT_MESSAGE,
+  validateManualConfirmationEligibility,
+} from "../../utils/upi-return-handler";
 
 interface ChoosePaymentAppModalProps {
   visible: boolean;
   transaction: UserTransaction | null;
   onClose: () => void;
-  onPaymentCompleted: (transactionId: string) => Promise<{ success: boolean; error?: string } | any> | any;
+  onPaymentCompleted: (transactionId: string, stage?: any, options?: any) => Promise<{ success: boolean; error?: string } | any> | any;
   onShowToast: (message: string, type?: "info" | "success" | "warning") => void;
+  workflowStage?: PaymentWorkflowStage | { stage?: any } | string | null;
 }
 
 interface CombinedPaymentAppOption {
@@ -53,6 +66,7 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
   onClose,
   onPaymentCompleted,
   onShowToast,
+  workflowStage,
 }) => {
   const [appOptions, setAppOptions] = useState<CombinedPaymentAppOption[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -63,15 +77,21 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const hasLaunchedExternalAppRef = useRef<boolean>(false);
+  const isConfirmingRef = useRef<boolean>(false);
 
   // Sync with ConnectedAppsService & device installed apps
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      isConfirmingRef.current = false;
+      GlobalUpiReturnManager.clearAwaitingReturn();
+      return;
+    }
 
     setIsAwaitingReturn(false);
     setLaunchingAppId(null);
     setSelectedApp(null);
     hasLaunchedExternalAppRef.current = false;
+    isConfirmingRef.current = false;
     setIsLoading(true);
 
     const refreshAppList = async (connectedList: ConnectedApp[]) => {
@@ -113,33 +133,70 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
     };
   }, [visible]);
 
-  // AppState & Web window focus/visibility listeners to detect return from external payment application
+  // AppState, Linking deep-link, and Web window focus/visibility listeners to detect return safely
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !transaction) return;
 
-    const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
-      if (
-        appStateRef.current.match(/inactive|background/) &&
-        nextAppState === "active" &&
-        hasLaunchedExternalAppRef.current
-      ) {
-        setIsAwaitingReturn(true);
+    const processReturn = (incomingUrl?: string | null) => {
+      // Must be awaiting return for this transaction
+      if (!GlobalUpiReturnManager.isAwaiting(String(transaction.id))) {
+        return;
       }
+
+      const returnOutcome = GlobalUpiReturnManager.handleAppReturn(incomingUrl, transaction);
+      if (returnOutcome.handled && returnOutcome.shouldPromptUser) {
+        setIsAwaitingReturn(true);
+        onShowToast(returnOutcome.message || UPI_RETURN_PROMPT_MESSAGE, "info");
+      }
+    };
+
+    const appStateSub = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+      const isComingFromBackground =
+        appStateRef.current.match(/inactive|background/) && nextAppState === "active";
       appStateRef.current = nextAppState;
+
+      if (
+        isComingFromBackground &&
+        (hasLaunchedExternalAppRef.current || GlobalUpiReturnManager.isAwaiting(String(transaction.id)))
+      ) {
+        processReturn(null);
+      }
     });
+
+    const linkingSub = Linking.addEventListener("url", (event: { url: string }) => {
+      if (event?.url) {
+        processReturn(event.url);
+      }
+    });
+
+    Linking.getInitialURL()
+      .then((initialUrl) => {
+        if (initialUrl) {
+          processReturn(initialUrl);
+        }
+      })
+      .catch(() => {
+        // Ignore initial url read error
+      });
 
     let handleVisibilityChange: (() => void) | undefined;
     let handleWindowFocus: (() => void) | undefined;
 
     if (Platform.OS === "web" && typeof document !== "undefined") {
       handleVisibilityChange = () => {
-        if (!document.hidden && hasLaunchedExternalAppRef.current) {
-          setIsAwaitingReturn(true);
+        if (
+          !document.hidden &&
+          (hasLaunchedExternalAppRef.current || GlobalUpiReturnManager.isAwaiting(String(transaction.id)))
+        ) {
+          processReturn(null);
         }
       };
       handleWindowFocus = () => {
-        if (hasLaunchedExternalAppRef.current) {
-          setIsAwaitingReturn(true);
+        if (
+          hasLaunchedExternalAppRef.current ||
+          GlobalUpiReturnManager.isAwaiting(String(transaction.id))
+        ) {
+          processReturn(null);
         }
       };
       document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -147,7 +204,8 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
     }
 
     return () => {
-      subscription.remove();
+      appStateSub.remove();
+      linkingSub.remove();
       if (Platform.OS === "web" && typeof document !== "undefined") {
         if (handleVisibilityChange) {
           document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -157,7 +215,7 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
         }
       }
     };
-  }, [visible]);
+  }, [visible, transaction, onShowToast]);
 
   if (!transaction) return null;
 
@@ -173,6 +231,18 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
   };
 
   const handleSelectApp = async (app: CombinedPaymentAppOption) => {
+    if (launchingAppId !== null || !transaction) {
+      return;
+    }
+
+    if (workflowStage !== undefined) {
+      const stageValidation = validatePaymentSubmissionStage(workflowStage);
+      if (!stageValidation.valid) {
+        onShowToast(stageValidation.error || "Cannot submit payment from this stage", "warning");
+        return;
+      }
+    }
+
     if (!app.isEnabledInProfile) {
       onShowToast(`${app.name} is paused in Connected Apps. Enable in Profile.`, "info");
       return;
@@ -185,8 +255,27 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
 
     setLaunchingAppId(app.id);
     setSelectedApp(app);
-    onShowToast(`Opening ${app.name}...`, "info");
+    onShowToast(`Submitting payment to ${app.name}...`, "info");
 
+    const stageToSend: PaymentWorkflowStage =
+      (typeof workflowStage === "string" ? workflowStage : workflowStage?.stage) || "PAYMENT_SUBMITTED";
+
+    // 1. Submit transaction to backend before launching external UPI app
+    const submitResult = await PaymentService.submitTransaction(
+      String(transaction.id),
+      stageToSend,
+      app.name
+    );
+
+    if (!submitResult.success) {
+      setLaunchingAppId(null);
+      setSelectedApp(null);
+      onShowToast(submitResult.error || "Failed to submit payment to server", "warning");
+      return;
+    }
+
+    // 2. Only after successful backend submission response, launch external UPI app
+    onShowToast(`Opening ${app.name}...`, "info");
     const result = await PaymentAppLauncherService.launchPaymentApp(
       {
         id: app.id,
@@ -197,13 +286,15 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
         isInstalled: app.isInstalled,
         isSupported: true,
       },
-      upiDetails
+      upiDetails,
+      stageToSend
     );
 
     setLaunchingAppId(null);
 
     if (result.success) {
       hasLaunchedExternalAppRef.current = true;
+      GlobalUpiReturnManager.startAwaitingReturn(String(transaction.id));
       setIsAwaitingReturn(true);
       onShowToast(`${app.name} opened. Complete payment and return to AVARAN.`, "success");
     } else {
@@ -211,26 +302,70 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
     }
   };
 
+  const handleClose = () => {
+    if (isConfirmingCompletion || isConfirmingRef.current) return;
+    GlobalUpiReturnManager.clearAwaitingReturn();
+    onClose();
+  };
+
   const handleConfirmCompletion = async () => {
-    if (isConfirmingCompletion || !transaction) return;
+    if (isConfirmingCompletion || isConfirmingRef.current || !transaction) return;
+
+    const hasActiveContext =
+      isAwaitingReturn && GlobalUpiReturnManager.isAwaiting(String(transaction.id));
+
+    const eligibility = validateManualConfirmationEligibility(transaction, {
+      hasActiveContext,
+      stage: workflowStage || "PAYMENT_COMPLETED",
+    });
+
+    if (!eligibility.eligible) {
+      onShowToast(eligibility.error || "Cannot complete payment from this stage", "warning");
+      return;
+    }
+
+    if (!GlobalUpiReturnManager.startConfirming(String(transaction.id))) {
+      return;
+    }
+
+    isConfirmingRef.current = true;
     setIsConfirmingCompletion(true);
+
     try {
-      const res = await onPaymentCompleted(transaction.id);
+      const res = await onPaymentCompleted(
+        String(transaction.id),
+        "PAYMENT_COMPLETED",
+        { hasActiveContext: true }
+      );
+
       if (res && typeof res === "object" && (res as any).success === false) {
         onShowToast((res as any).error || "Failed to confirm payment on server", "warning");
         setIsConfirmingCompletion(false);
+        isConfirmingRef.current = false;
+        GlobalUpiReturnManager.finishConfirming(String(transaction.id));
         return;
       }
+
+      GlobalUpiReturnManager.finishConfirming(String(transaction.id));
+      GlobalUpiReturnManager.clearAwaitingReturn();
+      setIsAwaitingReturn(false);
       onShowToast("✓ Payment verified & marked as completed", "success");
       onClose();
     } catch (err: any) {
       onShowToast(err?.message || "Failed to confirm payment", "warning");
+      setIsConfirmingCompletion(false);
+      isConfirmingRef.current = false;
+      GlobalUpiReturnManager.finishConfirming(String(transaction.id));
     } finally {
       setIsConfirmingCompletion(false);
+      isConfirmingRef.current = false;
+      GlobalUpiReturnManager.finishConfirming(String(transaction?.id));
     }
   };
 
   const handleCancelCompletion = () => {
+    if (isConfirmingCompletion || isConfirmingRef.current) return;
+    GlobalUpiReturnManager.clearAwaitingReturn();
     setIsAwaitingReturn(false);
     onShowToast("Payment incomplete. You can retry or choose another app.", "info");
   };
@@ -240,9 +375,9 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
-      <TouchableWithoutFeedback onPress={onClose}>
+      <TouchableWithoutFeedback onPress={handleClose}>
         <View style={styles.backdrop}>
           <TouchableWithoutFeedback>
             <View style={styles.modalCard}>
@@ -264,7 +399,7 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
                   </View>
                 </View>
                 <TouchableOpacity
-                  onPress={onClose}
+                  onPress={handleClose}
                   style={styles.closeBtn}
                   accessibilityRole="button"
                   accessibilityLabel="Close"
@@ -286,17 +421,31 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
 
                   <View style={styles.returnActionsRow}>
                     <TouchableOpacity
-                      style={styles.completeBtn}
+                      style={[
+                        styles.completeBtn,
+                        isConfirmingCompletion && styles.completeBtnDisabled,
+                      ]}
                       onPress={handleConfirmCompletion}
+                      disabled={isConfirmingCompletion}
                       activeOpacity={0.8}
                     >
-                      <Ionicons name="checkmark-done" size={16} color={colors.btnPrimaryText} style={{ marginRight: 6 }} />
-                      <Text style={styles.completeBtnText}>YES — PAYMENT COMPLETED</Text>
+                      {isConfirmingCompletion ? (
+                        <ActivityIndicator size="small" color={colors.btnPrimaryText} style={{ marginRight: 6 }} />
+                      ) : (
+                        <Ionicons name="checkmark-done" size={16} color={colors.btnPrimaryText} style={{ marginRight: 6 }} />
+                      )}
+                      <Text style={styles.completeBtnText}>
+                        {isConfirmingCompletion ? "VERIFYING PAYMENT..." : "YES — PAYMENT COMPLETED"}
+                      </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={styles.notCompletedBtn}
+                      style={[
+                        styles.notCompletedBtn,
+                        isConfirmingCompletion && styles.btnDisabled,
+                      ]}
                       onPress={handleCancelCompletion}
+                      disabled={isConfirmingCompletion}
                       activeOpacity={0.8}
                     >
                       <Text style={styles.notCompletedBtnText}>NO — PAYMENT NOT COMPLETED</Text>
@@ -683,5 +832,11 @@ const styles = StyleSheet.create({
     ...typography.smallSemibold,
     color: colors.textSecondary,
     fontSize: 13,
+  },
+  completeBtnDisabled: {
+    opacity: 0.6,
+  },
+  btnDisabled: {
+    opacity: 0.5,
   },
 });

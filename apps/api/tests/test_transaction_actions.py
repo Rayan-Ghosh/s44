@@ -13,7 +13,7 @@ def _create_txn(client):
 
 def test_confirm_transaction_endpoint(client):
     txn_id = _create_txn(client)
-    res = client.post(f"/api/v1/transactions/{txn_id}/confirm")
+    res = client.post(f"/api/v1/transactions/{txn_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert res.status_code == 200
     assert res.json()["status"] == "CONFIRMED"
 
@@ -46,12 +46,12 @@ def test_cannot_confirm_or_cancel_already_confirmed_transaction(client):
     txn_id = _create_txn(client)
 
     # 1. First confirmation succeeds
-    res1 = client.post(f"/api/v1/transactions/{txn_id}/confirm")
+    res1 = client.post(f"/api/v1/transactions/{txn_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert res1.status_code == 200
     assert res1.json()["status"] == "CONFIRMED"
 
     # 2. Repeated confirmation must fail with 400 Bad Request
-    res2 = client.post(f"/api/v1/transactions/{txn_id}/confirm")
+    res2 = client.post(f"/api/v1/transactions/{txn_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert res2.status_code == 400
     assert "terminal status" in res2.json()["detail"].lower()
 

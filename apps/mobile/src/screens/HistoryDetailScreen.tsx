@@ -30,7 +30,7 @@ export const HistoryDetailScreen: React.FC = () => {
   const isPayment = item.type === "payment";
   const payment = isPayment ? (item as PaymentHistoryItem) : null;
   const call = !isPayment ? (item as CallHistoryItem) : null;
-  const itemLevel = item.riskLevel || getRiskLevelFromScore(item.riskScore);
+  const itemLevel = typeof item.riskScore === "number" ? getRiskLevelFromScore(item.riskScore) : (item.riskLevel || "LOW");
 
   return (
     <View style={styles.screen}>
@@ -83,7 +83,7 @@ export const HistoryDetailScreen: React.FC = () => {
             <View style={styles.row}>
               <Text style={styles.label}>Risk Engine Decision</Text>
               <Text style={styles.value}>
-                {(item.riskScore ?? 0) >= 75 ? "Confirm / Cancel Flag" : "Standard Allow"}
+                {getRiskLevelFromScore(item.riskScore) === "HIGH" ? "Confirm / Cancel Flag" : "Standard Allow"}
               </Text>
             </View>
 

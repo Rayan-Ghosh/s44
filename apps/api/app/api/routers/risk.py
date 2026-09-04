@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.alert import Alert
-from app.models.enums import AlertStatus, RiskDecision, RiskLevel, TransactionStatus
+from app.models.enums import AlertStatus, PaymentWorkflowStage, RiskDecision, RiskLevel, TransactionStatus
 from app.repositories import risk_repository, transaction_repository
 from app.schemas.risk import RiskEvaluationRequest, RiskScoreRead
 from ml.inference.predict import get_predictor
@@ -133,5 +133,6 @@ def evaluate_risk(payload: dict, db: Session = Depends(get_db)) -> dict:
             db.add(alert)
         db.commit()
 
+    decision_package["stage"] = PaymentWorkflowStage.EVALUATION_COMPLETED.value
     return decision_package
 

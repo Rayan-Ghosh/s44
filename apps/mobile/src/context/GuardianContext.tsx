@@ -271,6 +271,10 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const initiateGuardianRequest = useCallback(
     async (tx: UserTransaction) => {
+      // Only HIGH risk transactions may enter the HIGH-risk Guardian flow
+      const isHigh = (tx.riskLevel || getRiskLevelFromScore(tx.riskScore)) === "HIGH";
+      if (!isHigh) return;
+
       if (activeRequest && activeRequest.status === "PENDING") return;
 
       clearTimers();
@@ -358,8 +362,8 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
 
       let contactId = trustedContacts[0]?.id ? parseInt(trustedContacts[0].id, 10) : undefined;
       let dto = await GuardianService.getRequestByTransactionId(numTxnId);
-      
-      if (!dto && isTrustedFeatureEnabled && (contactId || trustedContacts.length > 0) && (tx.status === "Risk detected" || tx.status === "Held") && (tx.riskLevel === "HIGH" || (tx.riskScore && tx.riskScore >= 60))) {
+      const isHigh = (tx.riskLevel || getRiskLevelFromScore(tx.riskScore)) === "HIGH";
+      if (!dto && isTrustedFeatureEnabled && (contactId || trustedContacts.length > 0) && isHigh && (tx.status === "Risk detected" || tx.status === "Held")) {
         const createRes = await GuardianService.createRequest(numTxnId, contactId);
         if (createRes.success && createRes.request) dto = createRes.request;
       }
