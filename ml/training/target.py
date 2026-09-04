@@ -30,10 +30,19 @@ LABEL COMPATIBILITY ACROSS DATASETS
     target, and even then only when the dataset's mapping in
     ml/datasets/preparation.py sanctions it as a training source.
 
-    Practically, that admits PaySim and S40 synthetic, and excludes
-    IEEE-CIS (card-not-present e-commerce, chargeback-derived) and ULB
-    (2013 credit-card fraud, PCA features) — both of which describe a
-    different fraud mechanism from S40's.
+    Practically, that admits PaySim, the Indian Online Scam dataset, and S40
+    synthetic, and excludes IEEE-CIS (card-not-present e-commerce,
+    chargeback-derived) and ULB (2013 credit-card fraud, PCA features) —
+    both of which describe a different fraud mechanism from S40's.
+
+    NOTE (2026-09-04 real-data retraining pass): `s40_compatible=True` says
+    a dataset's *label* means the same thing as S40's target. It says
+    nothing about whether the dataset can support S40's *feature* space —
+    PaySim and the Indian dataset both pass the label check but fail the
+    per-user-history requirement of the original 13-feature design (see
+    docs/EDA_REPORT.md). `ml/datasets/preparation.py`'s
+    `MODEL_DATASET_MAPPING` is where that second, separate question is
+    decided.
 """
 
 from __future__ import annotations
@@ -99,6 +108,7 @@ def assert_label_compatible(dataset: str) -> None:
     from ml.data.adapters import (
         CreditCardAdapter,
         IeeeCisAdapter,
+        IndianScamAdapter,
         PaySimAdapter,
         SyntheticAdapter,
     )
@@ -108,6 +118,7 @@ def assert_label_compatible(dataset: str) -> None:
         "ieee_cis": IeeeCisAdapter,
         "credit_card_ulb": CreditCardAdapter,
         "s40_synthetic": SyntheticAdapter,
+        "indian_online_scam": IndianScamAdapter,
     }
     adapter_cls = adapters.get(dataset)
     if adapter_cls is None:

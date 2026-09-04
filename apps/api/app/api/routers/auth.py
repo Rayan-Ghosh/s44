@@ -247,7 +247,7 @@ def login(
         db, identifier, client_ip
     )
     if not is_allowed:
-        SecurityAuditService.log_event("LOGIN_RATE_LIMITED", ip_address=client_ip, details={"retry_after": retry_after})
+        SecurityAuditService.log_event("LOGIN_RATE_LIMITED", ip_address=client_ip, details={"retry_after": retry_after}, db=db)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=limit_msg or "Too many failed attempts. Please try again later.",
@@ -261,7 +261,7 @@ def login(
     if user is None:
         verify_password(payload.password or "invalid", DUMMY_ARGON2_HASH)
         RateLimitService.record_login_failure(db, identifier, client_ip)
-        SecurityAuditService.log_event("LOGIN_FAILURE", ip_address=client_ip)
+        SecurityAuditService.log_event("LOGIN_FAILURE", ip_address=client_ip, db=db)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email/mobile number or password.",
@@ -279,7 +279,7 @@ def login(
     if contact and contact.password_hash:
         if not payload.password or not verify_password(payload.password, contact.password_hash):
             RateLimitService.record_login_failure(db, identifier, client_ip)
-            SecurityAuditService.log_event("LOGIN_FAILURE", user_id=user.id, ip_address=client_ip)
+            SecurityAuditService.log_event("LOGIN_FAILURE", user_id=user.id, ip_address=client_ip, db=db)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email/mobile number or password.",
@@ -290,7 +290,7 @@ def login(
 
     # 4. Successful credential verification -> Reset account-level failure counter
     RateLimitService.record_login_success(db, identifier)
-    SecurityAuditService.log_event("LOGIN_SUCCESS", user_id=user.id, ip_address=client_ip)
+    SecurityAuditService.log_event("LOGIN_SUCCESS", user_id=user.id, ip_address=client_ip, db=db)
 
     saved_email = decrypt_field(contact.email_encrypted) if contact and contact.email_encrypted else ""
     saved_phone = decrypt_field(contact.phone_encrypted) if contact and contact.phone_encrypted else ""

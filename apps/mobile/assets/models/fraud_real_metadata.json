@@ -1,0 +1,17 @@
+{
+  "model_name": "s40_transaction_fraud_real",
+  "model_version": "v20260904-053602",
+  "feature_names": [
+    "amount",
+    "amount_log",
+    "recipient_amount_zscore",
+    "recipient_amount_vs_average",
+    "recipient_prior_count",
+    "new_recipient",
+    "recipient_transactions_last_10m",
+    "recipient_transactions_last_1h",
+    "recipient_time_of_day_deviation"
+  ],
+  "calibrated_selected_threshold": 0.25,
+  "warning": "This ONNX export is the RAW, uncalibrated XGBoost output \u2014 the isotonic calibrator was not exported (no standard ONNX op). Do not compare its output directly against `calibrated_selected_threshold` above, which was chosen against calibrated probabilities. See ml/export/to_onnx.py's module docstring."
+}

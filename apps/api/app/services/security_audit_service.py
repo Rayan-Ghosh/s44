@@ -80,19 +80,33 @@ class SecurityAuditService:
         # Structured application logging
         logger.info(json.dumps(audit_entry))
 
-        # DB persistence if session is provided and audit_logs table model exists
+        # DB persistence, mapped onto the real AuditLog columns
+        # (actor/action/resource/timestamp/metadata — see app/models/audit_log.py).
+        # Previously this constructed AuditLog with fields (event_type, user_id,
+        # details) that don't exist on the model; the broad except below silently
+        # swallowed the resulting TypeError, so no row was ever persisted. Fixed
+        # to use the real columns and to surface unexpected failures instead of
+        # hiding them.
         if db:
             try:
                 from app.models.audit_log import AuditLog
+                actor = f"user:{user_id}" if user_id is not None else "system"
+                resource = f"transaction:{transaction_id}" if transaction_id is not None else "system"
                 log_row = AuditLog(
-                    event_type=event_type,
-                    user_id=user_id,
+                    actor=actor,
+                    action=event_type,
+                    resource=resource,
                     timestamp=now,
-                    details=json.dumps(safe_details),
+                    event_metadata={
+                        **safe_details,
+                        "device_hash": audit_entry["device_hash"],
+                        "ip_address": ip_address,
+                    },
                 )
                 db.add(log_row)
                 db.commit()
             except Exception:
                 db.rollback()
+                logger.exception("Failed to persist audit log entry for event_type=%s", event_type)
 
         return audit_entry

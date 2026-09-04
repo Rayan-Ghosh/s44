@@ -102,6 +102,9 @@ def test_registry_contains_every_expected_dataset():
         "credit_card_ulb",
         "teleantifraud",
         "s40_synthetic",
+        # Added 2026-09-04 real-data retraining pass — see docs/EDA_REPORT.md
+        # and docs/DATA_STRATEGY.md §10c.
+        "indian_online_scam",
     }
 
 
@@ -160,7 +163,9 @@ def test_for_task_filters_correctly():
     voice = {e.name for e in registry.for_task(Task.VOICE_SOCIAL_ENGINEERING)}
     assert voice == {"teleantifraud"}
     anomaly = {e.name for e in registry.for_task(Task.ANOMALY_VALIDATION)}
-    assert anomaly == {"credit_card_ulb"}
+    # indian_online_scam added 2026-09-04 — it supports per-recipient
+    # (not per-user) anomaly features, see ml/training/train_anomaly_real.py.
+    assert anomaly == {"credit_card_ulb", "indian_online_scam"}
 
 
 def test_unknown_dataset_raises():

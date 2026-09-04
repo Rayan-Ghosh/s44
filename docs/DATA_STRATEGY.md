@@ -317,6 +317,39 @@ train on?" — currently none, for a documented and specific reason.
 Acquisition status is otherwise unchanged: no dataset has been downloaded,
 no Kaggle credentials exist or were created, and IEEE-CIS remains PENDING.
 
+## 10c. Phase 5 addendum — real-data retraining pass (2026-09-04)
+
+The project owner provided three real dataset files directly (IEEE-CIS,
+PaySim, and a new Indian Online Scam dataset) and explicitly authorized
+local use for internal prototype work — this does NOT resolve the
+licence-verification questions in §2.1/§2.2 above, which remain open for
+any use beyond this project. Registry entries updated: `download` set to
+`PRESENT` for `paysim`/`ieee_cis` (files now exist locally), and a new
+`indian_online_scam` entry added.
+
+**§10b's broader finding is reconfirmed, with one addition.** The Indian
+dataset was initially measured as having repeat customers (1,126/1,132) —
+this was wrong: its raw file is a ~4x self-concatenation, and once
+deduplicated it has **zero repeat customers**, the same structural problem
+as PaySim. See `docs/EDA_REPORT.md` for the corrected measurement. So
+§10b's conclusion still holds for S40's *original* per-user feature
+design: no available dataset supports it.
+
+**What changed:** rather than accept synthetic-only training as final, this
+pass reframed the feature space from per-USER to per-RECIPIENT deviation
+(`ml/features/recipient_features.py`) — PaySim's recipients repeat in
+~83% of rows, and the Indian dataset's 100 merchants repeat ~12x each, even
+though neither dataset's *senders/customers* do. `MODEL_DATASET_MAPPING`
+in `ml/datasets/preparation.py` was revised accordingly: PaySim and
+`indian_online_scam` are now training sources for a NEW model
+(`s40_transaction_fraud_real` / `s40_behaviour_anomaly_real`, see
+`docs/FRAUD_MODEL_CARD_REAL.md` / `docs/ANOMALY_MODEL_CARD_REAL.md`), not
+a replacement for the original per-user model, which is untouched and
+stays synthetic-only for the reasons §10b already established. IEEE-CIS
+stays evaluation-only-and-unused in both cases — it has no
+recipient/payee concept, so not even the recipient-centric feature set
+is computable on it.
+
 ## 11. What Phase 3 deliberately did not do
 
 No model training (spec §35.1's detectors are Phase 4/5). No fusion
