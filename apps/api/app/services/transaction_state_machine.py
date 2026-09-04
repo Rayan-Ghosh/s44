@@ -65,8 +65,8 @@ ALLOWED_TRANSITIONS: dict[S, frozenset[S]] = {
     # directly — the existing mobile client already launches the UPI app
     # itself (payment-app-launcher-service.ts) before calling
     # /transactions/{id}/confirm without going through /payments/launch-upi.
-    S.ALLOWED: frozenset({S.PAYMENT_PENDING, S.CONFIRMED, S.CANCELLED, S.REPORTED, S.BLOCKED}),
-    S.AWAITING_CONFIRMATION: frozenset({S.PAYMENT_PENDING, S.CONFIRMED, S.CANCELLED, S.REPORTED, S.BLOCKED}),
+    S.ALLOWED: frozenset({S.PAYMENT_PENDING, S.CONFIRMED, S.PENDING_GUARDIAN_APPROVAL, S.CANCELLED, S.REPORTED, S.BLOCKED}),
+    S.AWAITING_CONFIRMATION: frozenset({S.PAYMENT_PENDING, S.CONFIRMED, S.PENDING_GUARDIAN_APPROVAL, S.CANCELLED, S.REPORTED, S.BLOCKED}),
     S.PENDING_AUTHORIZATION: frozenset(
         {S.AUTHORIZED, S.PENDING_GUARDIAN_APPROVAL, S.CANCELLED, S.REPORTED, S.BLOCKED}
     ),

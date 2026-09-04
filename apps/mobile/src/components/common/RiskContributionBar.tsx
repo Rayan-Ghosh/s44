@@ -76,16 +76,22 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: spacing.xs,
+    gap: spacing.sm,
   },
   factorLabel: {
     ...typography.small,
     color: colors.textSecondary,
     fontSize: 13,
+    flex: 1,
+    flexShrink: 1,
   },
   factorPercent: {
     ...typography.smallSemibold,
     fontSize: 13,
     fontWeight: "700",
+    flexShrink: 0,
+    textAlign: "right",
+    minWidth: 38,
   },
   barTrack: {
     height: 6,

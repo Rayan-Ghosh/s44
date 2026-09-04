@@ -112,11 +112,9 @@ export const FloatingToast: React.FC<FloatingToastProps> = ({
 const styles = StyleSheet.create({
   toastWrapper: {
     position: "absolute",
-    top: 0,
-    bottom: 0,
+    top: Platform.OS === "web" ? 24 : 54,
     left: 0,
     right: 0,
-    justifyContent: "center",
     alignItems: "center",
     zIndex: 9999,
     ...(Platform.OS === "web"

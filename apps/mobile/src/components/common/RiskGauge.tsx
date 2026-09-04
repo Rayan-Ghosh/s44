@@ -272,11 +272,14 @@ const styles = StyleSheet.create({
   gaugeRow: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
+    gap: spacing.md,
   },
   svgContainer: {
     position: "relative",
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   centerLabel: {
     position: "absolute",
@@ -294,7 +297,8 @@ const styles = StyleSheet.create({
   },
   infoCol: {
     flex: 1,
-    marginLeft: spacing.lg,
+    minWidth: 140,
+    flexShrink: 1,
   },
   levelBadge: {
     paddingHorizontal: spacing.sm,
@@ -309,7 +313,8 @@ const styles = StyleSheet.create({
   riskExplanation: {
     ...typography.small,
     color: colors.textSecondary,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
     lineHeight: 18,
+    flexShrink: 1,
   },
 });

@@ -273,19 +273,44 @@ def get_user_transactions(
                 })
 
         final_sc = float(latest_risk.final_score) if latest_risk else 0.0
+        risk_level = get_risk_level_from_score(final_sc)
+
+        guardian_req = False
+        if risk_level == "HIGH":
+            from app.repositories import guardian_repository
+            contacts = guardian_repository.get_trusted_contacts_by_user(db, t.user_id)
+            if contacts:
+                guardian_req = True
+
+        rec_display = t.recipient.display_name if (t.recipient and t.recipient.display_name) else None
+        res_status = "RESOLVED" if rec_display else "UNVERIFIED"
+
         items.append({
             "id": t.id,
-            "merchant": t.recipient.display_name if (t.recipient and t.recipient.display_name) else "UPI Merchant",
+            "merchant": rec_display or "UPI Merchant",
             "amount": float(t.amount),
             "timestamp": t.timestamp.isoformat() if t.timestamp else "",
             "payment_method": t.payment_method or "UPI",
             "status": t.status.value if hasattr(t.status, "value") else str(t.status),
-            "risk_level": get_risk_level_from_score(final_sc),
+            "risk_level": risk_level,
             "risk_score": final_sc,
             "risk_factors": factors,
+            "reasons": [f["explanation"] for f in factors if f.get("explanation")],
+            # Goal 2 persisted card fields
+            "evaluation_id": f"EVAL-TXN-{t.id}",
+            "recipient_input": rec_display or f"recipient_{t.recipient_id}",
+            "recipient_type": "UPI_ID" if t.payment_method == "UPI" else "PHONE",
+            "normalized_recipient": rec_display or f"recipient_{t.recipient_id}",
+            "display_name": rec_display,
+            "resolution_status": res_status,
+            "decision": latest_risk.decision.value if (latest_risk and hasattr(latest_risk.decision, "value")) else ("ALLOW" if risk_level == "LOW" else "WARN"),
+            "evaluation_timestamp": t.timestamp.isoformat() if t.timestamp else "",
+            "workflow_stage": "EVALUATION_COMPLETED",
+            "guardian_required": guardian_req,
         })
 
     return {"items": items, "total": total}
+
 
 
 @router.get("/{user_id}/trusted-contacts")

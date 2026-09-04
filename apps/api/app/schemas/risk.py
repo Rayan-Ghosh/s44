@@ -9,6 +9,7 @@ docs/DEVELOPMENT_PLAN.md Phase 4/6).
 """
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -36,5 +37,42 @@ class RiskScoreRead(BaseModel):
     risk_factors: list[RiskFactorRead] = []
 
 
+class PrePaymentRecipientDetail(BaseModel):
+    raw_input: str
+    normalized: str
+    recipient_type: str
+    display_name: Optional[str] = None
+    resolution_status: str
+
+
 class RiskEvaluationRequest(BaseModel):
-    transaction_id: int
+    transaction_id: Optional[int] = None
+    recipient: Optional[str] = None
+    recipient_type: Optional[str] = None
+    amount: Optional[float] = None
+    note: Optional[str] = None
+    qr_data: Optional[str] = None
+    contact_phone: Optional[str] = None
+    user_id: Optional[int] = None
+
+
+class PrePaymentEvaluationResponse(BaseModel):
+    evaluation_id: Optional[str] = None
+    stage: str
+    risk_score: float
+    risk_level: str
+    decision: str
+    plain_language_reasons: list[str] = []
+    risk_factors: list[str] = []
+    risk_contributions_pct: dict[str, float] = {}
+    sub_scores: dict[str, float] = {}
+    recipient: Optional[PrePaymentRecipientDetail] = None
+    amount: Optional[float] = None
+    note: Optional[str] = None
+    qr_data: Optional[str] = None
+    latency_ms: Optional[float] = None
+    timestamp: str
+    expires_at: Optional[str] = None
+    guardian_required: bool = False
+    disclaimer: str
+

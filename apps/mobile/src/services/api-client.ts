@@ -13,17 +13,41 @@ declare const process: any;
  * Android Emulator normally uses:
  * http://10.0.2.2:8000
  */
-const getDefaultFallbackUrl = (): string => {
-  if (Platform.OS === "android") {
-    return "http://10.0.2.2:8000";
+const getHostIp = (): string | null => {
+  const hostUri =
+    Constants?.expoConfig?.hostUri ||
+    (Constants as any)?.manifest2?.extra?.expoClient?.hostUri ||
+    (Constants as any)?.manifest?.debuggerHost ||
+    (Constants as any)?.experienceUrl;
+  if (hostUri && typeof hostUri === "string") {
+    const cleaned = hostUri.replace(/^[a-zA-Z]+:\/\//, "");
+    const ip = cleaned.split(":")[0];
+    if (ip && ip !== "localhost" && ip !== "127.0.0.1") {
+      return ip;
+    }
   }
-  return "http://127.0.0.1:8000";
+  return null;
+};
+
+/**
+ * Default API URL.
+ *
+ * Automatically resolves computer LAN IP in Expo Go / physical devices,
+ * with fallback to local development server.
+ */
+const getDefaultFallbackUrl = (): string => {
+  const hostIp = getHostIp();
+  if (hostIp) {
+    return `http://${hostIp}:8000`;
+  }
+  return "http://10.160.81.164:8000";
 };
 
 let _customApiBaseUrl: string | null = null;
 
 /**
  * Cleans and normalizes an API URL.
+ * On physical devices (Android/iOS), rewrites localhost/127.0.0.1 to the computer's LAN IP.
  */
 export const sanitizeApiUrl = (url: string): string => {
   let clean = url.trim();
@@ -37,6 +61,13 @@ export const sanitizeApiUrl = (url: string): string => {
     !clean.startsWith("https://")
   ) {
     clean = `http://${clean}`;
+  }
+
+  // On physical devices, localhost/127.0.0.1 points to the device itself.
+  // Rewrite to the computer's LAN IP so network requests reach the backend.
+  if (Platform.OS !== "web" && (clean.includes("://localhost") || clean.includes("://127.0.0.1"))) {
+    const hostIp = getHostIp() || "10.160.81.164";
+    clean = clean.replace("://localhost", `://${hostIp}`).replace("://127.0.0.1", `://${hostIp}`);
   }
 
   return clean.replace(/\/+$/, "");

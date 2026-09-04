@@ -34,7 +34,7 @@ import { Camera } from "expo-camera";
 import * as Contacts from "expo-contacts";
 import { applyScannedQrToForm } from "../utils/qr-scanner-helper";
 import { applySelectedContactToForm } from "../utils/contact-picker-helper";
-import { getRecipientType, RecipientType } from "../utils/recipient-type";
+import { getRecipientType, isRecipientValid, RecipientType } from "../utils/recipient-type";
 import { resolveRecipient } from "../services/recipient-resolution-service";
 import { useAuth } from "../context/AuthContext";
 import { useGuardian } from "../context/GuardianContext";
@@ -62,18 +62,36 @@ import {
 } from "../utils/risk-scoring";
 
 export interface EvaluationDisplayResult {
+  evaluation_id?: string;
+  transaction_id?: string;
   stage: PaymentWorkflowStage;
   riskLevel?: RiskLevel;
   riskScore?: number;
+  decision?: string;
   reasons?: string[];
   summary?: string;
   message?: string;
   status?: string;
+  transactionStatus?: string;
+  guardian_required?: boolean;
+  verification_status?: string;
+  recipient?: {
+    raw_input: string;
+    normalized: string;
+    recipient_type: string;
+    display_name?: string | null;
+    resolution_status: string;
+  };
+  amount?: number;
+  note?: string;
+  timestamp?: string;
+  disclaimer?: string;
   isAuthorized: false;
   isApproved: false;
   isCompleted: false;
   isSubmitted: false;
 }
+
 
 const NewPaymentHighlightCard: React.FC<{
   children: React.ReactNode;
@@ -153,6 +171,7 @@ export const PaymentsScreen: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isActing, setIsActing] = useState<boolean>(false);
   const [isAuthorizing, setIsAuthorizing] = useState<boolean>(false);
+  const [isStartingGuardian, setIsStartingGuardian] = useState<boolean>(false);
 
   // Risk Score Result Reveal & List Stagger Animation States (run once on first view)
   const hasPlayedRevealRef = useRef(false);
@@ -286,70 +305,106 @@ export const PaymentsScreen: React.FC = () => {
     }
   };
 
-  const handleEvaluateAndPay = () => {
+  const handleEvaluateAndPay = async () => {
     if (isEvaluating) return;
+
+    if (!isRecipientValid(entryRecipient)) {
+      showToast("Enter a valid UPI ID or mobile number", "warning");
+      return;
+    }
+
+    const parsedAmount = entryAmount.trim() === "" ? NaN : Number(entryAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      showToast("Enter a valid amount greater than zero", "warning");
+      return;
+    }
+
+    const draftResult = PaymentService.createPaymentDraft({
+      recipient: entryRecipient.trim(),
+      amount: parsedAmount,
+      note: entryNote.trim() || undefined,
+    });
+
+    if (!draftResult.success) {
+      showToast(draftResult.error, "warning");
+      return;
+    }
+
+    const draft = draftResult.draft;
     setIsEvaluating(true);
     setPaymentDraft(null);
     setEvaluationResult(null);
     const evaluationVersion = ++formVersionRef.current;
+
     try {
-      const resolution = resolveRecipient({ originalValue: entryRecipient });
-      if (!resolution.success) {
-        if (resolution.reason === "RESOLUTION_UNAVAILABLE") {
-          showToast("Mobile number verification is not available yet", "warning");
-        } else {
-          showToast("Enter a valid UPI ID or mobile number", "warning");
-        }
-        return;
-      }
-
-      const parsedAmount = entryAmount.trim() === "" ? NaN : Number(entryAmount);
-      const draftResult = PaymentService.createPaymentDraft({
-        recipient: resolution.resolvedRecipient,
-        amount: parsedAmount,
-        note: entryNote,
+      const evalResult = await PaymentService.evaluatePayment({
+        recipient: draft.recipient,
+        amount: draft.amount,
+        note: draft.note,
+        user_id: session?.userId,
       });
-
-      if (!draftResult.success) {
-        showToast(draftResult.error, "warning");
-        return;
-      }
-
-      const draft = draftResult.draft;
-
-      const evalResult = PaymentService.evaluatePaymentDraft({ draft });
-      if (!evalResult.success) {
-        showToast(evalResult.error, "warning");
-        return;
-      }
 
       // Race-condition guard: if form inputs were modified while evaluation was in flight, discard
       if (formVersionRef.current !== evaluationVersion) {
         return;
       }
 
+      if (!evalResult.success) {
+        showToast(evalResult.error || "Unable to evaluate payment draft", "warning");
+        return;
+      }
+
       setPaymentDraft(draft);
       const evalData = evalResult.data;
-      const derivedRiskLevel: RiskLevel | undefined =
-        evalData.riskLevel ||
-        (typeof evalData.riskScore === "number" ? getRiskLevelFromScore(evalData.riskScore) : undefined);
+      const derivedRiskLevel: RiskLevel = evalData.risk_level;
+
+      // Part 2: Persist the successful evaluation as an advisory payment card
+      const persistRes = await PaymentService.persistPaymentDraftCard(
+        evalData,
+        draft,
+        session?.userId || 1
+      );
+
+      // Race-condition guard: check again after async persistence
+      if (formVersionRef.current !== evaluationVersion) {
+        return;
+      }
+
+      const persistedTx = persistRes.transaction;
 
       setEvaluationResult({
+        evaluation_id: evalData.evaluation_id || persistedTx?.evaluationId,
+        transaction_id: persistedTx ? String(persistedTx.id) : undefined,
         stage: "EVALUATION_COMPLETED",
         riskLevel: derivedRiskLevel,
-        riskScore: typeof evalData.riskScore === "number" ? evalData.riskScore : undefined,
-        reasons: Array.isArray(evalData.reasons) ? evalData.reasons : undefined,
-        summary: typeof evalData.summary === "string" ? evalData.summary : undefined,
-        message: typeof evalData.message === "string" ? evalData.message : undefined,
-        status: typeof evalData.status === "string" ? evalData.status : undefined,
+        riskScore: evalData.risk_score,
+        decision: evalData.decision,
+        reasons: evalData.plain_language_reasons,
+        recipient: evalData.recipient,
+        amount: evalData.amount ?? draft.amount,
+        note: evalData.note ?? draft.note,
+        timestamp: evalData.timestamp,
+        disclaimer: evalData.disclaimer,
+        status: evalData.decision,
+        transactionStatus: persistedTx?.status || "Held",
+        guardian_required: Boolean(evalData.guardian_required || persistedTx?.guardianRequired),
+        verification_status: evalData.recipient?.display_name ? "VERIFIED" : "UNVERIFIED",
         isAuthorized: false,
         isApproved: false,
         isCompleted: false,
         isSubmitted: false,
       });
-      showToast(evalResult.data.message, "info");
+
+      // Automatically select the newly persisted card if available
+      if (persistedTx) {
+        setSelectedTx(persistedTx);
+      }
+
+      await loadPayments();
+      showToast(`Evaluation persisted: ${derivedRiskLevel} risk`, "info");
     } catch (err: any) {
       showToast(err?.message || "Unable to evaluate payment draft", "warning");
+
     } finally {
       setIsEvaluating(false);
     }
@@ -600,30 +655,11 @@ export const PaymentsScreen: React.FC = () => {
       setIsAuthorizing(false);
 
       if (res.success) {
-        let contacts = trustedContacts;
-        if (contacts.length === 0 && session?.userId) {
-          contacts = await GuardianService.getTrustedContacts(session.userId);
-        }
-
-        const isHighRisk =
-          selectedTx.riskLevel === "HIGH" ||
-          (typeof selectedTx.riskScore === "number" && selectedTx.riskScore >= 61);
-
         const updatedSelected: UserTransaction = {
           ...selectedTx,
           authorizationStatus: "AUTHORIZED",
-          status: isHighRisk && isTrustedFeatureEnabled && contacts.length > 0 ? "Held" : selectedTx.status,
         };
         setSelectedTx(updatedSelected);
-
-        // If high risk and Trusted contact is active, route through Guardian approval flow
-        if (isHighRisk && isTrustedFeatureEnabled && contacts.length > 0) {
-          showToast("✓ Identity Verified. Awaiting approval from your Trusted Contact...", "info");
-          setAwaitingGuardian(true);
-          await initiateGuardianRequest(updatedSelected);
-          await loadPayments();
-          return;
-        }
 
         showToast("✓ Identity Verified. Completing your secure payment...", "success");
         await loadPayments();
@@ -641,7 +677,7 @@ export const PaymentsScreen: React.FC = () => {
     txId: string,
     stage?: PaymentWorkflowStage | { stage?: any } | string | null
   ) => {
-    if (isActing || isAuthorizing) return;
+    if (isActing || isAuthorizing || isStartingGuardian) return;
     if (!selectedTx) return;
 
     if (stage !== undefined) {
@@ -666,22 +702,40 @@ export const PaymentsScreen: React.FC = () => {
       contacts = await GuardianService.getTrustedContacts(session.userId);
     }
 
-    // High-Risk Biometric Authorization Check
+    // High risk with Guardian enabled and contact available: Guardian approval is required
+    if (isHighRisk && isTrustedFeatureEnabled && contacts.length > 0) {
+      // If already approved by Guardian, proceed with authorization or app selector
+      if (selectedTx.canonicalStatus === "GUARDIAN_APPROVED" || selectedTx.status === "Approved by you") {
+        if (
+          selectedTx.authorizationRequired !== false &&
+          selectedTx.authorizationStatus !== "AUTHORIZED"
+        ) {
+          await handleAuthorize(selectedTx.id);
+          return;
+        }
+        setIsChooseAppModalVisible(true);
+        return;
+      }
+
+      setIsStartingGuardian(true);
+      try {
+        setAwaitingGuardian(true);
+        await initiateGuardianRequest(selectedTx);
+        showToast("Awaiting approval from your Trusted Contact...", "info");
+        await loadPayments();
+      } finally {
+        setIsStartingGuardian(false);
+      }
+      return;
+    }
+
+    // High-Risk without Guardian: Biometric Authorization Check
     if (
       isHighRisk &&
       selectedTx.authorizationRequired !== false &&
       selectedTx.authorizationStatus !== "AUTHORIZED"
     ) {
       await handleAuthorize(selectedTx.id);
-      return;
-    }
-
-    // If high risk and Trusted contact is active, route through Guardian approval flow
-    if (isHighRisk && isTrustedFeatureEnabled && contacts.length > 0) {
-      setAwaitingGuardian(true);
-      await initiateGuardianRequest(selectedTx);
-      showToast("Awaiting approval from your Trusted Contact...", "info");
-      await loadPayments();
       return;
     }
 
@@ -935,19 +989,19 @@ export const PaymentsScreen: React.FC = () => {
               style={styles.evaluateBtn}
             />
 
-            {/* Evaluation Result Section (Informational only) */}
+            {/* Evaluation Result Section (Clean compact advisory summary) */}
             {evaluationResult && (
               <View
                 style={styles.evaluationResultCard}
                 accessibilityRole="summary"
-                accessibilityLabel="Payment evaluation result"
+                accessibilityLabel="Payment evaluation summary"
                 testID="evaluation-result-section"
               >
                 {/* Header Row */}
                 <View style={styles.evalHeaderRow}>
                   <View style={styles.evalHeaderLeft}>
-                    <Ionicons name="shield-checkmark-outline" size={16} color={colors.brand} />
-                    <Text style={styles.evalHeaderTitle}>Pre-Payment Evaluation</Text>
+                    <Ionicons name="shield-checkmark" size={16} color={colors.brand} />
+                    <Text style={styles.evalHeaderTitle}>Evaluation Summary</Text>
                   </View>
                   {(() => {
                     const evaluatedLevel: RiskLevel | null =
@@ -960,95 +1014,81 @@ export const PaymentsScreen: React.FC = () => {
                       const badge = getStatusBadgeProps(evaluatedLevel);
                       return <StatusBadge label={badge.label} status={badge.status} />;
                     }
-                    return <StatusBadge label="EVALUATION UNAVAILABLE" status="neutral" />;
+                    return <StatusBadge label="EVALUATION COMPLETED" status="neutral" />;
                   })()}
                 </View>
 
-                {/* Risk Score & Gauge (if available) */}
-                {(() => {
-                  const evaluatedLevel: RiskLevel | null =
-                    evaluationResult.riskLevel ||
-                    (typeof evaluationResult.riskScore === "number"
-                      ? getRiskLevelFromScore(evaluationResult.riskScore)
-                      : null);
-
-                  if (typeof evaluationResult.riskScore === "number" && evaluatedLevel) {
-                    return (
-                      <View style={styles.evalGaugeRow}>
-                        <RiskGauge
-                          score={evaluationResult.riskScore}
-                          riskLevel={evaluatedLevel}
-                          size="sm"
-                        />
-                        <View style={styles.evalGaugeDetails}>
-                          <Text style={styles.evalScoreLabel}>Risk Score</Text>
-                          <Text style={styles.evalScoreValue}>{evaluationResult.riskScore}/100</Text>
-                          <Text style={styles.evalLevelDescription}>
-                            {evaluatedLevel === "HIGH"
-                              ? "High risk detected — caution advised"
-                              : evaluatedLevel === "MEDIUM"
-                              ? "Moderate risk advisory notice"
-                              : "Standard verified low-risk signature"}
-                          </Text>
-                        </View>
-                      </View>
-                    );
-                  }
-                  return null;
-                })()}
-
-                {/* Risk Reasons / Summary */}
-                {evaluationResult.reasons && evaluationResult.reasons.length > 0 ? (
-                  <View style={styles.evalReasonsContainer}>
-                    <Text style={styles.evalReasonsTitle}>Evaluation Factors</Text>
-                    {evaluationResult.reasons.map((reason, idx) => {
-                      const evaluatedLevel: RiskLevel | null =
-                        evaluationResult.riskLevel ||
-                        (typeof evaluationResult.riskScore === "number"
-                          ? getRiskLevelFromScore(evaluationResult.riskScore)
-                          : null);
-
-                      return (
-                        <View key={idx} style={styles.evalReasonRow}>
-                          <Ionicons
-                            name={
-                              evaluatedLevel === "HIGH"
-                                ? "alert-circle"
-                                : evaluatedLevel === "MEDIUM"
-                                ? "warning"
-                                : "checkmark-circle"
-                            }
-                            size={13}
-                            color={
-                              evaluatedLevel === "HIGH"
-                                ? colors.threat
-                                : evaluatedLevel === "MEDIUM"
-                                ? colors.caution
-                                : colors.safe
-                            }
-                            style={{ marginRight: 6, marginTop: 2 }}
-                          />
-                          <Text style={styles.evalReasonText}>{reason}</Text>
-                        </View>
-                      );
-                    })}
+                {/* Recipient & Amount Details Grid */}
+                <View style={styles.evalDetailGrid}>
+                  <View style={styles.evalDetailRow}>
+                    <Text style={styles.evalDetailLabel}>Recipient</Text>
+                    <View style={styles.evalRecipientBadgeRow}>
+                      <Text style={styles.evalDetailValue} numberOfLines={2}>
+                        {evaluationResult.recipient?.raw_input || paymentDraft?.recipient}
+                      </Text>
+                      <StatusBadge
+                        label={
+                          evaluationResult.recipient?.recipient_type === "PHONE"
+                            ? "Mobile"
+                            : "UPI ID"
+                        }
+                        status="neutral"
+                        dot={false}
+                      />
+                    </View>
                   </View>
-                ) : evaluationResult.summary ? (
-                  <Text style={styles.evalSummaryText}>{evaluationResult.summary}</Text>
-                ) : evaluationResult.message ? (
-                  <Text style={styles.evalSummaryText}>{evaluationResult.message}</Text>
-                ) : null}
 
-                {/* Informational State Disclaimer */}
+                  {evaluationResult.recipient?.display_name ? (
+                    <View style={styles.evalDetailRow}>
+                      <Text style={styles.evalDetailLabel}>Resolved Name</Text>
+                      <View style={styles.evalRecipientBadgeRow}>
+                        <Text style={styles.evalDetailValue} numberOfLines={1}>
+                          {evaluationResult.recipient.display_name}
+                        </Text>
+                        <StatusBadge label="RESOLVED" status="resolved" dot={false} />
+                      </View>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.evalDetailRow}>
+                    <Text style={styles.evalDetailLabel}>Evaluated Amount</Text>
+                    <Text style={[styles.evalDetailValue, { color: colors.brand, fontWeight: "700" }]}>
+                      ₹{(evaluationResult.amount ?? paymentDraft?.amount ?? 0).toFixed(2)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.evalDetailRow}>
+                    <Text style={styles.evalDetailLabel}>Workflow Stage</Text>
+                    <StatusBadge label={evaluationResult.stage || "EVALUATION_COMPLETED"} status="neutral" dot={false} />
+                  </View>
+
+                  {evaluationResult.transactionStatus && (
+                    <View style={styles.evalDetailRow}>
+                      <Text style={styles.evalDetailLabel}>Transaction Status</Text>
+                      <StatusBadge label={evaluationResult.transactionStatus} status="neutral" dot={false} />
+                    </View>
+                  )}
+
+                  {evaluationResult.evaluation_id && (
+                    <View style={styles.evalDetailRow}>
+                      <Text style={styles.evalDetailLabel}>Evaluation Ref</Text>
+                      <Text style={[styles.evalDetailValue, { fontSize: 11, color: colors.textMuted }]} numberOfLines={1}>
+                        {evaluationResult.evaluation_id}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Informational State Disclaimer (Exact mandatory notice) */}
                 <View style={styles.evalDisclaimerRow}>
                   <Ionicons
                     name="information-circle-outline"
                     size={14}
                     color={colors.textSecondary}
-                    style={{ marginRight: 5 }}
+                    style={{ marginRight: 5, flexShrink: 0 }}
                   />
                   <Text style={styles.evalDisclaimerText}>
-                    Pre-payment evaluation only. Not an authorization or approval. No transaction has been created or submitted.
+                    ADVISORY PRE-PAYMENT EVALUATION ONLY. NO PAYMENT AUTHORIZED OR INITIATED.
                   </Text>
                 </View>
               </View>
@@ -1103,10 +1143,10 @@ export const PaymentsScreen: React.FC = () => {
           {selectedTx && (
             <View style={[styles.detailCard, isCurrentActiveTx ? styles.detailCardActive : styles.detailCardReadOnly]}>
               <View style={styles.detailTopRow}>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={styles.detailBadgeRow}>
                     <Text style={styles.detailHeading}>
-                      {isCurrentActiveTx ? "CURRENT PAYMENT IN PROGRESS" : "COMPLETED TRANSACTION RECORD"}
+                      {isCurrentActiveTx ? "PAYMENT EVALUATION SUMMARY" : "COMPLETED TRANSACTION RECORD"}
                     </Text>
                     {!isCurrentActiveTx && (
                       <View style={styles.readOnlyTag}>
@@ -1115,7 +1155,9 @@ export const PaymentsScreen: React.FC = () => {
                       </View>
                     )}
                   </View>
-                  <Text style={styles.detailMerchant}>{selectedTx.merchant}</Text>
+                  <Text style={styles.detailMerchant} numberOfLines={2} ellipsizeMode="tail">
+                    {selectedTx.merchant}
+                  </Text>
                   <AnimatedAmount
                     amount={selectedTx?.amount ?? 0}
                     prefix="₹"
@@ -1123,10 +1165,65 @@ export const PaymentsScreen: React.FC = () => {
                     duration={900}
                     animateOnlyOnce={hasPlayedRevealRef.current}
                   />
-                  <Text style={styles.detailMeta}>
-                    Method: {selectedTx.paymentAppUsed || selectedTx.paymentMethod} · {selectedTx.date}
-                  </Text>
-                  <Text style={styles.detailRef}>Ref ID: TXN-{selectedTx.id}</Text>
+
+                  {/* Structured Summary Key-Values */}
+                  <View style={styles.summaryGrid}>
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>Payment Method</Text>
+                      <Text style={styles.summaryValue}>
+                        {selectedTx.paymentAppUsed || selectedTx.paymentMethod}
+                      </Text>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>Recipient Type</Text>
+                      <View style={styles.summaryBadgeRow}>
+                        <Text style={styles.summaryValue}>
+                          {selectedTx.recipientType === "PHONE" ? "Mobile Number" : "UPI ID"}
+                        </Text>
+                        <StatusBadge
+                          label={selectedTx.resolutionStatus || (selectedTx.displayName ? "RESOLVED" : "UNVERIFIED")}
+                          status={selectedTx.resolutionStatus === "RESOLVED" || selectedTx.displayName ? "resolved" : "neutral"}
+                          dot={false}
+                        />
+                      </View>
+                    </View>
+
+                    {selectedTx.displayName && (
+                      <View style={styles.summaryRow}>
+                        <Text style={styles.summaryLabel}>Resolved Name</Text>
+                        <Text style={styles.summaryValue} numberOfLines={1}>
+                          {selectedTx.displayName}
+                        </Text>
+                      </View>
+                    )}
+
+                    {selectedTx.note && (
+                      <View style={styles.summaryRow}>
+                        <Text style={styles.summaryLabel}>Note</Text>
+                        <Text style={[styles.summaryValue, { fontStyle: "italic" }]} numberOfLines={2}>
+                          {selectedTx.note}
+                        </Text>
+                      </View>
+                    )}
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>Workflow Stage</Text>
+                      <StatusBadge label={selectedTx.workflowStage || "EVALUATION_COMPLETED"} status="neutral" dot={false} />
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>Transaction Status</Text>
+                      <StatusBadge label={selectedTx.status} status={selectedTx.status === "Risk detected" || selectedTx.status === "Held" ? "pending" : "neutral"} dot={false} />
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>Reference / Eval ID</Text>
+                      <Text style={styles.summaryRefText} numberOfLines={2}>
+                        TXN-{selectedTx.id} {selectedTx.evaluationId ? `· ${selectedTx.evaluationId}` : ""}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
                 <TouchableOpacity
                   onPress={() => setSelectedTx(null)}
@@ -1294,8 +1391,14 @@ export const PaymentsScreen: React.FC = () => {
                   {isCurrentActiveTx ? (
                     <View style={styles.decisionBlock}>
                       {/* 1. Guardian Waiting State (Active hold / countdown) */}
-                      {((selectedTx.riskLevel === "HIGH" || (typeof selectedTx.riskScore === "number" && selectedTx.riskScore >= 61)) && isTrustedFeatureEnabled && (trustedContacts.length > 0 || selectedTx.status === "Held") && !isTransactionTerminal(selectedTx) && selectedTx.status !== "Approved by you" && selectedTx.authorizationStatus === "AUTHORIZED" && !paymentOutcome) ||
-                      (((awaitingGuardian && activeRequest) || (activeRequest && activeRequest.status === "PENDING" && String(activeRequest.transactionId) === String(selectedTx.id) && !paymentOutcome)) && !paymentOutcome) ? (
+                      {!paymentOutcome &&
+                      !isTransactionTerminal(selectedTx) &&
+                      selectedTx.status !== "Approved by you" &&
+                      selectedTx.canonicalStatus !== "GUARDIAN_APPROVED" &&
+                      ((awaitingGuardian && activeRequest && activeRequest.status === "PENDING") ||
+                        (activeRequest &&
+                          activeRequest.status === "PENDING" &&
+                          String(activeRequest.transactionId) === String(selectedTx.id))) ? (
                         <View style={styles.guardianWaitBlock}>
                           <View style={styles.guardianWaitHeader}>
                             <View style={styles.guardianWaitHeaderLeft}>
@@ -1411,11 +1514,17 @@ export const PaymentsScreen: React.FC = () => {
                           )}
                           <View style={styles.actionRow}>
                             <Button
-                              label={isAuthorizing ? "Verifying..." : "CONFIRM & CHOOSE APP"}
+                              label={
+                                isStartingGuardian
+                                  ? "Requesting Guardian..."
+                                  : isAuthorizing
+                                  ? "Verifying..."
+                                  : "CONFIRM PAYMENT"
+                              }
                               icon="arrow-forward-circle"
                               onPress={() => handleConfirm(selectedTx.id)}
-                              loading={isActing || isAuthorizing}
-                              disabled={isActing || isAuthorizing}
+                              loading={isActing || isAuthorizing || isStartingGuardian}
+                              disabled={isActing || isAuthorizing || isStartingGuardian}
                               variant="primary"
                               size="md"
                               style={styles.actionBtn}
@@ -1425,10 +1534,10 @@ export const PaymentsScreen: React.FC = () => {
                               icon="close-circle-outline"
                               onPress={() => handleCancel(selectedTx.id)}
                               loading={isActing}
-                              disabled={isActing || isAuthorizing}
+                              disabled={isActing || isAuthorizing || isStartingGuardian}
                               variant="outline"
                               size="md"
-                              style={styles.actionBtn}
+                              style={styles.actionBtnCancel}
                             />
                           </View>
                         </View>
@@ -1441,7 +1550,7 @@ export const PaymentsScreen: React.FC = () => {
                             isActing && styles.cancelActionBtnDisabled,
                           ]}
                           onPress={() => handleCancel(selectedTx.id)}
-                          disabled={isActing || isAuthorizing}
+                          disabled={isActing || isAuthorizing || isStartingGuardian}
                           activeOpacity={0.7}
                           accessibilityRole="button"
                           accessibilityLabel="Cancel payment"
@@ -1809,8 +1918,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     borderWidth: 1.2,
     borderColor: colors.border,
-    padding: spacing.lg,
+    padding: spacing.md,
     marginBottom: spacing.lg,
+    width: "100%",
     ...shadows.lg,
   },
   detailCardActive: {
@@ -1828,10 +1938,13 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
+    width: "100%",
+    gap: spacing.sm,
   },
   detailBadgeRow: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: spacing.sm,
   },
   detailHeading: {
@@ -1860,14 +1973,60 @@ const styles = StyleSheet.create({
   detailMerchant: {
     ...typography.h2,
     color: colors.textPrimary,
-    fontSize: 20,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: "800",
     marginTop: 2,
+    flexWrap: "wrap",
   },
   detailAmount: {
     ...typography.amountLarge,
     color: colors.textPrimary,
     marginVertical: 4,
+  },
+  summaryGrid: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+    gap: 6,
+    width: "100%",
+  },
+  summaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    paddingVertical: 2,
+  },
+  summaryLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontSize: 11,
+    flexShrink: 0,
+  },
+  summaryValue: {
+    ...typography.smallSemibold,
+    color: colors.textPrimary,
+    fontSize: 12,
+    flexShrink: 1,
+    textAlign: "right",
+  },
+  summaryBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    flexShrink: 1,
+  },
+  summaryRefText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontSize: 10.5,
+    flexShrink: 1,
+    textAlign: "right",
   },
   detailMeta: {
     ...typography.small,
@@ -1888,10 +2047,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSecondary,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
     ...(Platform.OS === "web" ? ({ cursor: "pointer" } as any) : {}),
   },
   assessmentSection: {
     marginTop: spacing.md,
+    width: "100%",
   },
   assessmentHeading: {
     ...typography.caption,
@@ -1908,6 +2069,7 @@ const styles = StyleSheet.create({
     marginVertical: spacing.sm,
     borderWidth: 1,
     borderColor: colors.borderLight,
+    width: "100%",
   },
   reasonsTitle: {
     ...typography.smallSemibold,
@@ -1918,7 +2080,8 @@ const styles = StyleSheet.create({
   reasonBulletRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginVertical: 2,
+    marginVertical: 3,
+    width: "100%",
   },
   reasonBulletText: {
     ...typography.small,
@@ -1926,6 +2089,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     flex: 1,
+    flexShrink: 1,
+    flexWrap: "wrap",
   },
   auditCard: {
     backgroundColor: colors.surfaceSecondary,
@@ -1934,6 +2099,7 @@ const styles = StyleSheet.create({
     borderColor: colors.borderLight,
     padding: spacing.md,
     marginVertical: spacing.sm,
+    width: "100%",
   },
   auditHeader: {
     flexDirection: "row",
@@ -1952,6 +2118,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 3,
+    flexWrap: "wrap",
+    gap: spacing.xs,
   },
   auditLabel: {
     ...typography.small,
@@ -1962,20 +2130,29 @@ const styles = StyleSheet.create({
     ...typography.smallSemibold,
     color: colors.textPrimary,
     fontSize: 12,
+    flexShrink: 1,
   },
   decisionBlock: {
     marginTop: spacing.md,
     gap: spacing.sm,
+    width: "100%",
   },
   actionRow: {
     flexDirection: "row",
     gap: spacing.sm,
     width: "100%",
     alignItems: "center",
+    flexWrap: "wrap",
   },
   actionBtn: {
     flex: 1,
-    minWidth: 0,
+    minWidth: 140,
+    flexGrow: 1,
+  },
+  actionBtnCancel: {
+    flex: 1,
+    minWidth: 100,
+    flexGrow: 1,
   },
   cancelActionBtn: {
     flexDirection: "row",
@@ -2390,6 +2567,41 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.sm,
+  },
+  evalDetailGrid: {
+    paddingVertical: spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+    gap: spacing.xs,
+  },
+  evalDetailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    paddingVertical: 2,
+  },
+  evalDetailLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontSize: 11,
+    flexShrink: 0,
+  },
+  evalDetailValue: {
+    ...typography.smallSemibold,
+    color: colors.textPrimary,
+    fontSize: 12,
+    flexShrink: 1,
+    textAlign: "right",
+  },
+  evalRecipientBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    flexShrink: 1,
   },
   evalHeaderRow: {
     flexDirection: "row",

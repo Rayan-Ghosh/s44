@@ -53,6 +53,19 @@ class TransactionRead(BaseModel):
     risk_score: Optional[float] = 0.0
     risk_factors: Optional[list] = []
     reasons: Optional[list[str]] = []
+    # AVARAN PAY Part 2 persisted card fields
+    evaluation_id: Optional[str] = None
+    recipient_input: Optional[str] = None
+    recipient_type: Optional[str] = None
+    normalized_recipient: Optional[str] = None
+    display_name: Optional[str] = None
+    resolution_status: Optional[str] = None
+    note: Optional[str] = None
+    decision: Optional[str] = "ALLOW"
+    evaluation_timestamp: Optional[str] = None
+    workflow_stage: Optional[str] = "EVALUATION_COMPLETED"
+    guardian_required: Optional[bool] = False
+
 
 
 class AuthorizeTransactionRequest(BaseModel):
