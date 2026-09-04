@@ -94,13 +94,31 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
     isConfirmingRef.current = false;
     setIsLoading(true);
 
+    // PART 3: Build the selectable list from ConnectedAppsService only.
+    // KNOWN_PAYMENT_APPS is now only used for the actual UPI URI launch scheme (fallback).
+    // The user sees ONLY apps they have configured in Profile → Connected Apps.
     const refreshAppList = async (connectedList: ConnectedApp[]) => {
+      // Get device-detected apps for install status cross-reference
       const detected = await PaymentAppLauncherService.getAvailablePaymentApps(true);
 
-      const combined: CombinedPaymentAppOption[] = detected.map((devApp) => {
-        const matchingConfig = connectedList.find((c) => c.id === devApp.id);
-        const isEnabledInProfile = matchingConfig ? matchingConfig.isProtected : true;
-        const isInstalled = devApp.isInstalled;
+      // Filter connected list to UPI-type apps only (banking type has no UPI scheme)
+      const upiConnected = connectedList.filter(
+        (a) => a.type === "upi" && a.scheme
+      );
+
+      if (upiConnected.length === 0) {
+        // No connected UPI apps at all — show empty state
+        setAppOptions([]);
+        setIsLoading(false);
+        return;
+      }
+
+      const combined: CombinedPaymentAppOption[] = upiConnected.map((connApp) => {
+        // Match against device-detected apps for install status
+        const devApp = detected.find((d) => d.id === connApp.id);
+        // On web, treat as installed (for demo purposes); on native check device
+        const isInstalled = devApp ? devApp.isInstalled : Platform.OS === "web";
+        const isEnabledInProfile = connApp.isProtected;
         const isReadyToPay = isEnabledInProfile && isInstalled;
 
         let statusLabel: "READY TO PAY" | "DISABLED" | "NOT INSTALLED" = "READY TO PAY";
@@ -111,7 +129,12 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
         }
 
         return {
-          ...devApp,
+          id: connApp.id,
+          name: connApp.name,
+          packageName: connApp.packageName || devApp?.packageName || "",
+          scheme: connApp.scheme || devApp?.scheme || "upi://pay",
+          iconName: connApp.iconName,
+          isInstalled,
           isEnabledInProfile,
           isReadyToPay,
           statusLabel,
@@ -459,7 +482,20 @@ export const ChoosePaymentAppModal: React.FC<ChoosePaymentAppModalProps> = ({
                   {isLoading ? (
                     <View style={styles.loadingContainer}>
                       <ActivityIndicator size="small" color={colors.brand} />
-                      <Text style={styles.loadingText}>Verifying installed payment apps...</Text>
+                      <Text style={styles.loadingText}>Verifying connected payment apps...</Text>
+                    </View>
+                  ) : appOptions.length === 0 ? (
+                    /* PART 3: Empty state — no UPI apps connected in Profile */
+                    <View style={styles.emptyAppsState}>
+                      <Ionicons name="link-outline" size={28} color={colors.textMuted} />
+                      <Text style={styles.emptyAppsTitle}>No payment apps connected</Text>
+                      <Text style={styles.emptyAppsSub}>
+                        Go to{" "}
+                        <Text style={{ fontWeight: "700", color: colors.brand }}>
+                          Profile → Connected Apps
+                        </Text>
+                        {" "}to add a UPI payment app.
+                      </Text>
                     </View>
                   ) : (
                     <ScrollView style={styles.appsScroll} showsVerticalScrollIndicator={false}>
@@ -661,6 +697,28 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.textMuted,
     fontSize: 12,
+  },
+  // PART 3: Empty state styles when no UPI apps are connected in Profile
+  emptyAppsState: {
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+  },
+  emptyAppsTitle: {
+    ...typography.bodySemibold,
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  emptyAppsSub: {
+    ...typography.small,
+    color: colors.textSecondary,
+    fontSize: 12,
+    textAlign: "center",
+    lineHeight: 18,
   },
   appsScroll: {
     maxHeight: 300,

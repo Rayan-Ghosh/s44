@@ -395,13 +395,20 @@ export const PaymentsScreen: React.FC = () => {
         isSubmitted: false,
       });
 
+      // PART 1: Clear form inputs so the user can start a new payment immediately.
+      // The evaluation result card (evaluationResult state) is NOT cleared — it stays
+      // visible so the user can review the risk score, reasons, and action buttons.
+      setEntryRecipient("");
+      setEntryAmount("");
+      setEntryNote("");
+
       // Automatically select the newly persisted card if available
       if (persistedTx) {
         setSelectedTx(persistedTx);
       }
 
       await loadPayments();
-      showToast(`Evaluation persisted: ${derivedRiskLevel} risk`, "info");
+      showToast(`Evaluation complete: ${derivedRiskLevel} risk`, "info");
     } catch (err: any) {
       showToast(err?.message || "Unable to evaluate payment draft", "warning");
 
@@ -1631,64 +1638,77 @@ export const PaymentsScreen: React.FC = () => {
                         }}
                         activeOpacity={0.8}
                       >
-                        <View style={styles.txnLeft}>
-                          <View
-                            style={[
-                              styles.txnIconBox,
-                              isRisk && styles.txnIconBoxRisk,
-                              isSelected && styles.txnIconBoxSelected,
-                            ]}
-                          >
-                            <Ionicons
-                              name={isRisk ? "warning" : "checkmark-circle"}
-                              size={18}
-                              color={isRisk ? colors.threat : colors.safe}
-                            />
-                          </View>
-                          <View style={styles.txnTextCol}>
-                            <Text style={styles.txnMerchant}>{item.merchant}</Text>
-                            <Text style={styles.txnMeta}>
-                              {item.paymentAppUsed || item.paymentMethod} · {item.date}
-                            </Text>
-                          </View>
-                        </View>
+                        {/* Derive risk level before applying any colors so MEDIUM ≠ HIGH */}
+                        {(() => {
+                          const itemLevel = item.riskLevel || getRiskLevelFromScore(item.riskScore ?? 0);
+                          const riskIconColor = isRisk
+                            ? (itemLevel === "HIGH" ? colors.threat : colors.caution)
+                            : colors.safe;
+                          const riskAmtColor = isRisk
+                            ? (itemLevel === "HIGH" ? colors.threat : colors.caution)
+                            : colors.textPrimary;
+                          const iconBoxStyle = isRisk
+                            ? (itemLevel === "HIGH" ? styles.txnIconBoxRisk : styles.txnIconBoxCaution)
+                            : {};
 
-                        <View style={styles.txnRight}>
-                          <AnimatedAmount
-                            amount={item?.amount ?? 0}
-                            prefix="₹"
-                            style={[
-                              styles.txnAmount,
-                              isRisk && { color: colors.threat },
-                            ]}
-                            animateOnlyOnce={hasPlayedListStaggerRef.current}
-                            duration={600}
-                          />
-                          {(() => {
-                            const itemLevel = item.riskLevel || getRiskLevelFromScore(item.riskScore ?? 0);
-                            return (
-                              <StatusBadge
-                                label={
-                                  isRisk
-                                    ? `${itemLevel} RISK`
-                                    : item.status === "Reported"
-                                    ? "Reported"
-                                    : item.status === "Blocked"
-                                    ? "Blocked"
-                                    : "Completed"
-                                }
-                                status={
-                                  isRisk
-                                    ? (itemLevel === "HIGH" ? "high" : itemLevel === "MEDIUM" ? "medium" : "low")
-                                    : item.status === "Reported"
-                                    ? "escalated"
-                                    : "low"
-                                }
-                                dot={false}
-                              />
-                            );
-                          })()}
-                        </View>
+                          return (
+                            <>
+                              <View style={styles.txnLeft}>
+                                <View
+                                  style={[
+                                    styles.txnIconBox,
+                                    iconBoxStyle,
+                                    isSelected && styles.txnIconBoxSelected,
+                                  ]}
+                                >
+                                  <Ionicons
+                                    name={isRisk ? "warning" : "checkmark-circle"}
+                                    size={18}
+                                    color={riskIconColor}
+                                  />
+                                </View>
+                                <View style={styles.txnTextCol}>
+                                  <Text style={styles.txnMerchant}>{item.merchant}</Text>
+                                  <Text style={styles.txnMeta}>
+                                    {item.paymentAppUsed || item.paymentMethod} · {item.date}
+                                  </Text>
+                                </View>
+                              </View>
+
+                              <View style={styles.txnRight}>
+                                <AnimatedAmount
+                                  amount={item?.amount ?? 0}
+                                  prefix="₹"
+                                  style={[
+                                    styles.txnAmount,
+                                    { color: riskAmtColor },
+                                  ]}
+                                  animateOnlyOnce={hasPlayedListStaggerRef.current}
+                                  duration={600}
+                                />
+                                <StatusBadge
+                                  label={
+                                    isRisk
+                                      ? `${itemLevel} RISK`
+                                      : item.status === "Reported"
+                                      ? "Reported"
+                                      : item.status === "Blocked"
+                                      ? "Blocked"
+                                      : "Completed"
+                                  }
+                                  status={
+                                    isRisk
+                                      ? (itemLevel === "HIGH" ? "high" : itemLevel === "MEDIUM" ? "medium" : "low")
+                                      : item.status === "Reported"
+                                      ? "escalated"
+                                      : "low"
+                                  }
+                                  dot={false}
+                                />
+                              </View>
+                            </>
+                          );
+                        })()}
                       </TouchableOpacity>
                     </NewPaymentHighlightCard>
                   </StaggerRevealCard>
@@ -2269,6 +2289,11 @@ const styles = StyleSheet.create({
   txnIconBoxRisk: {
     backgroundColor: "rgba(163,61,53,0.07)",
     borderColor: colors.threatBorder,
+  },
+  // PART 2: Amber/caution icon box for MEDIUM-risk transactions
+  txnIconBoxCaution: {
+    backgroundColor: "rgba(168,117,32,0.07)",
+    borderColor: colors.cautionBorder,
   },
   txnIconBoxSelected: {
     backgroundColor: colors.surface,
