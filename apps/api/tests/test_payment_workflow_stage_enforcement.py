@@ -544,25 +544,40 @@ def test_confirmation_endpoint_rejections_and_acceptance(client: TestClient, tes
     db_session.commit()
     db_session.refresh(txn)
 
-    # 1. Missing stage unconditionally rejected (even when require_stage is omitted, false, or header absent)
-    res_no_stage = client.post(f"/api/v1/transactions/{txn.id}/confirm")
-    assert res_no_stage.status_code == 400
-    assert "PAYMENT_COMPLETED" in res_no_stage.json()["detail"]
-
-    res_empty_body = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={})
-    assert res_empty_body.status_code == 400
-    assert "PAYMENT_COMPLETED" in res_empty_body.json()["detail"]
-
-    res_req_false = client.post(f"/api/v1/transactions/{txn.id}/confirm?require_stage=false")
-    assert res_req_false.status_code == 400
-    assert "PAYMENT_COMPLETED" in res_req_false.json()["detail"]
-
-    res_header_false = client.post(
-        f"/api/v1/transactions/{txn.id}/confirm",
-        headers={"X-Require-Stage": "false"},
+    # 1. Stage is optional by default, same as /authorize — a caller that
+    # omits it (e.g. the real mobile confirm-without-stage path, or a
+    # retry) is not blocked. Strict mode (require_stage) is opt-in and
+    # exercised on its own transaction below so it doesn't consume this
+    # one's ALLOWED state before the rejection tests that follow.
+    strict_txn = Transaction(
+        user_id=test_data["user"].id,
+        recipient_id=test_data["recipient"].id,
+        device_id=test_data["device"].id,
+        amount=Decimal("500.00"),
+        status=TransactionStatus.ALLOWED,
+        authorization_required=False,
     )
-    assert res_header_false.status_code == 400
-    assert "PAYMENT_COMPLETED" in res_header_false.json()["detail"]
+    db_session.add(strict_txn)
+    db_session.commit()
+    db_session.refresh(strict_txn)
+
+    res_req_true = client.post(f"/api/v1/transactions/{strict_txn.id}/confirm?require_stage=true")
+    assert res_req_true.status_code == 400
+    assert "PAYMENT_COMPLETED" in res_req_true.json()["detail"]
+
+    res_header_true = client.post(
+        f"/api/v1/transactions/{strict_txn.id}/confirm",
+        headers={"X-Require-Stage": "true"},
+    )
+    assert res_header_true.status_code == 400
+    assert "PAYMENT_COMPLETED" in res_header_true.json()["detail"]
+
+    res_strict_ok = client.post(
+        f"/api/v1/transactions/{strict_txn.id}/confirm?require_stage=true",
+        json={"stage": "PAYMENT_COMPLETED"},
+    )
+    assert res_strict_ok.status_code == 200
+    assert res_strict_ok.json()["status"] == "COMPLETED"
 
     # 2. EVALUATION_COMPLETED rejected
     res = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "EVALUATION_COMPLETED"})
@@ -598,10 +613,11 @@ def test_confirmation_endpoint_rejections_and_acceptance(client: TestClient, tes
     assert res.status_code == 400
     assert "Conflicting workflow stage values" in res.json()["detail"]
 
-    # 7. Valid acceptance
+    # 7. Valid acceptance — confirm now advances straight to the final
+    # COMPLETED status in one call (AVARAN PAY spec §5/§8), not CONFIRMED.
     res = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert res.status_code == 200
-    assert res.json()["status"] == TransactionStatus.CONFIRMED.value
+    assert res.json()["status"] == TransactionStatus.COMPLETED.value
 
 
 def test_guardian_endpoint_rejections(client: TestClient, test_data: dict, db_session: Session):

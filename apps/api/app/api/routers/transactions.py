@@ -321,6 +321,12 @@ def confirm_transaction(
     /api/v1/payments/{id}/confirm surface — idempotent (a repeat call
     against an already-COMPLETED transaction returns the current state
     instead of erroring, per spec §12).
+
+    Stage is optional-by-default, same as /authorize: when the caller does
+    supply one, it's validated (rejecting EVALUATION_COMPLETED, risk levels,
+    or any stage other than PAYMENT_COMPLETED); when omitted, confirmation
+    proceeds as before unless the caller explicitly opts into strict mode
+    via require_stage/X-Require-Stage.
     """
     body_stage_provided = payload is not None and "stage" in payload.model_fields_set
     body_stage = payload.stage if payload is not None else None
@@ -337,10 +343,11 @@ def confirm_transaction(
             detail=conflict_err,
         )
 
-    if not stage_provided:
+    is_stage_required = require_stage or (x_require_stage is not None and x_require_stage.lower() in ("true", "1"))
+    if stage_provided:
+        enforce_completion_stage(candidate_stage)
+    elif is_stage_required:
         enforce_completion_stage(None)
-
-    enforce_completion_stage(candidate_stage)
 
     try:
         result = payment_lifecycle_service.confirm(
