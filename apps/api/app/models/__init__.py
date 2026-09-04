@@ -11,6 +11,7 @@ from app.models.device import Device
 from app.models.fraud_case import FraudCase
 from app.models.guardian_request import GuardianRequest
 from app.models.model_prediction import ModelPrediction
+from app.models.notification import Notification
 from app.models.otp_verification import OtpVerification
 from app.models.password_reset_authorization import PasswordResetAuthorization
 from app.models.recipient import Recipient
@@ -33,6 +34,7 @@ __all__ = [
     "FraudCase",
     "GuardianRequest",
     "ModelPrediction",
+    "Notification",
     "OtpVerification",
     "PasswordResetAuthorization",
     "Recipient",

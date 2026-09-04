@@ -68,4 +68,5 @@ class SubmitTransactionRequest(BaseModel):
 class ConfirmTransactionRequest(BaseModel):
     stage: Optional[str] = Field(default=None, description="Workflow stage: must be PAYMENT_COMPLETED")
     payment_app_used: Optional[str] = Field(default=None, description="Payment app used, e.g. Google Pay UPI")
+    utr_reference: Optional[str] = Field(default=None, max_length=64, description="UPI transaction reference, if available")
 

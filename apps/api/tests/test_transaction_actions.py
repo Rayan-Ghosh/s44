@@ -12,13 +12,15 @@ def _create_txn(client):
 
 
 def test_confirm_transaction_endpoint(client):
+    # AVARAN PAY spec §5/§8: confirm now moves the transaction through
+    # CONFIRMED to the final immutable COMPLETED status in one call.
     txn_id = _create_txn(client)
     res = client.post(f"/api/v1/transactions/{txn_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert res.status_code == 200
-    assert res.json()["status"] == "CONFIRMED"
+    assert res.json()["status"] == "COMPLETED"
 
     txn = client.get(f"/api/v1/transactions/{txn_id}").json()
-    assert txn["status"] == "CONFIRMED"
+    assert txn["status"] == "COMPLETED"
 
 
 def test_cancel_transaction_endpoint(client):
@@ -45,22 +47,25 @@ def test_report_transaction_endpoint(client):
 def test_cannot_confirm_or_cancel_already_confirmed_transaction(client):
     txn_id = _create_txn(client)
 
-    # 1. First confirmation succeeds
-    res1 = client.post(f"/api/v1/transactions/{txn_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
+    # 1. First confirmation succeeds and reaches the final COMPLETED status
+    res1 = client.post(f"/api/v1/transactions/{txn_id}/confirm")
     assert res1.status_code == 200
-    assert res1.json()["status"] == "CONFIRMED"
+    assert res1.json()["status"] == "COMPLETED"
 
-    # 2. Repeated confirmation must fail with 400 Bad Request
-    res2 = client.post(f"/api/v1/transactions/{txn_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
-    assert res2.status_code == 400
-    assert "terminal status" in res2.json()["detail"].lower()
+    # 2. Repeated confirmation against a COMPLETED transaction is safe and
+    # idempotent (spec §12): same 200/COMPLETED response, flagged as a
+    # duplicate, not an error.
+    res2 = client.post(f"/api/v1/transactions/{txn_id}/confirm")
+    assert res2.status_code == 200
+    assert res2.json()["status"] == "COMPLETED"
+    assert res2.json()["duplicate"] is True
 
-    # 3. Cancellation on completed/confirmed transaction must fail with 400 Bad Request
+    # 3. Cancellation on a completed transaction must fail with 400 Bad Request
     res3 = client.post(f"/api/v1/transactions/{txn_id}/cancel")
     assert res3.status_code == 400
     assert "terminal status" in res3.json()["detail"].lower()
 
-    # 4. Status remains CONFIRMED in database
+    # 4. Status remains COMPLETED in database
     txn = client.get(f"/api/v1/transactions/{txn_id}").json()
-    assert txn["status"] == "CONFIRMED"
+    assert txn["status"] == "COMPLETED"
 

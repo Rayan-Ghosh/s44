@@ -103,10 +103,13 @@ REGISTRY: dict[str, DatasetEntry] = {
             "be read programmatically (Kaggle serves a JavaScript app, so the "
             "licence field is not in the fetched HTML). Widely cited as CC BY-SA "
             "4.0, but that is unconfirmed here and must be checked by a human on "
-            "the dataset page before any public submission."
+            "the dataset page before any public submission. The project owner "
+            "has explicitly authorized local use of this file for internal "
+            "prototype work (2026-09-04) — this does NOT resolve the "
+            "public-redistribution question above."
         ),
         verification=VerificationStatus.PARTIALLY_VERIFIED,
-        download=DownloadStatus.NOT_DOWNLOADED,
+        download=DownloadStatus.PRESENT,
         relative_path="paysim/PS_20174392719_1491204439457_log.csv",
         adapter="ml.data.adapters.paysim_adapter.PaySimAdapter",
         target_field="isFraud",
@@ -133,8 +136,19 @@ REGISTRY: dict[str, DatasetEntry] = {
             "competition/non-commercial use with redistribution prohibited, and "
             "typically requires accepting the rules while signed in. Because the "
             "terms are unconfirmed AND this is real customer data, this dataset "
-            "is NOT downloaded. A human must accept the rules and confirm "
-            "hackathon use is permitted before acquisition."
+            "was NOT downloaded by this project's governed acquisition path, and "
+            "`download` below is deliberately left NOT_DOWNLOADED — flipping it "
+            "to PRESENT while `verification` stays PENDING would defeat the "
+            "safety invariant ml/tests/test_canonical_and_registry.py checks for "
+            "(PRESENT implying a verified/safe-to-use dataset). The project owner "
+            "has separately provided the raw files directly and explicitly "
+            "authorized LOCAL, READ-ONLY use for EDA and evaluation-only "
+            "generalization checks in this one retraining pass (2026-09-04) — "
+            "recorded here in prose, not in the structured status fields, "
+            "because that authorization is exceptional and does not resolve the "
+            "underlying Kaggle licence question above. This dataset must not be "
+            "pooled into any training target (ml/datasets/preparation.py already "
+            "refuses this — see MODEL_DATASET_MAPPING) or redistributed."
         ),
         verification=VerificationStatus.PENDING,
         download=DownloadStatus.NOT_DOWNLOADED,
@@ -148,6 +162,46 @@ REGISTRY: dict[str, DatasetEntry] = {
             "features anonymized. Identity file covers only part of transactions."
         ),
         is_real_world_data=True,
+    ),
+    "indian_online_scam": DatasetEntry(
+        name="indian_online_scam",
+        description=(
+            "Indian card/online payment fraud transactions with fraud-type "
+            "categories (phishing, scam, identity theft, malware, payment card "
+            "fraud)."
+        ),
+        source_url="provided directly by project owner — no public URL",
+        provenance=(
+            "Provided directly by the project owner (2026-09-04), not a public "
+            "download — no source URL to record. See docs/EDA_REPORT.md for the "
+            "full measurement this entry is based on."
+        ),
+        licence="Unknown — provided directly, no licence metadata available.",
+        licence_notes=(
+            "No licence text accompanies this file. Used here only under the "
+            "project owner's own authorization for internal prototype work; "
+            "must not be redistributed or used outside this project without "
+            "the owner separately confirming its terms."
+        ),
+        verification=VerificationStatus.PARTIALLY_VERIFIED,
+        download=DownloadStatus.PRESENT,
+        relative_path="indian_scam/transactions.csv",
+        adapter="ml.data.adapters.indian_scam_adapter.IndianScamAdapter",
+        target_field="is_fraudulent",
+        tasks=(Task.TRANSACTION_FRAUD, Task.ANOMALY_VALIDATION),
+        limitations=(
+            "The raw file is a ~4x self-concatenation (6,753 of 7,953 rows are "
+            "exact duplicates of a ~1,200-row export) — the adapter deduplicates "
+            "before use. Once deduplicated, customers do not repeat (1,132 "
+            "unique customers / 1,200 rows), so it cannot support S40's original "
+            "per-user behavioural feature design — used with the recipient-"
+            "centric feature set instead (merchants do repeat: 100 merchants / "
+            "1,200 rows). fraud_type categories are nearly evenly split at an "
+            "overall 31% fraud rate, far above any organically-observed rate — "
+            "the signature of a constructed/practice dataset, documented as such "
+            "rather than presented as organic real-world logs."
+        ),
+        is_real_world_data=False,
     ),
     "credit_card_ulb": DatasetEntry(
         name="credit_card_ulb",

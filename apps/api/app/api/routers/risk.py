@@ -8,11 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.alert import Alert
-from app.models.enums import AlertStatus, PaymentWorkflowStage, RiskDecision, RiskLevel, TransactionStatus
+from app.models.enums import PaymentWorkflowStage
 from app.repositories import risk_repository, transaction_repository
 from app.schemas.risk import RiskEvaluationRequest, RiskScoreRead
-from ml.inference.predict import get_predictor
+from app.services import recipient_profile_service, risk_service
+from app.services.security_audit_service import SecurityAuditService
 
 logger = logging.getLogger(__name__)
 
@@ -38,101 +38,78 @@ def evaluate_risk(payload: dict, db: Session = Depends(get_db)) -> dict:
     """
     Executes live multi-signal ML scoring (<20ms) for an existing transaction or raw payload.
     Persists RiskScore and RiskFactor rows if backed by DB and returns the authoritative RiskDecisionPackage.
+
+    Delegates to app/services/risk_service.py, shared with the new
+    POST /api/v1/payments/{id}/analyse surface.
     """
-    predictor = get_predictor()
-
     txn_id = payload.get("transaction_id")
-    txn = transaction_repository.get_transaction(db, int(txn_id)) if (txn_id and str(txn_id).isdigit()) else None
-
-    if txn:
-        user_risk_profile = txn.user.risk_profile if txn.user and txn.user.risk_profile else {}
-        inference_input = {
-            "transaction": {
-                "transaction_id": str(txn.id),
-                "amount": float(txn.amount),
-                "recipient_id": str(txn.recipient_id),
-                "timestamp": txn.timestamp.isoformat() if txn.timestamp else "",
-                "device_id": str(txn.device_id),
-                "location": txn.location or "",
-                "voice_transcript": "",
-            },
-            "user_profile": user_risk_profile,
-        }
-    else:
-        # Direct raw transaction inference
-        inference_input = payload if "transaction" in payload else {"transaction": payload, "user_profile": payload.get("user_profile", {})}
+    txn_id_int = int(txn_id) if (txn_id and str(txn_id).isdigit()) else None
 
     try:
-        decision_package = predictor.predict(inference_input)
+        decision_package = risk_service.evaluate(db, txn_id_int, raw_payload=payload)
     except Exception:
-        logger.exception(
-            "ML risk scoring failed for transaction_id=%s", txn.id if txn else txn_id
-        )
         raise HTTPException(
             status_code=503,
             detail="Risk scoring is temporarily unavailable. Please try again.",
         )
 
-    # Map decision package to DB enums
-    level_map = {"LOW": RiskLevel.LOW, "MEDIUM": RiskLevel.MEDIUM, "HIGH": RiskLevel.HIGH}
-    decision_map = {
-        "ALLOW": RiskDecision.ALLOW,
-        "WARN_CHOICE": RiskDecision.WARN,
-        "CONFIRM_OR_CANCEL": RiskDecision.CONFIRM_OR_CANCEL,
-    }
-
-    r_level = level_map.get(decision_package["risk_level"], RiskLevel.LOW)
-    r_dec = decision_map.get(decision_package["decision"], RiskDecision.ALLOW)
-
-    # Format risk factors for storage
-    factors_to_save = []
-    for factor_name in decision_package.get("risk_factors", []):
-        pct = decision_package.get("risk_contributions_pct", {}).get(factor_name, 0.0)
-        factors_to_save.append({
-            "factor_type": "ml_signal",
-            "name": factor_name,
-            "contribution": pct,
-            "explanation": factor_name.replace("_", " ").title(),
-        })
-
-    # Save to database if transaction exists in DB
-    if txn:
-        saved_score = risk_repository.save_risk_evaluation(
-            db,
-            transaction_id=txn.id,
-            fraud_probability=float(decision_package.get("sub_scores", {}).get("transaction_fraud", 0.0)),
-            final_score=float(decision_package["risk_score"]),
-            risk_level=r_level,
-            decision=r_dec,
-            risk_factors=factors_to_save,
+    if txn_id_int:
+        SecurityAuditService.log_event(
+            "RISK_EVALUATED",
+            transaction_id=txn_id_int,
+            details={"risk_level": decision_package.get("risk_level"), "risk_score": decision_package.get("risk_score")},
+            db=db,
         )
 
-        # Update transaction status and authorization flags based on risk level
-        if r_level == RiskLevel.HIGH:
-            txn.authorization_required = True
-            txn.authorization_status = "PENDING"
-            txn.status = TransactionStatus.PENDING_AUTHORIZATION
-        elif r_level == RiskLevel.LOW and txn.status == TransactionStatus.PENDING:
-            txn.authorization_required = False
-            txn.authorization_status = "NONE"
-            txn.status = TransactionStatus.ALLOWED
-        elif r_level == RiskLevel.MEDIUM and txn.status == TransactionStatus.PENDING:
-            txn.authorization_required = False
-            txn.authorization_status = "NONE"
-            txn.status = TransactionStatus.AWAITING_CONFIRMATION
-
-        # If HIGH or MEDIUM, create an Alert for analyst console
-        if r_level in (RiskLevel.HIGH, RiskLevel.MEDIUM):
-            alert = Alert(
-                transaction_id=txn.id,
-                risk_score_id=saved_score.id,
-                severity=r_level,
-                summary="; ".join(decision_package.get("plain_language_reasons", [])) or f"Flagged {r_level.value} Risk UPI Payment (₹{txn.amount})",
-                status=AlertStatus.OPEN,
-            )
-            db.add(alert)
-        db.commit()
-
+    # Tags the response with the workflow stage this endpoint produces, so
+    # the client's next call (authorize/submit/confirm) can be validated by
+    # app/services/payment_workflow_guard.py — an evaluation result must
+    # never itself be usable as an authorization/submission/completion
+    # stage. Status transitions and Alert creation for this decision are
+    # handled inside risk_service.evaluate() itself (shared with
+    # POST /api/v1/payments/{id}/analyse).
     decision_package["stage"] = PaymentWorkflowStage.EVALUATION_COMPLETED.value
     return decision_package
+
+
+@router.post("/{transaction_id}/recipient-evaluate")
+def evaluate_recipient_risk(transaction_id: int, db: Session = Depends(get_db)) -> dict:
+    """
+    Real-data, recipient-centric second opinion (s40_transaction_fraud_real /
+    s40_behaviour_anomaly_real — see docs/FRAUD_MODEL_CARD_REAL.md).
+
+    Deliberately ADDITIVE, not a replacement for POST /evaluate: this is a
+    newly-trained model with materially weaker validated real-data support
+    (see the model cards' own honesty sections) and a different feature
+    contract. It is not wired into the authoritative risk decision
+    (app/services/risk_service.py) or the payment state machine — callers
+    get a second, clearly-separate signal, not a second authority.
+    """
+    from ml.inference.recipient_predictor import get_recipient_predictor
+
+    txn = transaction_repository.get_transaction(db, transaction_id)
+    if txn is None:
+        raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} not found.")
+    if txn.recipient is None or not txn.recipient.recipient_hash:
+        raise HTTPException(status_code=422, detail="Transaction has no recipient to evaluate.")
+
+    features = recipient_profile_service.compute_recipient_features(
+        db,
+        recipient_hash=txn.recipient.recipient_hash,
+        amount=float(txn.amount),
+        as_of=txn.timestamp,
+        exclude_transaction_id=txn.id,
+    )
+
+    predictor = get_recipient_predictor()
+    if not predictor.available:
+        raise HTTPException(
+            status_code=503,
+            detail="Real-data recipient model is not trained/registered yet.",
+        )
+
+    result = predictor.predict(features)
+    result["transaction_id"] = transaction_id
+    result["features_used"] = features
+    return result
 

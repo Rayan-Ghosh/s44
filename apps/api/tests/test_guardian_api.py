@@ -193,7 +193,20 @@ def test_guardian_request_expired_blocks_approval_and_blocks_transaction(client,
     assert detail["outcome"] == "TIMEOUT"
     assert detail["remaining_seconds"] == 0
 
-    # Associated transaction must be permanently blocked (GUARDIAN_REJECTED)
+    # Associated transaction must be permanently blocked. AVARAN PAY spec §6:
+    # expiry is a distinct hard-stop from an explicit Guardian rejection.
     txn = client.get(f"/api/v1/transactions/{txn_id}").json()
-    assert txn["status"] == "GUARDIAN_REJECTED"
+    assert txn["status"] == "GUARDIAN_TIMEOUT"
+
+
+def test_user_override_endpoint_removed(client):
+    """AVARAN PAY spec §6: Guardian rejection/expiry stops payment with no
+    override path. The former PIN-bypass endpoint must no longer exist."""
+    user_id, contact_id, txn_id = _setup_high_risk_txn(client)
+    req_id = client.post(
+        "/api/v1/guardian/requests", json={"transaction_id": txn_id, "trusted_contact_id": contact_id}
+    ).json()["id"]
+
+    res = client.post(f"/api/v1/guardian/requests/{req_id}/user-override", json={"pin": "1234"})
+    assert res.status_code == 404
 

@@ -58,24 +58,29 @@ class ModelDataset:
 MODEL_DATASET_MAPPING: dict[ModelTarget, ModelDataset] = {
     ModelTarget.TRANSACTION_FRAUD: ModelDataset(
         target=ModelTarget.TRANSACTION_FRAUD,
-        training_datasets=("s40_synthetic",),
-        evaluation_only=("paysim", "ieee_cis"),
+        training_datasets=("s40_synthetic", "paysim", "indian_online_scam"),
+        evaluation_only=("ieee_cis",),
         rationale=(
-            "CORRECTED IN PHASE 4. PaySim was originally listed as a training "
-            "source (spec §36.1 names it as the starting point), but it is "
-            "structurally incompatible with S40's feature space and has been "
-            "demoted to evaluation-only. S40 scores a payment by how far it "
-            "deviates from THAT USER's own history; in PaySim only ~0.15% of "
-            "originating accounts appear in more than one transaction, so every "
-            "row is effectively a cold start. Measured on PaySim-shaped data, "
-            "amount_zscore and amount_vs_average come out 100% null and "
-            "profile_is_cold is 1 for every row — a degenerate feature matrix. "
-            "PaySim also lacks device, location and wall-clock time, so only 6 "
-            "of the 13 model features are computable at all. "
-            "S40 synthetic therefore remains the only source that can express "
-            "per-user behavioural deviation. IEEE-CIS stays evaluation-only for "
-            "the separate reasons in spec §36.2 (chargeback-derived e-commerce "
-            "label) and remains licence-blocked."
+            "REVISED 2026-09-04 (real-data retraining pass). Phase 4 originally "
+            "demoted PaySim to evaluation-only because it cannot support S40's "
+            "*original* per-user (USER_ID-keyed) behavioural features — only "
+            "~0.15% of originating accounts (nameOrig) repeat. That measurement "
+            "still holds and is not being relitigated. What changed: the model "
+            "trained in this pass uses a separate, RECIPIENT-centric feature "
+            "set (ml/features/recipient_features.py: recipient_amount_zscore, "
+            "recipient_frequency, new_recipient, etc., keyed on RECIPIENT_ID "
+            "not USER_ID) instead of replacing the original design. PaySim's "
+            "*recipients* (nameDest) repeat in ~83% of rows — the opposite of "
+            "its sender-side problem — so this feature set is genuinely "
+            "computable on it. The same reframing applies to the Indian Online "
+            "Scam dataset, whose customers do not repeat (see "
+            "docs/EDA_REPORT.md — an earlier EDA pass mistakenly reported "
+            "repeat customers, which was an artefact of a ~4x-duplicated raw "
+            "file) but whose 100 merchants do (~12 transactions/merchant). "
+            "IEEE-CIS stays evaluation-only: it has no recipient/payee concept "
+            "at all (card-not-present e-commerce), so even the recipient-"
+            "centric feature set is not computable on it, on top of its "
+            "separate label-semantics and licence issues (spec §36.2)."
         ),
         excluded={
             "credit_card_ulb": (
@@ -88,20 +93,25 @@ MODEL_DATASET_MAPPING: dict[ModelTarget, ModelDataset] = {
     ),
     ModelTarget.BEHAVIOUR_ANOMALY: ModelDataset(
         target=ModelTarget.BEHAVIOUR_ANOMALY,
-        training_datasets=("s40_synthetic",),
-        evaluation_only=("paysim", "credit_card_ulb"),
+        training_datasets=("s40_synthetic", "paysim", "indian_online_scam"),
+        evaluation_only=("credit_card_ulb",),
         rationale=(
-            "The anomaly model answers 'is this unusual for THIS user' "
-            "(spec §40), so it needs per-user histories. S40 synthetic is the "
-            "only source that reliably provides them with known ground truth. "
-            "PaySim provides real per-user sequences for sanity-checking. "
-            "ULB is useful only as an independent check that the imbalance and "
-            "anomaly-scoring technique behaves, since it has no user identity."
+            "REVISED 2026-09-04, same reasoning as TRANSACTION_FRAUD above: the "
+            "anomaly model in this pass answers 'is this unusual for THIS "
+            "RECIPIENT' rather than 'this user', which PaySim and the Indian "
+            "dataset both support (recipient/merchant repeat activity) even "
+            "though neither supports per-user history. S40 synthetic still "
+            "provides the per-user-keyed ground truth used for the original "
+            "design's own validation. ULB remains useful only as an "
+            "independent imbalance/technique check, since it has no recipient "
+            "identity either."
         ),
         excluded={
             "ieee_cis": (
-                "Its user identity is a card-number proxy, not a verified user, "
-                "so per-user 'normal behaviour' would be unreliable."
+                "No recipient/payee concept at all (card-not-present "
+                "e-commerce) — neither the original per-user nor the "
+                "recipient-centric feature set is computable on it. Its user "
+                "identity is also a card-number proxy, not a verified user."
             ),
             "teleantifraud": "Voice data.",
         },

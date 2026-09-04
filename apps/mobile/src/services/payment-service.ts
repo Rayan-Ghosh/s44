@@ -182,12 +182,20 @@ const STATUS_MAP: Record<string, UserTransaction["status"]> = {
   PENDING_AUTHORIZATION: "Held",
   AUTHORIZED: "Held",
   PENDING_GUARDIAN_APPROVAL: "Held",
+  // AVARAN PAY spec addition: UPI app launched, awaiting return/confirmation.
+  PAYMENT_PENDING: "Held",
   ALLOWED: "Safe",
   CONFIRMED: "Completed",
+  // AVARAN PAY spec addition: final immutable record, one step after CONFIRMED.
+  COMPLETED: "Completed",
   GUARDIAN_APPROVED: "Approved by you",
-  GUARDIAN_TIMEOUT_USER_OVERRODE: "Approved by you",
   CANCELLED: "Blocked",
   GUARDIAN_REJECTED: "Blocked",
+  // AVARAN PAY spec addition: replaces GUARDIAN_TIMEOUT_USER_OVERRODE, which
+  // no longer exists backend-side — expiry is now a hard stop, not an
+  // override the user could proceed past.
+  GUARDIAN_TIMEOUT: "Blocked",
+  BLOCKED: "Blocked",
   REPORTED: "Reported",
 };
 

@@ -25,10 +25,24 @@ class TransactionStatus(str, enum.Enum):
     PENDING_GUARDIAN_APPROVAL = "PENDING_GUARDIAN_APPROVAL"
     GUARDIAN_APPROVED = "GUARDIAN_APPROVED"
     GUARDIAN_REJECTED = "GUARDIAN_REJECTED"
-    GUARDIAN_TIMEOUT_USER_OVERRODE = "GUARDIAN_TIMEOUT_USER_OVERRODE"
+    # AVARAN PAY spec addition: proactive 120s Guardian expiry (spec §6) is a
+    # hard terminal stop, distinct from an explicit rejection. Replaces the
+    # former GUARDIAN_TIMEOUT_USER_OVERRODE, which let a user PIN-bypass a
+    # timed-out Guardian hold — removed because the spec requires expiry to
+    # stop the payment unconditionally, with no override path.
+    GUARDIAN_TIMEOUT = "GUARDIAN_TIMEOUT"
+    # AVARAN PAY spec addition (spec §8): transaction has launched the
+    # selected UPI app and is awaiting return/confirmation.
+    PAYMENT_PENDING = "PAYMENT_PENDING"
     CONFIRMED = "CONFIRMED"
+    # AVARAN PAY spec addition (spec §5, §8): final immutable completed
+    # record, persisted one step after CONFIRMED.
+    COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
     REPORTED = "REPORTED"
+    # AVARAN PAY spec addition (spec §5): payment stopped by a separately
+    # configured security policy (not by user choice or Guardian outcome).
+    BLOCKED = "BLOCKED"
 
 
 class ConsentStatus(str, enum.Enum):

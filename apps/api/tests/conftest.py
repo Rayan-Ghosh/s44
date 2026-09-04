@@ -26,6 +26,13 @@ sys.path.insert(0, str(API_ROOT))
 _fd, _TEST_DB_PATH = tempfile.mkstemp(suffix=".db", prefix="s40_test_")
 os.close(_fd)
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
+# Several test files exercise FastAPI's real lifespan via
+# `with TestClient(app) as ...`. A live Guardian-expiry background worker
+# on its own thread would otherwise race the per-test schema
+# create_all/drop_all cycle on this shared engine — see
+# app/main.py / app/core/config.py. Guardian expiry itself is still
+# covered directly via app/services/guardian_service.py in tests.
+os.environ["ENABLE_GUARDIAN_EXPIRY_WORKER"] = "false"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

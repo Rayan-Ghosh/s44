@@ -47,6 +47,20 @@ class Settings(BaseSettings):
     integrity_secret_pepper: str = "avaran-integrity-hmac-pepper-2026"
     transaction_integrity_key: str = "avaran-dedicated-txn-integrity-key-dev-only"
 
+    # AVARAN PAY spec §7: biometric/device verification must carry a
+    # timestamp/expiry and be rejected once stale. Applied at confirmation
+    # time against Transaction.authorized_at.
+    authorization_max_age_seconds: int = 300
+
+    # AVARAN PAY spec §6: Guardian background expiry sweep interval.
+    guardian_expiry_sweep_interval_seconds: int = 5
+    # Disabled under the test harness (see apps/api/tests/conftest.py): the
+    # test suite recreates its schema per-test via Base.metadata.create_all/
+    # drop_all on a shared engine, and several test files exercise FastAPI's
+    # real lifespan via `with TestClient(app) as ...`; a live background
+    # worker on its own thread would race that per-test schema teardown.
+    enable_guardian_expiry_worker: bool = True
+
     # Symmetric key for app/core/contact_encryption.py (Fernet). Guards the
     # one place raw, reversible contact info (email/phone) is allowed to
     # live — see docs/PROFILE_CONTACT_INFO_DECISION.md. This dev default is

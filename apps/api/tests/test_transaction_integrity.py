@@ -97,7 +97,7 @@ def test_unchanged_transaction_authorizes_and_confirms(client: TestClient, integ
     # 2. Confirm without modifications -> must succeed
     confirm_resp = client.post(f"/api/v1/transactions/{txn.id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
     assert confirm_resp.status_code == 200
-    assert confirm_resp.json()["status"] == TransactionStatus.CONFIRMED.value
+    assert confirm_resp.json()["status"] == TransactionStatus.COMPLETED.value
 
 
 def test_amount_tamper_detected_and_invalidates_authorization(client: TestClient, integrity_setup: dict, db_session: Session):

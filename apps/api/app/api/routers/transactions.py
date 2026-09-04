@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.enums import FraudCaseStatus, GuardianOutcome, PaymentWorkflowStage, TransactionStatus
 from app.models.fraud_case import FraudCase
-from app.repositories import guardian_repository, transaction_repository
+from app.repositories import transaction_repository
 from app.schemas.transaction import (
     AuthorizeTransactionRequest,
     ConfirmTransactionRequest,
@@ -16,8 +16,14 @@ from app.schemas.transaction import (
     TransactionCreate,
     TransactionRead,
 )
-from app.services import transaction_service
+from app.services import payment_lifecycle_service, transaction_service
 from app.services.exceptions import TransactionNotFoundError, UserNotFoundError
+from app.services.payment_lifecycle_service import (
+    AuthorizationExpiredError,
+    AuthorizationRequiredError,
+    PaymentNotEligibleError,
+    TransactionIntegrityViolationError,
+)
 from app.services.payment_workflow_guard import (
     enforce_authorization_stage,
     enforce_completion_stage,
@@ -27,6 +33,7 @@ from app.services.payment_workflow_guard import (
 from app.services.security_audit_service import SecurityAuditService
 from app.services.session_service import SessionService
 from app.services.transaction_integrity_service import TransactionIntegrityService
+from app.services.transaction_state_machine import is_terminal
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
 
@@ -158,12 +165,7 @@ def authorize_transaction(
             )
 
     # Check terminal states
-    if txn.status in (
-        TransactionStatus.CONFIRMED,
-        TransactionStatus.CANCELLED,
-        TransactionStatus.REPORTED,
-        TransactionStatus.GUARDIAN_REJECTED,
-    ):
+    if is_terminal(txn.status):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot authorize a transaction in terminal status {txn.status.value}.",
@@ -195,6 +197,7 @@ def authorize_transaction(
                 user_id=txn.user_id,
                 transaction_id=txn.id,
                 details={"reason": "transaction details modified prior to authorization"},
+                db=db,
             )
 
             raise HTTPException(
@@ -221,6 +224,7 @@ def authorize_transaction(
         user_id=txn.user_id,
         transaction_id=txn.id,
         details={"method": auth_method},
+        db=db,
     )
 
     return {
@@ -309,7 +313,15 @@ def confirm_transaction(
     x_require_stage: Optional[str] = Header(None, alias="X-Require-Stage"),
     db: Session = Depends(get_db),
 ) -> dict:
-    """User confirms payment after review and required authorization with integrity validation."""
+    """User confirms payment after review and required authorization with integrity validation.
+
+    Workflow-stage validation (payment_workflow_guard) runs first and makes
+    zero database mutations on rejection; the actual confirmation then
+    delegates to app/services/payment_lifecycle_service.py, shared with the
+    /api/v1/payments/{id}/confirm surface — idempotent (a repeat call
+    against an already-COMPLETED transaction returns the current state
+    instead of erroring, per spec §12).
+    """
     body_stage_provided = payload is not None and "stage" in payload.model_fields_set
     body_stage = payload.stage if payload is not None else None
 
@@ -330,101 +342,44 @@ def confirm_transaction(
 
     enforce_completion_stage(candidate_stage)
 
-    txn = transaction_repository.get_transaction(db, transaction_id)
-
-    if txn is None:
-        raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} not found.")
-
-    if txn.status in (
-        TransactionStatus.CONFIRMED,
-        TransactionStatus.CANCELLED,
-        TransactionStatus.REPORTED,
-        TransactionStatus.GUARDIAN_REJECTED,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot confirm a transaction in terminal status {txn.status.value}.",
+    try:
+        result = payment_lifecycle_service.confirm(
+            db, transaction_id, utr_reference=payload.utr_reference if payload else None
         )
+    except TransactionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AuthorizationExpiredError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except AuthorizationRequiredError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except TransactionIntegrityViolationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except PaymentNotEligibleError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    # Authoritative Backend Enforcement: High-risk payments awaiting guardian approval cannot be confirmed directly
-    if txn.status == TransactionStatus.PENDING_GUARDIAN_APPROVAL:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Transaction is awaiting trusted guardian approval and cannot be confirmed directly.",
-        )
-
-    pending_req = guardian_repository.get_pending_request_for_transaction(db, txn.id)
-    if pending_req:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Transaction is awaiting trusted contact approval.",
-        )
-
-    # Authoritative Backend Enforcement: High-risk payments MUST be authorized
-    if txn.authorization_required:
-        if txn.authorization_status != "AUTHORIZED":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="High-risk transaction requires biometric authorization before confirmation.",
-            )
-
-        # Cryptographic Integrity Verification: Ensure no parameters changed after authorization
-        if not TransactionIntegrityService.verify_integrity(txn, txn.integrity_hash):
-            # Invalidate authorization and any guardian approvals atomically
-            txn.authorization_status = "PENDING"
-            txn.integrity_hash = None
-            txn.guardian_integrity_hash = None
-            txn.status = TransactionStatus.PENDING_AUTHORIZATION
-            for req in txn.guardian_requests:
-                if req.outcome == GuardianOutcome.APPROVED:
-                    req.outcome = GuardianOutcome.INVALIDATED
-                    req.resolution_notes = "Guardian approval invalidated due to transaction details modification."
-            db.commit()
-
-            SecurityAuditService.log_event(
-                "TRANSACTION_INTEGRITY_VIOLATION",
-                user_id=txn.user_id,
-                transaction_id=txn.id,
-                details={"action": "confirmation_rejected_authorization_invalidated"},
-            )
-
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Transaction details changed after security approval. Previous authorization has been invalidated and the transaction must be reviewed again.",
-            )
-
-    txn.status = TransactionStatus.CONFIRMED
-    db.commit()
-
+    txn = result.transaction
     return {
         "transaction_id": transaction_id,
-        "status": TransactionStatus.CONFIRMED.value,
-        "message": "Payment confirmed and released.",
+        "status": txn.status.value,
+        "duplicate": result.duplicate,
+        "message": "Payment already completed." if result.duplicate else "Payment confirmed and released.",
     }
 
 
 @router.post("/{transaction_id}/cancel")
 def cancel_transaction(transaction_id: int, db: Session = Depends(get_db)) -> dict:
-    """User cancels payment during hold window."""
-    txn = transaction_repository.get_transaction(db, transaction_id)
-    if txn is None:
-        raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} not found.")
+    """User cancels payment during hold window. Idempotent — cancelling an
+    already-cancelled transaction returns the current state instead of erroring."""
+    try:
+        result = payment_lifecycle_service.cancel(db, transaction_id)
+    except TransactionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PaymentNotEligibleError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if txn.status in (
-        TransactionStatus.CONFIRMED,
-        TransactionStatus.CANCELLED,
-        TransactionStatus.REPORTED,
-        TransactionStatus.GUARDIAN_REJECTED,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot cancel a transaction in terminal status {txn.status.value}.",
-        )
-
-    transaction_repository.update_transaction_status(db, transaction_id, TransactionStatus.CANCELLED)
     return {
         "transaction_id": transaction_id,
-        "status": TransactionStatus.CANCELLED.value,
+        "status": result.transaction.status.value,
         "message": "Payment cancelled. Money remains in your account.",
     }
 

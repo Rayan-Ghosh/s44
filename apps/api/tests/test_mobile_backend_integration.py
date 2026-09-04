@@ -103,11 +103,15 @@ def test_risk_evaluation_and_transaction_actions():
 
         confirm_res = client.post(f"/api/v1/transactions/{tx_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
         assert confirm_res.status_code == 200
-        assert confirm_res.json()["status"] == "CONFIRMED"
+        assert confirm_res.json()["status"] == "COMPLETED"
 
-        # 5. Duplicate Confirm / Cancel on Confirmed Transaction is rejected (Bug 2 fix)
-        dup_confirm = client.post(f"/api/v1/transactions/{tx_id}/confirm", json={"stage": "PAYMENT_COMPLETED"})
-        assert dup_confirm.status_code == 400
+        # 5. Duplicate confirm against a COMPLETED transaction is idempotent
+        # (AVARAN PAY spec §12): safe 200/COMPLETED response, flagged as a
+        # duplicate, not an error. Cancel on a completed transaction is
+        # still rejected.
+        dup_confirm = client.post(f"/api/v1/transactions/{tx_id}/confirm")
+        assert dup_confirm.status_code == 200
+        assert dup_confirm.json()["duplicate"] is True
         cancel_confirmed = client.post(f"/api/v1/transactions/{tx_id}/cancel")
         assert cancel_confirmed.status_code == 400
 
