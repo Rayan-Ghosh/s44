@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 
 import { CinematicCursor } from "@/components/cinematic/cursor"
 import { Narrative } from "@/components/cinematic/narrative"
+import { QrDownloadCard } from "@/components/cinematic/qr-download-card"
 
 /**
  * The landing route's client root.
@@ -37,6 +38,7 @@ export function Stage() {
     <div className="cinematic">
       <CinematicScene />
       <Narrative />
+      <QrDownloadCard />
       <CinematicCursor />
     </div>
   )

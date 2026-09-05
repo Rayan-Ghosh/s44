@@ -469,10 +469,14 @@ export function Narrative() {
             text="The moment before you tap confirm is the only moment that can still save the money."
             stagger={0.035} delay={0.75} />
           <div className="cta-row">
-            <a href="#held" className="btn btn--solid" onClick={(e) => {
-              e.preventDefault()
-              scrollToFraction(0.565)
-            }}>See a held payment</a>
+            <a
+              href="https://github.com/Rayan-Ghosh/SOA-IDEATHON-S40/releases/download/v1.0.0/AVARAN.apk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn--solid"
+            >
+              See a held payment
+            </a>
             <a href="#signals" className="btn btn--ghost" onClick={(e) => {
               e.preventDefault()
               scrollToFraction(0.1)
@@ -677,7 +681,12 @@ export function Narrative() {
             Your money, after it&rsquo;s gone, cannot.
           </p>
           <div className="cta-row cta-row--center">
-            <a href="#" className="btn btn--solid" onClick={(e) => e.preventDefault()}>
+            <a
+              href="https://github.com/Rayan-Ghosh/SOA-IDEATHON-S40/releases/download/v1.0.0/AVARAN.apk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn--solid"
+            >
               Add Avaran to your payments
             </a>
             <a href="#signals" className="btn btn--ghost" onClick={(e) => {
