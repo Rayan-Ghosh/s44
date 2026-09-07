@@ -60,9 +60,15 @@ class SecurityAuditService:
         ip_address: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
         db: Optional[Session] = None,
+        commit: bool = True,
     ) -> Dict[str, Any]:
         """
         Records a structured security event in application logs and database audit_logs if available.
+
+        `commit=False` lets a caller that's writing many rows in a loop (e.g. a
+        batch sweep) stage this row on the shared session without forcing a
+        separate round-trip transaction per row — the caller commits once for
+        the whole batch instead.
         """
         now = datetime.now(timezone.utc)
         safe_details = cls._sanitize_details(details)
@@ -104,7 +110,10 @@ class SecurityAuditService:
                     },
                 )
                 db.add(log_row)
-                db.commit()
+                if commit:
+                    db.commit()
+                else:
+                    db.flush()
             except Exception:
                 db.rollback()
                 logger.exception("Failed to persist audit log entry for event_type=%s", event_type)

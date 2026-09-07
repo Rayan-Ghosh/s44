@@ -14,6 +14,7 @@ import logging
 
 from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -68,6 +69,15 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+# Outermost middleware: compresses the final response body (JSON/text) when
+# the client negotiates it via Accept-Encoding. Starlette's GZipMiddleware
+# already skips bodies under minimum_size, skips responses that already carry
+# a Content-Encoding header or a known-compressed content type (images,
+# video, zip/gzip), and sets Vary: Accept-Encoding — so it won't double
+# compress or mangle already-compressed payloads.
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
 
 @app.middleware("http")
 async def security_headers_and_https_middleware(request: Request, call_next):
