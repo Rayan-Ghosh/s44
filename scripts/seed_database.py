@@ -33,6 +33,7 @@ from app.models.risk_score import RiskScore  # noqa: E402
 from app.models.transaction import Transaction  # noqa: E402
 from app.models.trusted_contact import TrustedContact  # noqa: E402
 from app.models.user_contact_info import UserContactInfo  # noqa: E402
+from app.models.user_credentials import UserCredentials  # noqa: E402
 from app.repositories import risk_repository, user_repository  # noqa: E402
 from app.schemas.transaction import TransactionCreate  # noqa: E402
 from app.schemas.user import UserCreate  # noqa: E402
@@ -472,6 +473,16 @@ def seed_users_and_transactions(db) -> list[tuple]:
             user = user_service.create_user(
                 db, UserCreate(name=demo["name"], phone_number=phone_clean), is_verified=True
             )
+
+        # Ensure UserCredentials exists
+        if not user.credentials:
+            creds = UserCredentials(
+                user_id=user.id,
+                password_hash=hash_password(demo.get("password", "password123")),
+            )
+            db.add(creds)
+            db.commit()
+            db.refresh(user)
 
         # Ensure UserContactInfo exists with password hash
         contact_info = db.query(UserContactInfo).filter_by(user_id=user.id).first()
