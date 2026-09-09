@@ -29,6 +29,7 @@ from app.api.routers import (
     payments,
     risk,
     simulator,
+    statements,
     transactions,
     users,
     voice_stream,
@@ -111,6 +112,8 @@ async def security_headers_and_https_middleware(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    if request.headers.get("access-control-request-private-network"):
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
     return response
 
 app.add_middleware(
@@ -124,6 +127,8 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:19006",
         "http://127.0.0.1:19006",
+        "http://10.160.81.205:8081",
+        "http://10.160.81.205:8000",
         "http://10.160.81.164:8081",
         "http://10.160.81.164:8000",
         "http://192.168.137.1:8081",
@@ -133,6 +138,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_private_network=True,
 )
 
 app.include_router(auth.router)
@@ -148,6 +154,7 @@ app.include_router(payments.router)
 app.include_router(demo.router)
 app.include_router(notifications.router)
 app.include_router(financial_profile.router)
+app.include_router(statements.router)
 
 
 

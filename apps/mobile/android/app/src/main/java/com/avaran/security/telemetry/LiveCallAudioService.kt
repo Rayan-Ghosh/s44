@@ -168,6 +168,12 @@ class LiveCallAudioService : Service() {
         ) {
             Log.w(TAG, "RECORD_AUDIO not granted; aborting speech detection")
             isDetecting.set(false)
+            CallGuardModule.emit(
+                CallGuardModule.EVENT_AUDIO_CAPTURE_UNAVAILABLE,
+                sessionId = sessionId,
+                errorCode = "PERMISSION_DENIED",
+                error = "Microphone permission is required to detect a live call."
+            )
             return
         }
 
@@ -225,9 +231,19 @@ class LiveCallAudioService : Service() {
         )
         if (!recognizer.isAvailable()) {
             Log.w(TAG, "on-device speech recognition unavailable on this device")
+            CallGuardModule.emit(
+                CallGuardModule.EVENT_AUDIO_CAPTURE_UNAVAILABLE,
+                sessionId = sessionId,
+                errorCode = "SPEECH_RECOGNITION_UNAVAILABLE",
+                error = "On-device speech recognition is unavailable on this device."
+            )
         }
         recognizer.start()
         speechRecognizer = recognizer
+        CallGuardModule.emit(
+            CallGuardModule.EVENT_AUDIO_CAPTURE_STARTED,
+            sessionId = sessionId
+        )
     }
 
     private fun stopSpeechDetection() {
@@ -236,6 +252,10 @@ class LiveCallAudioService : Service() {
         speechRecognizer = null
         classifierClient?.close()
         classifierClient = null
+        CallGuardModule.emit(
+            CallGuardModule.EVENT_AUDIO_CAPTURE_STOPPED,
+            sessionId = sessionId
+        )
     }
 
     // -------------------------------------------------------------------
@@ -260,6 +280,12 @@ class LiveCallAudioService : Service() {
         if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
             Log.e(TAG, "device does not support 16kHz mono PCM capture")
             isRecording.set(false)
+            CallGuardModule.emit(
+                CallGuardModule.EVENT_AUDIO_CAPTURE_UNAVAILABLE,
+                sessionId = sessionId,
+                errorCode = "UNSUPPORTED_AUDIO_FORMAT",
+                error = "Device does not support 16kHz mono PCM capture"
+            )
             return
         }
         val bufferSize = minBufferSize * 2
@@ -275,6 +301,12 @@ class LiveCallAudioService : Service() {
         } catch (e: SecurityException) {
             Log.e(TAG, "AudioRecord init failed: ${e.message}")
             isRecording.set(false)
+            CallGuardModule.emit(
+                CallGuardModule.EVENT_AUDIO_CAPTURE_ERROR,
+                sessionId = sessionId,
+                errorCode = "AUDIO_RECORD_SECURITY_EXCEPTION",
+                error = e.message ?: "AudioRecord init failed"
+            )
             return
         }
 
@@ -282,17 +314,39 @@ class LiveCallAudioService : Service() {
             Log.e(TAG, "AudioRecord failed to initialize")
             record.release()
             isRecording.set(false)
+            CallGuardModule.emit(
+                CallGuardModule.EVENT_AUDIO_CAPTURE_ERROR,
+                sessionId = sessionId,
+                errorCode = "AUDIO_RECORD_INIT_FAILED",
+                error = "AudioRecord failed to initialize"
+            )
             return
         }
 
         audioRecord = record
         record.startRecording()
+        CallGuardModule.emit(
+            CallGuardModule.EVENT_AUDIO_CAPTURE_STARTED,
+            sessionId = sessionId
+        )
 
         recordingThread = thread(name = "s40-live-call-audio") {
             val buffer = ByteArray(bufferSize)
             while (isRecording.get()) {
                 val read = record.read(buffer, 0, buffer.size)
                 if (read > 0) {
+                    val bytesPerSample = 2 // 16-bit PCM mono = 2 bytes per sample
+                    val durationMs = (read.toDouble() / (SAMPLE_RATE_HZ * bytesPerSample)) * 1000.0
+                    CallGuardModule.emit(
+                        eventName = CallGuardModule.EVENT_AUDIO_BUFFER_READY,
+                        sessionId = sessionId,
+                        bufferSize = read,
+                        sampleRateHz = SAMPLE_RATE_HZ,
+                        channelCount = 1,
+                        audioFormat = "pcm_s16le",
+                        durationMs = durationMs,
+                        source = "microphone"
+                    )
                     val frame = if (read == buffer.size) buffer else buffer.copyOf(read)
                     webSocket?.send(ByteString.of(*frame))
                 }
@@ -318,6 +372,10 @@ class LiveCallAudioService : Service() {
 
         webSocket?.close(NORMAL_CLOSURE_CODE, "call ended")
         webSocket = null
+        CallGuardModule.emit(
+            CallGuardModule.EVENT_AUDIO_CAPTURE_STOPPED,
+            sessionId = sessionId
+        )
     }
 
     private fun connectWebSocket() {
@@ -371,6 +429,10 @@ class LiveCallAudioService : Service() {
         stopSpeechDetection()
         stopRawAudioCapture()
         unregisterCallStateWatcher()
+        CallGuardModule.emit(
+            CallGuardModule.EVENT_CALL_STOPPED,
+            sessionId = sessionId
+        )
         super.onDestroy()
     }
 

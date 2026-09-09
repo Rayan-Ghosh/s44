@@ -17,10 +17,20 @@ from sqlalchemy.orm import Session
 from app.core.concurrency import STATEMENT_SEMAPHORE, try_acquire
 from app.core.config import BASE_DIR, settings
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
+from app.models.user import User
 from app.repositories import user_pattern_repository
 from app.services.statement_parser_service import StatementParseError, ingest_statement
 
 router = APIRouter(prefix="/api/v1/users", tags=["financial-profile"])
+
+
+def _require_self(user_id: int, current_user: User) -> None:
+    if current_user.id != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to access this user's financial profile.",
+        )
 
 
 @router.post("/{user_id}/statement/upload")
@@ -29,7 +39,9 @@ async def upload_statement(
     file: UploadFile = File(...),
     password: str | None = Form(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
+    _require_self(user_id, current_user)
     content = await file.read()
     if len(content) > settings.statement_upload_max_bytes:
         raise HTTPException(
@@ -45,7 +57,14 @@ async def upload_statement(
         )
     try:
         try:
-            return await ingest_statement(db, user_id, content, password)
+            return await ingest_statement(
+                db,
+                user_id,
+                content,
+                password,
+                filename=file.filename or "statement",
+                content_type=file.content_type or "application/pdf",
+            )
         except StatementParseError as exc:
             raise HTTPException(
                 status_code=422,
@@ -60,7 +79,9 @@ def model_sync(
     user_id: int,
     if_none_match: str | None = Header(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Response:
+    _require_self(user_id, current_user)
     profile = user_pattern_repository.get_or_create_profile(db, user_id)
     user_pattern_repository.touch_last_active(db, profile)
 
@@ -104,7 +125,13 @@ def model_sync(
 
 
 @router.get("/{user_id}/model-artifact/{version}")
-def download_model_artifact(user_id: int, version: str, db: Session = Depends(get_db)) -> FileResponse:
+def download_model_artifact(
+    user_id: int,
+    version: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    _require_self(user_id, current_user)
     artifact = user_pattern_repository.get_artifact_by_version(db, user_id, version)
     if artifact is None:
         raise HTTPException(status_code=404, detail="No such artifact version for this user.")

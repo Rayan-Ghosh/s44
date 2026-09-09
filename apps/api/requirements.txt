@@ -16,10 +16,25 @@ httpx==0.28.1
 alembic==1.19.1
 cryptography==50.0.1
 
-# Bank-statement PDF parsing (app/services/statement_parser_service.py) —
-# supports password-protected PDFs and table extraction natively, no other
-# PDF library exists in this repo.
-pdfplumber==0.11.7
-# Required by FastAPI for multipart/form-data (the statement upload endpoint's
-# File()/Form() parameters).
+# Required by FastAPI for multipart/form-data (statement upload, auth
+# endpoints' File()/Form() parameters). Pinned per this repo's convention;
+# satisfies Subhadeep2's original >=0.0.9 constraint.
 python-multipart==0.0.20
+
+# Bank-statement PDF parsing (app/services/statement_parser_service.py) —
+# supports password-protected PDFs and table extraction natively.
+pdfplumber==0.11.7
+
+# Auth/session (Subhadeep2's DB-integration/production-auth work).
+passlib[argon2,bcrypt]==1.7.4
+bcrypt==5.0.0
+argon2-cffi==25.1.0
+python-jose[cryptography]==3.5.0
+PyJWT==2.13.0
+
+# Bank-statement OCR/text extraction (app/services/statement_extraction_service.py)
+# — scanned/image statements, used as statement_parser_service.py's fallback
+# when pdfplumber finds no table.
+pypdf>=6.0.0
+Pillow>=11.0.0
+pytesseract>=0.3.10

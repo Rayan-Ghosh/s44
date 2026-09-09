@@ -8,24 +8,41 @@ actual export layout")."""
 
 from pathlib import Path
 
+from app.core.security import create_access_token
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+_user_counter = 0
+
+
 def _create_user(client) -> int:
+    global _user_counter
+    _user_counter += 1
     res = client.post(
         "/api/v1/users",
-        json={"name": "Statement Test User", "phone_number": f"+91-90000-{id(client) % 100000:05d}"},
+        json={
+            "name": "Statement Test User",
+            "phone_number": f"+91-90000-{(id(client) + _user_counter) % 100000:05d}",
+        },
     )
     assert res.status_code == 201, res.text
     return res.json()["id"]
 
 
-def test_upload_statement_parses_and_stores_rows(client):
+def _create_user_and_headers(client) -> tuple[int, dict]:
     user_id = _create_user(client)
+    token = create_access_token({"sub": str(user_id)})
+    return user_id, {"Authorization": f"Bearer {token}"}
+
+
+def test_upload_statement_parses_and_stores_rows(client):
+    user_id, headers = _create_user_and_headers(client)
     with open(FIXTURES / "sample_statement.pdf", "rb") as f:
         res = client.post(
             f"/api/v1/users/{user_id}/statement/upload",
             files={"file": ("statement.pdf", f, "application/pdf")},
+            headers=headers,
         )
     assert res.status_code == 200, res.text
     body = res.json()
@@ -41,11 +58,12 @@ def test_upload_statement_with_hdfc_style_headers_parses_via_dynamic_column_matc
     """Different bank, completely different column names/order/count than
     the first fixture (Value Dt / Narration / Withdrawal Amt. / Deposit
     Amt.) — proves columns are resolved by header text, not position."""
-    user_id = _create_user(client)
+    user_id, headers = _create_user_and_headers(client)
     with open(FIXTURES / "sample_statement_hdfc_style.pdf", "rb") as f:
         res = client.post(
             f"/api/v1/users/{user_id}/statement/upload",
             files={"file": ("statement.pdf", f, "application/pdf")},
+            headers=headers,
         )
     assert res.status_code == 200, res.text
     body = res.json()
@@ -54,19 +72,21 @@ def test_upload_statement_with_hdfc_style_headers_parses_via_dynamic_column_matc
 
 
 def test_upload_statement_re_upload_is_deduplicated(client):
-    user_id = _create_user(client)
+    user_id, headers = _create_user_and_headers(client)
     with open(FIXTURES / "sample_statement.pdf", "rb") as f:
         content = f.read()
 
     first = client.post(
         f"/api/v1/users/{user_id}/statement/upload",
         files={"file": ("statement.pdf", content, "application/pdf")},
+        headers=headers,
     )
     assert first.json()["inserted_rows"] == 5
 
     second = client.post(
         f"/api/v1/users/{user_id}/statement/upload",
         files={"file": ("statement.pdf", content, "application/pdf")},
+        headers=headers,
     )
     assert second.status_code == 200
     body = second.json()
@@ -75,24 +95,26 @@ def test_upload_statement_re_upload_is_deduplicated(client):
 
 
 def test_upload_password_protected_statement_with_correct_password(client):
-    user_id = _create_user(client)
+    user_id, headers = _create_user_and_headers(client)
     with open(FIXTURES / "sample_statement_protected.pdf", "rb") as f:
         res = client.post(
             f"/api/v1/users/{user_id}/statement/upload",
             files={"file": ("statement.pdf", f, "application/pdf")},
             data={"password": "secret123"},
+            headers=headers,
         )
     assert res.status_code == 200, res.text
     assert res.json()["inserted_rows"] == 1
 
 
 def test_upload_password_protected_statement_with_wrong_password_returns_422(client):
-    user_id = _create_user(client)
+    user_id, headers = _create_user_and_headers(client)
     with open(FIXTURES / "sample_statement_protected.pdf", "rb") as f:
         res = client.post(
             f"/api/v1/users/{user_id}/statement/upload",
             files={"file": ("statement.pdf", f, "application/pdf")},
             data={"password": "wrongpassword"},
+            headers=headers,
         )
     assert res.status_code == 422
 
@@ -101,33 +123,35 @@ def test_upload_statement_rejects_oversized_file(client, monkeypatch):
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "statement_upload_max_bytes", 100)
-    user_id = _create_user(client)
+    user_id, headers = _create_user_and_headers(client)
     with open(FIXTURES / "sample_statement.pdf", "rb") as f:
         res = client.post(
             f"/api/v1/users/{user_id}/statement/upload",
             files={"file": ("statement.pdf", f, "application/pdf")},
+            headers=headers,
         )
     assert res.status_code == 413
 
 
 def test_model_sync_returns_no_model_before_any_training(client):
-    user_id = _create_user(client)
-    res = client.get(f"/api/v1/users/{user_id}/model-sync")
+    user_id, headers = _create_user_and_headers(client)
+    res = client.get(f"/api/v1/users/{user_id}/model-sync", headers=headers)
     assert res.status_code == 200
     body = res.json()
     assert body["has_model"] is False
 
 
 def test_model_sync_then_304_on_matching_etag(client):
-    user_id = _create_user(client)
+    user_id, headers = _create_user_and_headers(client)
     with open(FIXTURES / "sample_statement.pdf", "rb") as f:
         upload = client.post(
             f"/api/v1/users/{user_id}/statement/upload",
             files={"file": ("statement.pdf", f, "application/pdf")},
+            headers=headers,
         )
     assert upload.json()["trained"] is True
 
-    first = client.get(f"/api/v1/users/{user_id}/model-sync")
+    first = client.get(f"/api/v1/users/{user_id}/model-sync", headers=headers)
     assert first.status_code == 200
     body = first.json()
     assert body["has_model"] is True
@@ -137,7 +161,7 @@ def test_model_sync_then_304_on_matching_etag(client):
 
     second = client.get(
         f"/api/v1/users/{user_id}/model-sync",
-        headers={"If-None-Match": f'"{checksum}"'},
+        headers={**headers, "If-None-Match": f'"{checksum}"'},
     )
     assert second.status_code == 304
     assert second.content == b""
@@ -146,20 +170,118 @@ def test_model_sync_then_304_on_matching_etag(client):
 def test_model_artifact_download_matches_sync_checksum(client):
     import hashlib
 
-    user_id = _create_user(client)
+    user_id, headers = _create_user_and_headers(client)
     with open(FIXTURES / "sample_statement.pdf", "rb") as f:
         client.post(
             f"/api/v1/users/{user_id}/statement/upload",
             files={"file": ("statement.pdf", f, "application/pdf")},
+            headers=headers,
         )
 
-    sync = client.get(f"/api/v1/users/{user_id}/model-sync").json()
-    download = client.get(sync["download_url"])
+    sync = client.get(f"/api/v1/users/{user_id}/model-sync", headers=headers).json()
+    download = client.get(sync["download_url"], headers=headers)
     assert download.status_code == 200
     assert hashlib.sha256(download.content).hexdigest() == sync["sha256_checksum"]
 
 
 def test_model_artifact_download_404_for_unknown_version(client):
+    user_id, headers = _create_user_and_headers(client)
+    res = client.get(f"/api/v1/users/{user_id}/model-artifact/v-does-not-exist", headers=headers)
+    assert res.status_code == 404
+
+
+def test_upload_freeform_text_statement_uses_ocr_fallback_path(client):
+    """No table structure at all (plain drawString text lines, not a
+    reportlab Table) — pdfplumber finds zero tables (verified directly:
+    `pdfplumber.open(...).pages[0].extract_tables() == []`), so this
+    exercises statement_parser_service.py's fallback: text extraction via
+    statement_extraction_service.py's shared primitive, then the
+    line-based date+keyword+amount parser. This is the non-OCR half of
+    that fallback (digital text, not a scanned image) — Tesseract isn't
+    installed on this dev machine (confirmed via
+    GET /api/v1/statements/ocr/status returning available=False), so the
+    image-OCR half of the same fallback function isn't exercised by this
+    test; it shares the same extract_pdf_page_texts() call path, just the
+    OCR branch inside it rather than the digital-text branch this test
+    does cover."""
+    user_id, headers = _create_user_and_headers(client)
+    with open(FIXTURES / "sample_statement_freeform_text.pdf", "rb") as f:
+        res = client.post(
+            f"/api/v1/users/{user_id}/statement/upload",
+            files={"file": ("statement.pdf", f, "application/pdf")},
+            headers=headers,
+        )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["parse_method"] == "ocr_fallback"
+    assert body["parsed_rows"] == 5
+    assert body["inserted_rows"] == 5
+
+
+def test_ocr_status_endpoint_reports_tesseract_availability_honestly(client):
+    """Not asserting True or False — this dev machine may or may not have
+    Tesseract installed; the point is the endpoint responds and reports
+    whatever the real state is, matching statement_extraction_service.py's
+    own graceful-degradation design (never crashes when OCR is
+    unavailable, never claims it's available when it isn't)."""
+    user_id = _create_user(client)
+    token = create_access_token({"sub": str(user_id)})
+    res = client.get("/api/v1/statements/ocr/status", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200
+    body = res.json()
+    assert "available" in body
+    assert isinstance(body["available"], bool)
+
+
+# --- Auth / ownership enforcement -----------------------------------------
+
+
+def test_upload_statement_without_token_returns_401(client):
+    user_id = _create_user(client)
+    with open(FIXTURES / "sample_statement.pdf", "rb") as f:
+        res = client.post(
+            f"/api/v1/users/{user_id}/statement/upload",
+            files={"file": ("statement.pdf", f, "application/pdf")},
+        )
+    assert res.status_code == 401
+
+
+def test_upload_statement_for_different_user_returns_403(client):
+    _user_a_id, headers_a = _create_user_and_headers(client)
+    user_b_id = _create_user(client)
+    with open(FIXTURES / "sample_statement.pdf", "rb") as f:
+        res = client.post(
+            f"/api/v1/users/{user_b_id}/statement/upload",
+            files={"file": ("statement.pdf", f, "application/pdf")},
+            headers=headers_a,
+        )
+    assert res.status_code == 403
+
+
+def test_model_sync_without_token_returns_401(client):
+    user_id = _create_user(client)
+    res = client.get(f"/api/v1/users/{user_id}/model-sync")
+    assert res.status_code == 401
+
+
+def test_model_sync_for_different_user_returns_403(client):
+    _user_a_id, headers_a = _create_user_and_headers(client)
+    user_b_id = _create_user(client)
+    res = client.get(f"/api/v1/users/{user_b_id}/model-sync", headers=headers_a)
+    assert res.status_code == 403
+
+
+def test_model_artifact_download_without_token_returns_401(client):
     user_id = _create_user(client)
     res = client.get(f"/api/v1/users/{user_id}/model-artifact/v-does-not-exist")
-    assert res.status_code == 404
+    assert res.status_code == 401
+
+
+def test_model_artifact_download_for_different_user_returns_403(client):
+    _user_a_id, headers_a = _create_user_and_headers(client)
+    user_b_id = _create_user(client)
+    res = client.get(
+        f"/api/v1/users/{user_b_id}/model-artifact/v-does-not-exist",
+        headers=headers_a,
+    )
+    assert res.status_code == 403

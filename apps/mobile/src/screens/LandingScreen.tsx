@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -16,9 +16,11 @@ import { typography } from "../theme/typography";
 import { spacing, radii, shadows } from "../theme/layout";
 import { Button } from "../components/common/Button";
 import { AvaranLogo } from "../components/common/AvaranLogo";
+import { ServerEndpointModal } from "../components/profile/ServerEndpointModal";
 
 export const LandingScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const [isServerModalVisible, setIsServerModalVisible] = useState<boolean>(false);
 
   // Progressive Entrance Animation States
   const brandAnim = useRef(new Animated.Value(0)).current;
@@ -102,8 +104,18 @@ export const LandingScreen: React.FC = () => {
             },
           ]}
         >
-          <AvaranLogo size="sm" showText={false} />
-          <Text style={styles.brandName}>AVARAN</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+            <AvaranLogo size="sm" showText={false} />
+            <Text style={styles.brandName}>AVARAN</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setIsServerModalVisible(true)}
+            style={styles.serverIconBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Configure Backend Server"
+          >
+            <Ionicons name="server-outline" size={18} color={colors.brand} />
+          </TouchableOpacity>
         </Animated.View>
 
         {/* Hero Section */}
@@ -344,6 +356,11 @@ export const LandingScreen: React.FC = () => {
           </Animated.View>
         </View>
       </ScrollView>
+      <ServerEndpointModal
+        visible={isServerModalVisible}
+        onClose={() => setIsServerModalVisible(false)}
+        onEndpointSaved={() => setIsServerModalVisible(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -361,8 +378,8 @@ const styles = StyleSheet.create({
   brandRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: spacing.lg,
-    gap: spacing.sm,
   },
   brandName: {
     fontFamily: typography.brandTitle.fontFamily,
@@ -371,6 +388,16 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     letterSpacing: 4,
     textTransform: "uppercase",
+  },
+  serverIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
   },
   heroSection: {
     marginBottom: spacing.lg,

@@ -39,6 +39,7 @@ EXPECTED_TABLES = {
     "trusted_device_bindings",
     "auth_rate_limits",
     "password_reset_authorizations",
+    "user_credentials",
 }
 
 

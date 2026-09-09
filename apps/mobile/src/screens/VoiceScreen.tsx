@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,9 +10,18 @@ import { CallStatusIndicator } from "../components/voice/CallStatusIndicator";
 import { CallTranscriptView } from "../components/voice/CallTranscriptView";
 import { FraudWarningBanner } from "../components/voice/FraudWarningBanner";
 import { RiskScoreBadge } from "../components/risk/RiskScoreBadge";
+import { VoiceSignalBreakdown } from "../components/voice/VoiceSignalBreakdown";
 import { Button } from "../components/common/Button";
 import { useSecurity } from "../context/SecurityContext";
-import { isCallGuardAvailable, startCallDetection, stopCallDetection } from "../native/call-guard";
+import {
+  isCallGuardAvailable,
+  startCallDetection,
+  stopCallDetection,
+  subscribeToCallGuardEvents,
+  CallGuardEvent,
+} from "../services/call-guard";
+import { VoiceService } from "../services/voice-service";
+import { safeNormalizeVoiceAnalysis } from "../types/voice";
 
 export const VoiceScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -28,9 +37,76 @@ export const VoiceScreen: React.FC = () => {
 
   const isDisconnected = activeCall.status === "disconnected";
 
+  const analysis = safeNormalizeVoiceAnalysis(
+    activeCall.analysis || {
+      riskScore: activeCall.riskScore,
+      riskLevel: activeCall.riskLevel,
+      transcriptAnalysis: {
+        status: "available",
+        riskScore: activeCall.riskScore,
+        riskLevel: activeCall.riskLevel,
+        detectedPatterns: activeCall.detectedPatterns,
+        matchedPhrases: [],
+      },
+      acousticAnalysis: null,
+    }
+  );
+
   const [isRealDetectionActive, setIsRealDetectionActive] = useState(false);
   const [realDetectionError, setRealDetectionError] = useState<string | null>(null);
   const [isTogglingDetection, setIsTogglingDetection] = useState(false);
+  const [nativeCaptureStatus, setNativeCaptureStatus] = useState<
+    "idle" | "capturing" | "unavailable" | "error"
+  >("idle");
+  const [hasReceivedAudioBuffer, setHasReceivedAudioBuffer] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToCallGuardEvents((event: CallGuardEvent) => {
+      switch (event.type) {
+        case "call_started":
+        case "audio_capture_started":
+          setIsRealDetectionActive(true);
+          setNativeCaptureStatus("capturing");
+          setRealDetectionError(null);
+          break;
+        case "call_stopped":
+        case "audio_capture_stopped":
+          setIsRealDetectionActive(false);
+          setNativeCaptureStatus("idle");
+          setHasReceivedAudioBuffer(false);
+          break;
+        case "audio_capture_unavailable":
+          setIsRealDetectionActive(false);
+          setNativeCaptureStatus("unavailable");
+          setHasReceivedAudioBuffer(false);
+          setRealDetectionError(event.error || "Native audio capture is unavailable on this device.");
+          break;
+        case "audio_capture_error":
+          setIsRealDetectionActive(false);
+          setNativeCaptureStatus("error");
+          setHasReceivedAudioBuffer(false);
+          setRealDetectionError(event.error || "An error occurred during native audio capture.");
+          break;
+        case "audio_buffer_ready":
+          setHasReceivedAudioBuffer(true);
+          VoiceService.ingestAudioBuffer({
+            sessionId: event.sessionId,
+            timestamp: event.timestamp,
+            bufferSize: event.bufferSize,
+            sampleRateHz: event.sampleRateHz,
+            channelCount: event.channelCount,
+            audioFormat: event.audioFormat,
+            durationMs: event.durationMs,
+            source: event.source,
+          });
+          break;
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   const handleToggleRealDetection = async () => {
     setIsTogglingDetection(true);
@@ -76,6 +152,16 @@ export const VoiceScreen: React.FC = () => {
               ? "Uses your phone's real microphone, on-device speech recognition, and the real fraud classifier — not a script. Keep this screen open while a call plays nearby."
               : "Only available on Android — this build can't access the microphone this way."}
           </Text>
+          {nativeCaptureStatus === "capturing" && (
+            <View style={styles.nativeActiveIndicator}>
+              <View style={styles.liveIndicator} />
+              <Text style={styles.nativeActiveText}>
+                {hasReceivedAudioBuffer
+                  ? "Native speech capture active · Audio buffer received"
+                  : "Native speech capture active"}
+              </Text>
+            </View>
+          )}
           {realDetectionError && (
             <Text style={styles.realDetectionErrorText}>{realDetectionError}</Text>
           )}
@@ -173,14 +259,15 @@ export const VoiceScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Active Risk Score Badge */}
+        {/* Active Risk Score & Multi-Modal Analysis Breakdown */}
         {isSimulatingCall && (
           <View style={styles.riskSection}>
             <RiskScoreBadge
-              score={activeCall.riskScore}
-              level={activeCall.riskLevel}
+              score={analysis.riskScore}
+              level={analysis.riskLevel}
               size="lg"
             />
+            <VoiceSignalBreakdown analysis={analysis} />
           </View>
         )}
 
@@ -267,6 +354,16 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.threat,
     marginTop: spacing.xs,
+  },
+  nativeActiveIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: spacing.xs,
+  },
+  nativeActiveText: {
+    ...typography.caption,
+    color: colors.threat,
+    fontWeight: "700",
   },
   standbyCard: {
     backgroundColor: colors.surface,

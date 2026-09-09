@@ -13,6 +13,7 @@ import { PaymentService, UserTransaction, isTransactionTerminal } from "../servi
 import { useAuth } from "./AuthContext";
 
 import { ApiClient, IS_DEMO_MODE, getApiBaseUrl } from "../services/api-client";
+import { UserPatternService } from "../services/user-pattern-service";
 import { getRiskLevelFromScore } from "../utils/risk-scoring";
 
 // A 2-minute hold, matching the backend's real expiry (spec §6.3) — the UI
@@ -250,6 +251,17 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       loadContacts(session.userId);
     }
   }, [session?.userId, loadContacts]);
+
+  // Personalized transaction-pattern engine (apps/api/app/services/
+  // user_pattern_trainer.py trains server-side; this is the missing
+  // "predictions actually run on-device" half — see user-pattern-
+  // service.ts's docstring). Starts syncing the moment a user session
+  // exists, and again on every app foreground, matching the "evaluated
+  // when an active user opens the app" trigger the engine expects.
+  useEffect(() => {
+    if (!session?.userId) return;
+    return UserPatternService.registerForegroundSync(session.userId);
+  }, [session?.userId]);
 
   const addContact = useCallback(
     async (

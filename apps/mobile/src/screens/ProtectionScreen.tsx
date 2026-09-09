@@ -23,6 +23,7 @@ import {
   ProtectionModuleModal,
   ProtectionFeatureItem,
 } from "../components/protection/ProtectionModuleModal";
+import { StatementUploadCard } from "../components/protection/StatementUploadCard";
 import { AlertDetailsModal } from "../components/protection/AlertDetailsModal";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -562,9 +563,62 @@ export const ProtectionScreen: React.FC = () => {
             </View>
           )}
 
-          {/* 5. Recent Security Alerts */}
+          {/* 5. Bank Statement & Behavioral Baseline */}
           <StaggerRevealCard
             index={2}
+            baseDelay={60}
+            hasPlayed={hasPlayedProtectionStaggerRef.current}
+            style={styles.section}
+          >
+            <Text style={styles.sectionHeading}>BEHAVIORAL BASELINE & STATEMENTS</Text>
+            <StatementUploadCard
+              userId={session?.userId ?? 0}
+              onFileSelected={(file) => {
+                showToast(`Statement selected: ${file.name}`, "info");
+              }}
+              onFileRemoved={() => {
+                showToast("Statement removed", "info");
+              }}
+              onUploadSuccess={(receipt) => {
+                showToast(
+                  receipt.trained
+                    ? `Baseline calculated: typical payment ~₹${receipt.p50_amount?.toFixed(0) ?? "?"}`
+                    : `Parsed ${receipt.parsed_rows ?? 0} transaction(s) from your statement`,
+                  "success"
+                );
+              }}
+              onUploadError={(err) => {
+                showToast(
+                  err.message || "Statement upload failed",
+                  "warning"
+                );
+              }}
+              // This endpoint (POST /api/v1/users/{userId}/statement/upload)
+              // is always synchronous — the upload response IS the final
+              // result, there's no async job to poll. statusFn short-
+              // circuits the "Refresh Status" button to just re-confirm
+              // that, instead of hitting the unrelated OCR-preview
+              // endpoint's /api/v1/statements/{upload_id}/status (which
+              // has no record of this upload_id and would 404).
+              statusFn={async (uploadId) => ({
+                status: 200,
+                data: {
+                  upload_id: uploadId,
+                  user_id: session?.userId ?? 0,
+                  filename: "",
+                  status: "COMPLETED",
+                  message: "Your personalized baseline was already calculated from this statement.",
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  error_detail: null,
+                },
+              })}
+            />
+          </StaggerRevealCard>
+
+          {/* 6. Recent Security Alerts */}
+          <StaggerRevealCard
+            index={3}
             baseDelay={60}
             hasPlayed={hasPlayedProtectionStaggerRef.current}
             style={styles.section}
