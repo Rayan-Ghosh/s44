@@ -23,14 +23,28 @@ code has no way to reach or scrub. Nothing extracted is retained beyond the
 few structured (amount, timestamp, type) rows written to
 StatementLedgerTransaction; the original document text/bytes are never
 persisted anywhere.
+
+OCR FALLBACK: when pdfplumber finds no table at all (a scanned statement,
+or a plain-text non-tabular layout), this falls back to
+statement_extraction_service.py's text/OCR extraction (digital text
+stream, or Tesseract OCR on embedded page images for a scanned document)
+and then a line-based parser (`_parse_lines`) — regex date + a
+debit/credit keyword adjacent to an amount on the same line. This is
+explicitly LOWER CONFIDENCE than the table path: OCR'd or freeform text
+has no column structure to anchor on, so a line with a date and an amount
+but no unambiguous debit/credit keyword nearby is skipped, never guessed —
+same discipline as the table parser, just with less to work with. The
+response's `parse_method` field ("table" | "ocr_fallback") tells the
+caller which path actually ran.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 
 import pdfplumber
@@ -38,6 +52,13 @@ import pdfplumber
 from app.core.concurrency import run_cpu_bound
 from app.core.config import settings
 from app.repositories import user_pattern_repository
+from app.services.statement_extraction_service import (
+    PdfMalformedError,
+    PdfPasswordProtectedError,
+    PdfUnreadableError,
+    extract_pdf_page_texts,
+    extraction_service,
+)
 from app.services.user_pattern_trainer import retrain_user_pattern
 
 #: Column role -> recognized header text aliases. Indian bank statement
@@ -144,18 +165,91 @@ def _parse_table(table: list[list[str | None]]) -> list[ParsedRow]:
     return rows
 
 
-def parse_pdf_bytes(file_bytes: bytes, password: str | None, max_pages: int) -> list[ParsedRow]:
-    """CPU-bound, sync — always called via app.core.concurrency.run_cpu_bound,
-    never directly on the event loop."""
+_LINE_DATE_RE = re.compile(r"^\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})")
+_LINE_AMOUNT_RE = re.compile(r"\d[\d,]*\.\d{2}")
+
+
+def _classify_line(lowered_line: str) -> str | None:
+    """DEBIT if a debit keyword appears and no credit keyword does (and
+    vice versa); None (skip — never guess) if both or neither appear.
+    Same discipline as the table parser, applied to a line of free text
+    instead of a header cell."""
+    has_debit = any(kw in lowered_line for kw in HEADER_KEYWORDS["debit"])
+    has_credit = any(kw in lowered_line for kw in HEADER_KEYWORDS["credit"])
+    if has_debit and not has_credit:
+        return "DEBIT"
+    if has_credit and not has_debit:
+        return "CREDIT"
+    return None
+
+
+def _parse_lines(page_texts: list[str]) -> list[ParsedRow]:
+    """Best-effort fallback for OCR'd/freeform text with no table
+    structure — see module docstring's OCR FALLBACK note. A line needs a
+    leading recognizable date, an unambiguous debit/credit keyword, and at
+    least one currency-shaped amount to produce a row; anything less is
+    skipped."""
+    rows: list[ParsedRow] = []
+    for page_text in page_texts:
+        for raw_line in page_text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            date_match = _LINE_DATE_RE.match(line)
+            if not date_match:
+                continue
+            ts = _parse_date(date_match.group(1))
+            if ts is None:
+                continue
+
+            transaction_type = _classify_line(line.lower())
+            if transaction_type is None:
+                continue
+
+            amount = next(
+                (parsed for m in _LINE_AMOUNT_RE.findall(line) if (parsed := _parse_amount(m)) is not None),
+                None,
+            )
+            if amount is None:
+                continue
+
+            rows.append(ParsedRow(amount=amount, timestamp=ts, transaction_type=transaction_type))
+    return rows
+
+
+def parse_pdf_bytes(file_bytes: bytes, password: str | None, max_pages: int) -> tuple[list[ParsedRow], str]:
+    """Returns (rows, parse_method). CPU-bound, sync — always called via
+    app.core.concurrency.run_cpu_bound, never directly on the event loop.
+
+    Tries structured table extraction first (pdfplumber); a password/
+    corruption failure there is a hard error (StatementParseError) since
+    that means the file itself couldn't even be opened. If pdfplumber
+    opens it fine but finds no table at all, falls back to text/OCR
+    extraction (statement_extraction_service.py) plus the line-based
+    parser above — a failure at THIS stage just means "nothing found,"
+    same as finding zero table rows, not a hard error, since the file did
+    open successfully.
+    """
     try:
         with pdfplumber.open(BytesIO(file_bytes), password=password) as pdf:
             rows: list[ParsedRow] = []
             for page in pdf.pages[:max_pages]:
                 for table in page.extract_tables() or []:
                     rows.extend(_parse_table(table))
-            return rows
     except Exception as exc:  # noqa: BLE001 - pdfplumber/pypdfium2 raise several distinct types for bad password/corrupt file
         raise StatementParseError(str(exc)) from exc
+
+    if rows:
+        return rows, "table"
+
+    try:
+        page_texts, _is_scanned = extract_pdf_page_texts(
+            file_bytes, extraction_service.run_ocr_on_image, password=password
+        )
+    except (PdfMalformedError, PdfPasswordProtectedError, PdfUnreadableError):
+        return [], "table"
+
+    return _parse_lines(page_texts[:max_pages]), "ocr_fallback"
 
 
 def _dedup_hash(user_id: int, row: ParsedRow) -> str:
@@ -163,16 +257,38 @@ def _dedup_hash(user_id: int, row: ParsedRow) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-async def ingest_statement(db, user_id: int, file_bytes: bytes, password: str | None) -> dict:
+async def ingest_statement(
+    db,
+    user_id: int,
+    file_bytes: bytes,
+    password: str | None,
+    *,
+    filename: str = "statement",
+    content_type: str = "application/pdf",
+) -> dict:
     """Parses, dedupes, and stores the statement, then either triggers an
     inline bootstrap train (first-ever training for this user — see
     user_pattern_trainer.py's module docstring) or just flips the
-    opportunistic-retrain flag once the volume gate is met."""
+    opportunistic-retrain flag once the volume gate is met.
+
+    The response is a deliberate superset: `parsed_rows`/`inserted_rows`/
+    `parse_method`/`trained`/`p50_amount` etc. are this engine's own
+    fields, while `upload_id`/`status`/`message`/`filename`/`size_bytes`/
+    `uploaded_at` exist purely so the mobile StatementUploadCard UI
+    (apps/mobile/src/components/protection/StatementUploadCard.tsx,
+    originally built against Subhadeep2's /api/v1/statements/* contract)
+    keeps working against this endpoint unmodified — this is always a
+    synchronous, already-complete result, so `status` is always terminal
+    (COMPLETED/FAILED), never RECEIVED/PROCESSING; there is no async job to
+    poll."""
+    original_size = len(file_bytes)
     buf = bytearray(file_bytes)
     file_bytes = None  # drop the original reference; buf is now the only copy we control
 
     try:
-        rows = await run_cpu_bound(parse_pdf_bytes, bytes(buf), password, settings.statement_upload_max_pages)
+        rows, parse_method = await run_cpu_bound(
+            parse_pdf_bytes, bytes(buf), password, settings.statement_upload_max_pages
+        )
     finally:
         for i in range(len(buf)):
             buf[i] = 0
@@ -209,12 +325,37 @@ async def ingest_statement(db, user_id: int, file_bytes: bytes, password: str | 
         db.commit()
         db.refresh(profile)
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+    baseline_note = (
+        f"Typical payment: ~₹{profile.p50_amount:.0f}." if profile.p50_amount is not None else ""
+    )
+
     return {
+        # This engine's own fields.
         "parsed_rows": len(rows),
         "inserted_rows": inserted,
         "duplicate_rows": len(rows) - inserted,
+        "parse_method": parse_method,
         "trained": trained,
         "p50_amount": float(profile.p50_amount) if profile.p50_amount is not None else None,
         "p90_amount": float(profile.p90_amount) if profile.p90_amount is not None else None,
         "p99_amount": float(profile.p99_amount) if profile.p99_amount is not None else None,
+        # Compatibility fields for StatementUploadCard.tsx — see this
+        # function's docstring. Always a terminal status: this call is
+        # synchronous end-to-end, there is no RECEIVED/PROCESSING phase.
+        "upload_id": f"local-{uuid.uuid4().hex[:12]}",
+        "user_id": user_id,
+        "filename": filename,
+        "content_type": content_type,
+        "size_bytes": original_size,
+        "status": "COMPLETED" if rows or inserted else "FAILED",
+        "message": (
+            f"Parsed {len(rows)} transaction(s), {inserted} new. {baseline_note}".strip()
+            if rows
+            else "No transactions could be read from this statement. Try a clearer scan or a text-based export."
+        ),
+        "uploaded_at": now_iso,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "error_detail": None,
     }

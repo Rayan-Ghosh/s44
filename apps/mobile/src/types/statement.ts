@@ -39,7 +39,17 @@ export interface StatementUploadRequest {
 }
 
 /**
- * Response model returned by POST /api/v1/statements/upload.
+ * Response model returned by POST /api/v1/users/{userId}/statement/upload
+ * (the personalized transaction-pattern engine's endpoint — see
+ * apps/api/app/services/statement_parser_service.py::ingest_statement,
+ * which now backs StatementUploadCard.tsx instead of the original
+ * /api/v1/statements/upload OCR-preview endpoint).
+ *
+ * `upload_id`/`status`/`message`/`filename`/`size_bytes`/`uploaded_at`
+ * are a compatibility superset so this existing UI component keeps
+ * working unmodified — see that function's docstring. `status` is
+ * always terminal (COMPLETED/FAILED): this call is synchronous
+ * end-to-end, there is no RECEIVED/PROCESSING phase to poll for.
  */
 export interface StatementUploadResponse {
   /** Unique statement upload tracking receipt ID (e.g., 'stmt_upl_...') */
@@ -58,6 +68,27 @@ export interface StatementUploadResponse {
   message: string;
   /** ISO 8601 UTC timestamp of upload */
   uploaded_at: string;
+
+  // -- Personalized transaction-pattern engine fields (new) -----------
+  /** How many transaction rows were successfully parsed from the file. */
+  parsed_rows?: number;
+  /** How many of those parsed rows were new (not already stored). */
+  inserted_rows?: number;
+  /** How many were already-seen duplicates, skipped. */
+  duplicate_rows?: number;
+  /** "table" (pdfplumber found a structured table) or "ocr_fallback"
+   *  (text/OCR extraction + line-based parsing — see
+   *  statement_parser_service.py's OCR FALLBACK docstring note). */
+  parse_method?: "table" | "ocr_fallback";
+  /** Whether this upload triggered an immediate bootstrap training run
+   *  (a user's very first statement upload — see
+   *  user_pattern_trainer.py). */
+  trained?: boolean;
+  /** Personalized baseline percentiles, once trained (null until enough
+   *  history exists). */
+  p50_amount?: number | null;
+  p90_amount?: number | null;
+  p99_amount?: number | null;
 }
 
 /**

@@ -58,6 +58,11 @@ export type StatementUploadUiState =
   | "error";
 
 export interface StatementUploadCardProps {
+  /** Current user's id — the statement is uploaded to
+   * POST /api/v1/users/{userId}/statement/upload (the personalized
+   * transaction-pattern engine's endpoint; see statement-upload-service.ts
+   * and apps/api/app/services/statement_parser_service.py). */
+  userId: number;
   /** Optional container style */
   style?: ViewStyle;
   /** Callback fired when a valid statement file is successfully selected */
@@ -97,6 +102,7 @@ export function formatFileSize(bytes: number): string {
 }
 
 export const StatementUploadCard: React.FC<StatementUploadCardProps> = ({
+  userId,
   style,
   onFileSelected,
   onFileRemoved,
@@ -171,6 +177,7 @@ export const StatementUploadCard: React.FC<StatementUploadCardProps> = ({
 
       try {
         const result = await uploadStatementFile(file, {
+          endpoint: `/api/v1/users/${userId}/statement/upload`,
           signal: controller.signal,
           uploadFn,
         });
@@ -211,7 +218,7 @@ export const StatementUploadCard: React.FC<StatementUploadCardProps> = ({
         abortControllerRef.current = null;
       }
     },
-    [selectedFile, uploadFn, onUploadSuccess, onUploadError, onStatusChange]
+    [selectedFile, userId, uploadFn, onUploadSuccess, onUploadError, onStatusChange]
   );
 
   const handleRefreshStatus = useCallback(async () => {

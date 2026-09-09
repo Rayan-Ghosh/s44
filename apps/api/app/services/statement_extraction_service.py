@@ -33,6 +33,99 @@ logger = logging.getLogger(__name__)
 # Type alias for OCR engine hook
 OCREngineCallable = Callable[[bytes, str], Optional[str]]
 
+
+class PdfMalformedError(Exception):
+    """PDF couldn't be parsed at all, or has zero pages."""
+
+
+class PdfPasswordProtectedError(Exception):
+    """PDF is encrypted and the empty-password decrypt attempt failed."""
+
+
+class PdfUnreadableError(Exception):
+    """No text found — neither a digital text layer nor OCR on embedded
+    page images recovered anything."""
+
+
+def extract_pdf_page_texts(
+    raw_bytes: bytes, ocr_fn: OCREngineCallable, password: Optional[str] = None
+) -> tuple[List[str], bool]:
+    """The actual "get text out of a PDF" algorithm, standalone: digital
+    text-stream extraction first, OCR on embedded page images as a
+    fallback if that recovers zero characters. Returns
+    (page_texts, is_scanned).
+
+    Pulled out of StatementExtractionService._extract_pdf so the same
+    algorithm backs both that class's upload_id/record-dict workflow
+    (unchanged behavior — it now just delegates here, with password=None,
+    same as before this parameter existed) and
+    app/services/statement_parser_service.py's OCR-fallback path for
+    statements pdfplumber couldn't find a table in, which does pass a
+    caller-supplied password through here. One implementation of "how do
+    we get text out of a PDF or image," not two.
+    """
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
+    except pypdf.errors.PdfReadError as exc:
+        raise PdfMalformedError(f"Unable to parse PDF document or file is corrupted: {exc}") from exc
+    except Exception as exc:
+        raise PdfMalformedError(f"Invalid PDF structure: {exc}") from exc
+
+    if reader.is_encrypted:
+        try:
+            decrypted = reader.decrypt(password or "")
+        except Exception as exc:
+            raise PdfPasswordProtectedError(
+                "PDF statement is encrypted and password-protected."
+            ) from exc
+        if decrypted == 0:
+            raise PdfPasswordProtectedError("PDF statement is encrypted and password-protected.")
+
+    total_pages = len(reader.pages)
+    if total_pages == 0:
+        raise PdfMalformedError("PDF document contains zero pages.")
+
+    # Phase 1: digital text-stream extraction.
+    page_texts: List[str] = []
+    for idx, page in enumerate(reader.pages):
+        try:
+            page_texts.append((page.extract_text() or "").strip())
+        except Exception as exc:
+            logger.warning("Error extracting text on page %d: %s", idx + 1, exc)
+            page_texts.append("")
+
+    total_chars = sum(len(t) for t in page_texts)
+    is_scanned = False
+
+    # Phase 2: zero digital characters -> OCR embedded page images.
+    if total_chars == 0:
+        ocr_page_texts: List[str] = []
+        for idx, page in enumerate(reader.pages):
+            parts: List[str] = []
+            try:
+                for img_obj in getattr(page, "images", []):
+                    img_bytes = getattr(img_obj, "data", b"")
+                    if img_bytes:
+                        result = ocr_fn(img_bytes, "image/jpeg")
+                        if result and result.strip():
+                            parts.append(result.strip())
+            except Exception as exc:
+                logger.warning("Error extracting page images on page %d: %s", idx + 1, exc)
+            ocr_page_texts.append("\n".join(parts).strip())
+
+        total_ocr_chars = sum(len(t) for t in ocr_page_texts)
+        if total_ocr_chars > 0:
+            page_texts = ocr_page_texts
+            total_chars = total_ocr_chars
+            is_scanned = True
+
+    if total_chars == 0:
+        raise PdfUnreadableError(
+            "Scanned document contains no readable text layer or text resolution too low."
+        )
+
+    return page_texts, is_scanned
+
 # Dynamic candidate paths generator for Tesseract OCR on Windows & POSIX
 def _get_tesseract_candidate_paths() -> List[str]:
     local_app_data = os.environ.get("LOCALAPPDATA", "")
@@ -157,6 +250,13 @@ class StatementExtractionService:
                 return candidate
         return None
 
+    def run_ocr_on_image(self, raw_bytes: bytes, mime_or_format: str) -> Optional[str]:
+        """Public wrapper around _run_ocr for callers outside this class
+        (statement_parser_service.py's OCR-fallback path) — keeps that
+        method's implementation private while giving other modules a
+        proper entry point instead of reaching into `_run_ocr` directly."""
+        return self._run_ocr(raw_bytes, mime_or_format)
+
     def _run_ocr(self, raw_bytes: bytes, mime_or_format: str) -> Optional[str]:
         """
         Execute OCR on raw image bytes.
@@ -276,119 +376,36 @@ class StatementExtractionService:
         Supports:
         - Digital PDFs: direct text stream extraction
         - Scanned/raster-only PDFs: page image extraction with OCR fallback
+
+        Delegates the actual extraction algorithm to the standalone
+        extract_pdf_page_texts() above — this method's own job is just
+        mapping that to this class's upload_id/record-dict/response-schema
+        workflow.
         """
         try:
-            stream = io.BytesIO(raw_bytes)
-            reader = pypdf.PdfReader(stream)
-        except pypdf.errors.PdfReadError as exc:
+            page_texts, is_scanned_pdf = extract_pdf_page_texts(raw_bytes, self._run_ocr)
+        except PdfMalformedError as exc:
             return self._fail_extraction(
-                record=record,
-                upload_id=upload_id,
-                error_code="PDF_MALFORMED",
-                detail=f"Unable to parse PDF document or file is corrupted: {str(exc)}",
+                record=record, upload_id=upload_id, error_code="PDF_MALFORMED", detail=str(exc)
             )
-        except Exception as exc:
+        except PdfPasswordProtectedError as exc:
             return self._fail_extraction(
-                record=record,
-                upload_id=upload_id,
-                error_code="PDF_MALFORMED",
-                detail=f"Invalid PDF structure: {str(exc)}",
+                record=record, upload_id=upload_id, error_code="PDF_PASSWORD_PROTECTED", detail=str(exc)
             )
-
-        if reader.is_encrypted:
-            try:
-                decrypted = reader.decrypt("")
-                if decrypted == 0:
-                    return self._fail_extraction(
-                        record=record,
-                        upload_id=upload_id,
-                        error_code="PDF_PASSWORD_PROTECTED",
-                        detail="PDF statement is encrypted and password-protected.",
-                    )
-            except Exception:
-                return self._fail_extraction(
-                    record=record,
-                    upload_id=upload_id,
-                    error_code="PDF_PASSWORD_PROTECTED",
-                    detail="PDF statement is encrypted and password-protected.",
-                )
-
-        total_pages = len(reader.pages)
-        if total_pages == 0:
+        except PdfUnreadableError as exc:
             return self._fail_extraction(
-                record=record,
-                upload_id=upload_id,
-                error_code="PDF_MALFORMED",
-                detail="PDF document contains zero pages.",
+                record=record, upload_id=upload_id, error_code="OCR_SCAN_UNREADABLE", detail=str(exc)
             )
 
-        pages: List[StatementPageText] = []
-        raw_page_sections: List[str] = []
-
-        # Phase 1: Digital PDF text stream extraction
-        for idx, page in enumerate(reader.pages):
-            page_num = idx + 1
-            try:
-                page_text = page.extract_text() or ""
-            except Exception as e:
-                logger.warning("Error extracting text on page %d of %s: %s", page_num, upload_id, e)
-                page_text = ""
-
-            cleaned_text = page_text.strip()
-            pages.append(
-                StatementPageText(
-                    page_number=page_num,
-                    text=cleaned_text,
-                    char_count=len(cleaned_text),
-                )
-            )
-
+        total_pages = len(page_texts)
+        pages: List[StatementPageText] = [
+            StatementPageText(page_number=idx + 1, text=text, char_count=len(text))
+            for idx, text in enumerate(page_texts)
+        ]
         total_chars = sum(p.char_count for p in pages)
-        is_scanned_pdf = False
-
-        # Phase 2: If 0 digital characters extracted, attempt OCR on page raster images
-        if total_chars == 0:
-            ocr_pages: List[StatementPageText] = []
-            for idx, page in enumerate(reader.pages):
-                page_num = idx + 1
-                ocr_text_parts: List[str] = []
-
-                # Extract embedded images on this page
-                try:
-                    for img_obj in getattr(page, "images", []):
-                        img_bytes = getattr(img_obj, "data", b"")
-                        if img_bytes:
-                            ocr_result = self._run_ocr(img_bytes, "image/jpeg")
-                            if ocr_result and ocr_result.strip():
-                                ocr_text_parts.append(ocr_result.strip())
-                except Exception as img_exc:
-                    logger.warning("Error extracting page images on page %d of %s: %s", page_num, upload_id, img_exc)
-
-                combined_page_ocr = "\n".join(ocr_text_parts).strip()
-                ocr_pages.append(
-                    StatementPageText(
-                        page_number=page_num,
-                        text=combined_page_ocr,
-                        char_count=len(combined_page_ocr),
-                    )
-                )
-
-            total_ocr_chars = sum(p.char_count for p in ocr_pages)
-            if total_ocr_chars > 0:
-                pages = ocr_pages
-                total_chars = total_ocr_chars
-                is_scanned_pdf = True
-
-        if total_chars == 0:
-            return self._fail_extraction(
-                record=record,
-                upload_id=upload_id,
-                error_code="OCR_SCAN_UNREADABLE",
-                detail="Scanned document contains no readable text layer or text resolution too low.",
-            )
-
-        for p in pages:
-            raw_page_sections.append(f"--- Page {p.page_number} ---\n{p.text}")
+        raw_page_sections: List[str] = [
+            f"--- Page {p.page_number} ---\n{p.text}" for p in pages
+        ]
 
         combined_raw_text = "\n\n".join(raw_page_sections)
         now_iso = datetime.now(timezone.utc).isoformat()
