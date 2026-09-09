@@ -321,6 +321,8 @@ export class AuthService {
     const response = await ApiClient.post<{
       success: boolean;
       token: string;
+      access_token?: string;
+      refresh_token?: string;
       user: { id: number; name: string; phone: string; email: string };
     }>("/api/v1/auth/verify-otp", {
       userId: params.userId,

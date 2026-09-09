@@ -30,6 +30,19 @@ import { Button } from "../components/common/Button";
 import { FloatingToast, ToastConfig } from "../components/common/FloatingToast";
 import { ChoosePaymentAppModal } from "../components/payment/ChoosePaymentAppModal";
 import { QrScannerModal } from "../components/payment/QrScannerModal";
+import { PaymentSourceSelector } from "../components/payment/PaymentSourceSelector";
+import { UpiIdPaymentForm } from "../components/payment/UpiIdPaymentForm";
+import { MobilePaymentForm } from "../components/payment/MobilePaymentForm";
+import { QrPaymentInput } from "../components/payment/QrPaymentInput";
+import { PaymentRequestList } from "../components/payment/PaymentRequestList";
+import { PreparedPaymentCard } from "../components/payment/PreparedPaymentCard";
+import { PaymentRequestService, IncomingPaymentRequest } from "../services/payment-request-service";
+import {
+  PaymentInputSource,
+  PreparedPaymentDraft,
+  PaymentRiskEvaluationState,
+  GuardianEscalationState,
+} from "../types/transaction";
 import { Camera } from "expo-camera";
 import * as Contacts from "expo-contacts";
 import { applyScannedQrToForm } from "../utils/qr-scanner-helper";
@@ -193,10 +206,238 @@ export const PaymentsScreen: React.FC = () => {
   const [isScannerVisible, setIsScannerVisible] = useState<boolean>(false);
   const formVersionRef = useRef<number>(0);
 
+  // Payment Input Phase states
+  const [paymentSource, setPaymentSource] = useState<PaymentInputSource>("UPI_ID");
+  const [preparedDraft, setPreparedDraft] = useState<PreparedPaymentDraft | null>(null);
+  const [scannedQrPayload, setScannedQrPayload] = useState<string>("");
+  const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
+  const [evaluationState, setEvaluationState] = useState<PaymentRiskEvaluationState>({
+    status: "IDLE",
+  });
+  const [guardianState, setGuardianState] = useState<GuardianEscalationState>({
+    status: "IDLE",
+  });
+  const isRequestingGuardianRef = useRef<boolean>(false);
+
+  // Fetch pending payment requests count for badge
+  useEffect(() => {
+    PaymentRequestService.getPendingRequests()
+      .then((res) => {
+        if (!res.error && res.requests) {
+          setPendingRequestsCount(res.requests.length);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Check TTL expiration of active risk evaluation and associated Guardian escalation
+  useEffect(() => {
+    if (evaluationState.status !== "EVALUATED" || !evaluationState.expiresAt) return;
+
+    const expiresTime = new Date(evaluationState.expiresAt).getTime();
+    const timeUntilExpiry = expiresTime - Date.now();
+
+    if (timeUntilExpiry <= 0) {
+      setEvaluationState((prev) =>
+        prev.status === "EVALUATED" ? { ...prev, status: "EXPIRED" } : prev
+      );
+      setGuardianState((prev) =>
+        prev.status !== "IDLE" ? { ...prev, status: "EXPIRED" } : prev
+      );
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setEvaluationState((prev) =>
+        prev.status === "EVALUATED" ? { ...prev, status: "EXPIRED" } : prev
+      );
+      setGuardianState((prev) =>
+        prev.status !== "IDLE" ? { ...prev, status: "EXPIRED" } : prev
+      );
+    }, timeUntilExpiry);
+
+    return () => clearTimeout(timer);
+  }, [evaluationState.status, evaluationState.expiresAt]);
+
+  const handleSelectPaymentSource = (source: PaymentInputSource) => {
+    setPaymentSource(source);
+    setPreparedDraft(null);
+    setEvaluationState({ status: "IDLE" });
+    setGuardianState({ status: "IDLE" });
+  };
+
+  const handlePreparePayment = (params: {
+    recipient: string;
+    amount: number;
+    note?: string;
+    recipientName?: string;
+    qrPayload?: string;
+    requestId?: string;
+  }) => {
+    const res = PaymentService.preparePaymentInput({
+      source: paymentSource,
+      recipient: params.recipient,
+      amount: params.amount,
+      note: params.note,
+      recipientName: params.recipientName,
+      qrPayload: params.qrPayload,
+      requestId: params.requestId,
+    });
+
+    if (!res.success) {
+      showToast(res.error || "Failed to prepare payment", "warning");
+      return;
+    }
+
+    setPreparedDraft(res.draft);
+    setEvaluationState({ status: "IDLE" });
+    setGuardianState({ status: "IDLE" });
+    setEntryRecipient(res.draft.recipient);
+    setEntryAmount(String(res.draft.amount));
+    if (res.draft.note) setEntryNote(res.draft.note);
+    showToast("✓ Payment details prepared successfully", "success");
+  };
+
+  const handleEvaluatePreparedRisk = async (draftToEvaluate?: PreparedPaymentDraft) => {
+    const draft = draftToEvaluate || preparedDraft;
+    if (!draft) return;
+
+    setEvaluationState({ status: "ANALYZING" });
+    setGuardianState({ status: "IDLE" });
+    const currentVer = ++formVersionRef.current;
+
+    try {
+      const res = await PaymentService.evaluatePreparedPayment(draft, session?.userId);
+
+      // Guard against race conditions if user modified form in flight
+      if (formVersionRef.current !== currentVer) return;
+
+      if (!res.success) {
+        setEvaluationState({
+          status: "ERROR",
+          error: res.error || "Risk evaluation failed. Please check network or try again.",
+        });
+        setGuardianState({ status: "IDLE" });
+        showToast(res.error || "Risk evaluation failed", "warning");
+        return;
+      }
+
+      const evalData = res.data;
+      const nowIso = new Date().toISOString();
+      const expiresAt = evalData.expires_at;
+
+      // Defensive check if already expired
+      if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
+        setEvaluationState({
+          status: "EXPIRED",
+          data: evalData,
+          evaluatedAt: nowIso,
+          expiresAt,
+        });
+        setGuardianState({ status: "EXPIRED" });
+        showToast("Risk evaluation has expired", "warning");
+        return;
+      }
+
+      setEvaluationState({
+        status: "EVALUATED",
+        data: evalData,
+        evaluatedAt: nowIso,
+        expiresAt,
+      });
+
+      // Authoritative Guardian Escalation logic based on backend evaluation
+      if (evalData.guardian_required) {
+        setGuardianState({
+          status: "APPROVAL_REQUIRED",
+        });
+      } else {
+        setGuardianState({
+          status: "AUTHORIZATION_READY",
+        });
+      }
+
+      showToast(`Evaluation complete: ${evalData.risk_level} risk`, "info");
+    } catch (err: any) {
+      if (formVersionRef.current !== currentVer) return;
+      setEvaluationState({
+        status: "ERROR",
+        error: err?.message || "Unexpected evaluation error",
+      });
+      setGuardianState({ status: "IDLE" });
+      showToast(err?.message || "Unexpected evaluation error", "warning");
+    }
+  };
+
+  const handleRequestGuardianApproval = async () => {
+    if (!preparedDraft || !evaluationState.data) return;
+    if (isRequestingGuardianRef.current) return; // Prevent duplicate requests
+
+    isRequestingGuardianRef.current = true;
+    setGuardianState({ status: "REQUESTING_APPROVAL" });
+    const currentVer = ++formVersionRef.current;
+
+    try {
+      const res = await GuardianService.requestEvaluationGuardianApproval({
+        evaluationId: evaluationState.data.evaluation_id,
+        userId: session?.userId || 1,
+        amount: preparedDraft.amount,
+        recipient: preparedDraft.recipient,
+        riskScore: evaluationState.data.risk_score,
+        riskLevel: evaluationState.data.risk_level,
+        reasons: evaluationState.data.plain_language_reasons || [],
+      });
+
+      if (formVersionRef.current !== currentVer) return; // Race-condition guard
+
+      if (!res.success) {
+        setGuardianState({
+          status: "ERROR",
+          error: res.error,
+          blockerNotice: res.blockerNotice,
+        });
+        showToast(res.error || "Guardian escalation unavailable", "warning");
+        return;
+      }
+
+      setGuardianState({
+        status: "APPROVAL_PENDING",
+        requestId: res.requestId,
+        expiresAt: res.expiresAt,
+        remainingSeconds: res.remainingSeconds,
+      });
+
+      showToast("✓ Guardian approval request dispatched", "info");
+    } catch (err: any) {
+      if (formVersionRef.current !== currentVer) return;
+      setGuardianState({
+        status: "ERROR",
+        error: err?.message || "Failed to dispatch Guardian request",
+      });
+      showToast(err?.message || "Failed to dispatch Guardian request", "warning");
+    } finally {
+      isRequestingGuardianRef.current = false;
+    }
+  };
+
+  const handleAcceptPaymentRequest = (req: IncomingPaymentRequest) => {
+    setPaymentSource("PAYMENT_REQUEST");
+    handlePreparePayment({
+      recipient: req.upiId,
+      amount: req.amount,
+      note: req.note,
+      recipientName: req.requesterName,
+      requestId: req.id,
+    });
+  };
+
   const handleRecipientChange = (value: string) => {
     setEntryRecipient(value);
     setPaymentDraft(null);
     setEvaluationResult(null);
+    setPreparedDraft(null);
+    setEvaluationState({ status: "IDLE" });
+    setGuardianState({ status: "IDLE" });
     formVersionRef.current += 1;
   };
 
@@ -204,6 +445,9 @@ export const PaymentsScreen: React.FC = () => {
     setEntryAmount(value);
     setPaymentDraft(null);
     setEvaluationResult(null);
+    setPreparedDraft(null);
+    setEvaluationState({ status: "IDLE" });
+    setGuardianState({ status: "IDLE" });
     formVersionRef.current += 1;
   };
 
@@ -211,6 +455,9 @@ export const PaymentsScreen: React.FC = () => {
     setEntryNote(value);
     setPaymentDraft(null);
     setEvaluationResult(null);
+    setPreparedDraft(null);
+    setEvaluationState({ status: "IDLE" });
+    setGuardianState({ status: "IDLE" });
     formVersionRef.current += 1;
   };
 
@@ -242,6 +489,8 @@ export const PaymentsScreen: React.FC = () => {
       return;
     }
 
+    setScannedQrPayload(rawPayload);
+    setPaymentSource("QR");
     setEntryRecipient(result.updatedForm.recipient);
     if (result.updatedForm.amount) {
       setEntryAmount(result.updatedForm.amount);
@@ -251,6 +500,9 @@ export const PaymentsScreen: React.FC = () => {
     }
     setPaymentDraft(null);
     setEvaluationResult(null);
+    setPreparedDraft(null);
+    setEvaluationState({ status: "IDLE" });
+    setGuardianState({ status: "IDLE" });
     formVersionRef.current += 1;
     showToast("QR code scanned successfully", "success");
   };
@@ -295,9 +547,13 @@ export const PaymentsScreen: React.FC = () => {
         return;
       }
 
+      setPaymentSource("MOBILE");
       setEntryRecipient(result.updatedForm.recipient);
       setPaymentDraft(null);
       setEvaluationResult(null);
+      setPreparedDraft(null);
+      setEvaluationState({ status: "IDLE" });
+      setGuardianState({ status: "IDLE" });
       formVersionRef.current += 1;
       showToast("Contact selected successfully", "success");
     } catch {
@@ -911,90 +1167,80 @@ export const PaymentsScreen: React.FC = () => {
           {/* AVARAN PAY Entry Card */}
           <Card variant="default" style={styles.entryCard}>
             <View style={styles.entryCardHeader}>
-              <Text style={styles.entryCardTitle}>Pay someone new</Text>
+              <Text style={styles.entryCardTitle}>Payment Intake</Text>
               <Text style={styles.entryCardSubtitle}>
-                Enter UPI ID, mobile number or scan a QR
+                Select an intake method to prepare payment details
               </Text>
             </View>
 
-            {/* Recipient Input (Primary visual focus) */}
-            <TextInput
-              placeholder="UPI ID or mobile number"
-              icon="person-outline"
-              value={entryRecipient}
-              onChangeText={handleRecipientChange}
-              containerStyle={styles.recipientInputContainer}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+            {preparedDraft ? (
+              <PreparedPaymentCard
+                draft={preparedDraft}
+                evaluationState={evaluationState}
+                onAnalyzeRisk={() => handleEvaluatePreparedRisk(preparedDraft)}
+                onRetryEvaluation={() => handleEvaluatePreparedRisk(preparedDraft)}
+                isAnalyzing={evaluationState.status === "ANALYZING"}
+                guardianState={guardianState}
+                onRequestGuardianApproval={handleRequestGuardianApproval}
+                onRetryGuardian={handleRequestGuardianApproval}
+                isRequestingGuardian={guardianState.status === "REQUESTING_APPROVAL"}
+                onEdit={() => {
+                  setPreparedDraft(null);
+                  setEvaluationState({ status: "IDLE" });
+                  setGuardianState({ status: "IDLE" });
+                }}
+                onReset={() => {
+                  setPreparedDraft(null);
+                  setEvaluationState({ status: "IDLE" });
+                  setGuardianState({ status: "IDLE" });
+                  setEntryRecipient("");
+                  setEntryAmount("");
+                  setEntryNote("");
+                  setScannedQrPayload("");
+                }}
+              />
+            ) : (
+              <>
+                <PaymentSourceSelector
+                  activeSource={paymentSource}
+                  onSelectSource={handleSelectPaymentSource}
+                  pendingRequestsCount={pendingRequestsCount}
+                />
 
-            {/* Subtle recipient-type helper hint (only shown when recognized) */}
-            {recipientType !== "UNKNOWN" && (
-              <Text
-                style={styles.recipientTypeHint}
-                accessibilityRole="text"
-              >
-                {recipientType === "UPI_ID" ? "UPI ID detected" : "Mobile number detected"}
-              </Text>
+                {paymentSource === "UPI_ID" && (
+                  <UpiIdPaymentForm
+                    onPreparePayment={handlePreparePayment}
+                    initialRecipient={entryRecipient}
+                    initialAmount={entryAmount}
+                    initialNote={entryNote}
+                  />
+                )}
+
+                {paymentSource === "MOBILE" && (
+                  <MobilePaymentForm
+                    onPreparePayment={handlePreparePayment}
+                    onPickContact={handlePickContact}
+                    initialMobile={entryRecipient}
+                    initialAmount={entryAmount}
+                    initialNote={entryNote}
+                  />
+                )}
+
+                {paymentSource === "QR" && (
+                  <QrPaymentInput
+                    onPreparePayment={handlePreparePayment}
+                    onLaunchScanner={handleOpenScanner}
+                    scannedPayload={scannedQrPayload || undefined}
+                  />
+                )}
+
+                {paymentSource === "PAYMENT_REQUEST" && (
+                  <PaymentRequestList
+                    onAcceptRequest={handleAcceptPaymentRequest}
+                  />
+                )}
+              </>
             )}
-
-            {/* Secondary Actions: SCAN QR & CONTACTS */}
-            <View style={styles.secondaryActionsRow}>
-              <TouchableOpacity
-                onPress={handleOpenScanner}
-                style={styles.secondaryActionBtn}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Scan QR code"
-              >
-                <Ionicons name="qr-code-outline" size={15} color={colors.textSecondary} />
-                <Text style={styles.secondaryActionBtnText}>SCAN QR</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={handlePickContact}
-                style={styles.secondaryActionBtn}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Choose recipient from contacts"
-              >
-                <Ionicons name="people-outline" size={15} color={colors.textSecondary} />
-                <Text style={styles.secondaryActionBtnText}>CONTACTS</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Amount Field */}
-            <TextInput
-              label="Amount (₹)"
-              placeholder="0.00"
-              prefix="₹"
-              keyboardType="decimal-pad"
-              value={entryAmount}
-              onChangeText={handleAmountChange}
-              containerStyle={styles.amountInputContainer}
-            />
-
-            {/* Payment Note (Visually secondary) */}
-            <TextInput
-              label="Payment Note (Optional)"
-              placeholder="e.g. Consulting fee, Grocery store"
-              icon="document-text-outline"
-              value={entryNote}
-              onChangeText={handleNoteChange}
-              containerStyle={styles.noteInputContainer}
-            />
-
-            {/* Primary Action Button */}
-            <Button
-              label="EVALUATE & PAY"
-              icon="shield-checkmark"
-              variant="primary"
-              size="md"
-              loading={isEvaluating}
-              disabled={isEvaluating}
-              onPress={handleEvaluateAndPay}
-              style={styles.evaluateBtn}
-            />
 
             {/* Evaluation Result Section (Clean compact advisory summary) */}
             {evaluationResult && (

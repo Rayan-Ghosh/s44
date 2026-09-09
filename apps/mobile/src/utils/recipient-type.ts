@@ -101,3 +101,129 @@ export function getRecipientTypeHint(value: string | null | undefined): string |
   }
 }
 
+/**
+ * Validates a UPI ID input string with detailed error feedback.
+ */
+export function validateUpiIdInput(value: string | null | undefined): {
+  valid: boolean;
+  error?: string;
+  normalized?: string;
+} {
+  if (typeof value !== "string") {
+    return { valid: false, error: "UPI ID is required" };
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { valid: false, error: "UPI ID is required" };
+  }
+
+  if (/\s/.test(trimmed)) {
+    return { valid: false, error: "UPI ID cannot contain spaces" };
+  }
+
+  const atCount = (trimmed.match(/@/g) || []).length;
+  if (atCount === 0) {
+    return { valid: false, error: "UPI ID must contain '@' (e.g. name@bank)" };
+  }
+  if (atCount > 1) {
+    return { valid: false, error: "UPI ID cannot contain multiple '@' symbols" };
+  }
+
+  if (!UPI_ID_REGEX.test(trimmed)) {
+    return {
+      valid: false,
+      error: "Enter a valid UPI ID (e.g. user@okaxis or merchant@upi)",
+    };
+  }
+
+  return { valid: true, normalized: trimmed.toLowerCase() };
+}
+
+/**
+ * Validates an Indian mobile number input string with detailed error feedback.
+ */
+export function validateMobileNumberInput(value: string | null | undefined): {
+  valid: boolean;
+  error?: string;
+  normalized?: string;
+} {
+  if (typeof value !== "string") {
+    return { valid: false, error: "Mobile number is required" };
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { valid: false, error: "Mobile number is required" };
+  }
+
+  // Remove whitespace, dashes, parentheses
+  const clean = trimmed.replace(/[\s\-\(\)]/g, "");
+
+  let stripped = clean;
+  if (clean.startsWith("+91")) {
+    stripped = clean.slice(3);
+  } else if (clean.startsWith("91") && clean.length === 12) {
+    stripped = clean.slice(2);
+  } else if (clean.startsWith("0") && clean.length === 11) {
+    stripped = clean.slice(1);
+  }
+
+  if (!/^\d+$/.test(stripped)) {
+    return { valid: false, error: "Mobile number must contain digits only" };
+  }
+
+  if (stripped.length !== 10) {
+    return {
+      valid: false,
+      error: `Enter a 10-digit mobile number (${stripped.length} digits entered)`,
+    };
+  }
+
+  if (!/^[6-9]/.test(stripped)) {
+    return {
+      valid: false,
+      error: "Mobile number must start with 6, 7, 8, or 9",
+    };
+  }
+
+  return { valid: true, normalized: stripped };
+}
+
+/**
+ * Validates transaction amount input.
+ */
+export function validateAmountInput(value: string | number | null | undefined): {
+  valid: boolean;
+  error?: string;
+  amount?: number;
+} {
+  if (value === null || value === undefined) {
+    return { valid: false, error: "Amount is required" };
+  }
+
+  let num: number;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return { valid: false, error: "Amount is required" };
+    }
+    num = Number(trimmed);
+  } else {
+    num = value;
+  }
+
+  if (!Number.isFinite(num) || isNaN(num)) {
+    return { valid: false, error: "Enter a valid numeric amount" };
+  }
+
+  if (num <= 0) {
+    return { valid: false, error: "Amount must be greater than ₹0" };
+  }
+
+  if (num > 1000000) {
+    return { valid: false, error: "Amount cannot exceed ₹10,00,000" };
+  }
+
+  return { valid: true, amount: Math.round(num * 100) / 100 };
+}

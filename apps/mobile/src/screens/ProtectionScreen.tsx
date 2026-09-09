@@ -23,6 +23,7 @@ import {
   ProtectionModuleModal,
   ProtectionFeatureItem,
 } from "../components/protection/ProtectionModuleModal";
+import { StatementUploadCard } from "../components/protection/StatementUploadCard";
 import { AlertDetailsModal } from "../components/protection/AlertDetailsModal";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -562,9 +563,39 @@ export const ProtectionScreen: React.FC = () => {
             </View>
           )}
 
-          {/* 5. Recent Security Alerts */}
+          {/* 5. Bank Statement & Behavioral Baseline */}
           <StaggerRevealCard
             index={2}
+            baseDelay={60}
+            hasPlayed={hasPlayedProtectionStaggerRef.current}
+            style={styles.section}
+          >
+            <Text style={styles.sectionHeading}>BEHAVIORAL BASELINE & STATEMENTS</Text>
+            <StatementUploadCard
+              onFileSelected={(file) => {
+                showToast(`Statement selected: ${file.name}`, "info");
+              }}
+              onFileRemoved={() => {
+                showToast("Statement removed", "info");
+              }}
+              onUploadSuccess={(receipt) => {
+                showToast(
+                  `Statement uploaded successfully (${receipt.upload_id})`,
+                  "success"
+                );
+              }}
+              onUploadError={(err) => {
+                showToast(
+                  err.message || "Statement upload failed",
+                  "warning"
+                );
+              }}
+            />
+          </StaggerRevealCard>
+
+          {/* 6. Recent Security Alerts */}
+          <StaggerRevealCard
+            index={3}
             baseDelay={60}
             hasPlayed={hasPlayedProtectionStaggerRef.current}
             style={styles.section}

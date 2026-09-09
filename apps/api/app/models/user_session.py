@@ -14,11 +14,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 
+from app.core.security import hash_identifier
+
+
 class UserSession(Base):
     __tablename__ = "user_sessions"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
     )
     user_id: Mapped[int] = mapped_column(
         Integer,
@@ -49,12 +52,24 @@ class UserSession(Base):
     user: Mapped["User"] = relationship(back_populates="sessions")
 
     def __init__(self, **kwargs):
-        if "token_hash" in kwargs and "refresh_token_hash" not in kwargs:
+        if "token_hash" in kwargs and not kwargs.get("refresh_token_hash"):
             kwargs["refresh_token_hash"] = kwargs["token_hash"]
-        elif "refresh_token_hash" in kwargs and "token_hash" not in kwargs:
+        elif "refresh_token_hash" in kwargs and not kwargs.get("token_hash"):
             kwargs["token_hash"] = kwargs["refresh_token_hash"]
-        if "device_hash" in kwargs and "device_id" not in kwargs:
-            kwargs["device_id"] = kwargs["device_hash"]
-        elif "device_id" in kwargs and "device_hash" not in kwargs:
-            kwargs["device_hash"] = kwargs["device_id"]
+
+        if not kwargs.get("token_hash"):
+            kwargs["token_hash"] = hash_identifier(kwargs.get("refresh_token_hash") or "token")
+        if not kwargs.get("refresh_token_hash"):
+            kwargs["refresh_token_hash"] = kwargs["token_hash"]
+
+        effective_device = (
+            kwargs.get("device_id")
+            or kwargs.get("device_hash")
+            or f"client-device-{kwargs.get('user_id', 'unknown')}"
+        )
+        if not kwargs.get("device_hash"):
+            kwargs["device_hash"] = hash_identifier(effective_device)
+        if not kwargs.get("device_id"):
+            kwargs["device_id"] = effective_device
+
         super().__init__(**kwargs)

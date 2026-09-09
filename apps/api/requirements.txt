@@ -8,6 +8,7 @@
 # scaffold (see README.md "Verified" note).
 
 fastapi==0.141.1
+python-multipart>=0.0.9
 uvicorn[standard]==0.52.3
 sqlalchemy==2.0.52
 pydantic-settings==2.15.0
@@ -20,3 +21,6 @@ bcrypt==5.0.0
 argon2-cffi==25.1.0
 python-jose[cryptography]==3.5.0
 PyJWT==2.13.0
+pypdf>=6.0.0
+Pillow>=11.0.0
+pytesseract>=0.3.10

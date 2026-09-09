@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 from app.models.user_session import UserSession
 
 
+from app.core.security import hash_identifier
+
+
 def create_session(
     db: Session,
     user_id: int,
@@ -20,11 +23,15 @@ def create_session(
     ip_address: Optional[str] = None,
 ) -> UserSession:
     """Register a new active refresh token session."""
+    effective_dev = device_id or f"client-{user_id}"
+    dev_hash = hash_identifier(effective_dev)
     session = UserSession(
         user_id=user_id,
         refresh_token_hash=refresh_token_hash,
+        token_hash=refresh_token_hash,
         expires_at=expires_at,
-        device_id=device_id,
+        device_id=effective_dev,
+        device_hash=dev_hash,
         user_agent=user_agent,
         ip_address=ip_address,
         is_revoked=False,
