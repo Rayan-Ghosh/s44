@@ -76,6 +76,18 @@ class Settings(BaseSettings):
     otp_delivery_provider: str = "mock"
     enable_dev_otp_inspection: bool = True
 
+    # Circuit breaker guarding calls to the OTP delivery provider (see
+    # app/core/circuit_breaker.py). Protects the shared sync-route thread
+    # pool from a hung/slow live SMS/email gateway once one is configured —
+    # mock/console/none providers return instantly so these limits are
+    # effectively inert until a live provider is plugged in.
+    otp_delivery_breaker_failure_threshold: int = 3
+    otp_delivery_breaker_window_size: int = 5
+    otp_delivery_breaker_recovery_timeout_seconds: float = 30.0
+    otp_delivery_breaker_call_timeout_seconds: float = 5.0
+    otp_delivery_breaker_max_concurrent: int = 5
+    otp_delivery_breaker_max_queue: int = 10
+
     # HTTPS & Proxy Configuration
     enforce_https: bool = False
     trusted_proxy_ips: list[str] = ["127.0.0.1", "::1"]

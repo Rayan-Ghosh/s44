@@ -214,21 +214,29 @@ def _get_sender_masked_phone(db: Session, sender) -> Optional[str]:
     return None
 
 
-def _check_and_expire_request(db: Session, req) -> bool:
+def _check_and_expire_request(db: Session, req, *, commit: bool = True) -> bool:
     """Thin wrapper kept for call-site compatibility — see
     app/services/guardian_service.py for the shared implementation also
     used by the background expiry worker (app/main.py's lifespan task)."""
-    return guardian_service.check_and_expire_request(db, req)
+    return guardian_service.check_and_expire_request(db, req, commit=commit)
 
 
 def _serialize_pending_requests(db: Session, reqs: list) -> list[GuardianRequestRead]:
     """Shared helper: convert a list of pending GuardianRequest ORM rows into
     GuardianRequestRead responses with dynamic sender and recipient details,
-    filtering out any that have already expired and auto-resolving them."""
+    filtering out any that have already expired and auto-resolving them.
+
+    Any expiries found here are staged with commit=False and flushed in one
+    batch commit below, instead of one commit per expired row — this runs on
+    every poll of a pending-requests list, so a stale backlog would otherwise
+    mean one write transaction per row on every single poll."""
     results = []
     now = datetime.now(timezone.utc)
+    any_expired = False
     for req in reqs:
-        if _check_and_expire_request(db, req) or req.outcome != GuardianOutcome.PENDING:
+        if _check_and_expire_request(db, req, commit=False):
+            any_expired = True
+        if req.outcome != GuardianOutcome.PENDING:
             continue
         exp = req.expires_at.replace(tzinfo=timezone.utc) if req.expires_at.tzinfo is None else req.expires_at
         rem = max(0, int((exp - now).total_seconds()))
@@ -263,6 +271,8 @@ def _serialize_pending_requests(db: Session, reqs: list) -> list[GuardianRequest
             sender_phone_masked=sender_phone_masked,
             recipient_name=recipient_name,
         ))
+    if any_expired:
+        db.commit()
     return results
 
 

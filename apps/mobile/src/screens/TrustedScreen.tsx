@@ -41,13 +41,11 @@ const RELATIONSHIPS = ["Spouse", "Parent", "Sibling", "Child", "Friend", "Other"
 interface AddContactFormProps {
   onSave: (contact: Omit<TrustedContact, "id" | "addedAt">) => void;
   onCancel: () => void;
-  isSaving: boolean;
 }
 
 const AddContactForm: React.FC<AddContactFormProps> = ({
   onSave,
   onCancel,
-  isSaving,
 }) => {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -149,7 +147,6 @@ const AddContactForm: React.FC<AddContactFormProps> = ({
           onPress={handleSave}
           variant="primary"
           size="md"
-          loading={isSaving}
           style={{ flex: 1 }}
           icon="checkmark"
         />
@@ -251,7 +248,6 @@ export const TrustedScreen: React.FC = () => {
   } = useGuardian();
 
   const [showForm, setShowForm] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<"active" | "inactive">("active");
@@ -326,13 +322,19 @@ export const TrustedScreen: React.FC = () => {
       );
       return;
     }
-    setIsSaving(true);
+    // Optimistic: close the form immediately — GuardianContext.addContact
+    // inserts the new contact into the list right away, so the card shows
+    // up instantly. If the save actually fails on the server, the context
+    // rolls the list back to empty and we reopen the form with an error so
+    // the user can retry without losing their place.
+    setShowForm(false);
     const result = await addContact(userId, contact);
-    setIsSaving(false);
-    if (result.success) {
-      setShowForm(false);
-    } else {
-      Alert.alert("Failed to Save", result.error || "Please try again.");
+    if (!result.success) {
+      setShowForm(true);
+      Alert.alert(
+        "Failed to Save",
+        result.error || "Your trusted contact wasn't saved. Please try again."
+      );
     }
   };
 
@@ -341,7 +343,17 @@ export const TrustedScreen: React.FC = () => {
     if (!verified) {
       return;
     }
-    await removeContact(userId, contactId);
+    // Optimistic: GuardianContext.removeContact takes the card off screen
+    // immediately. If the server call fails, it restores the contact at its
+    // original position — surface that rollback clearly rather than letting
+    // the card just silently reappear.
+    const result = await removeContact(userId, contactId);
+    if (!result.success) {
+      Alert.alert(
+        "Failed to Remove",
+        result.error || "The contact couldn't be removed, so it's back on your list. Please try again."
+      );
+    }
   };
 
   return (
@@ -424,7 +436,6 @@ export const TrustedScreen: React.FC = () => {
             <AddContactForm
               onSave={handleSave}
               onCancel={() => setShowForm(false)}
-              isSaving={isSaving}
             />
           )}
 

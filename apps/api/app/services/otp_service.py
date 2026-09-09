@@ -16,8 +16,9 @@ import logging
 import os
 import re
 import secrets
-from typing import Optional
+from typing import Any, Optional
 
+from app.core.circuit_breaker import CircuitBreaker
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -196,5 +197,65 @@ def get_otp_delivery_provider() -> BaseOtpDeliveryProvider:
     return MockOtpDeliveryProvider()
 
 
-# Singleton delivery provider instance
-otp_delivery_provider: BaseOtpDeliveryProvider = get_otp_delivery_provider()
+class CircuitBreakerProtectedOtpProvider(BaseOtpDeliveryProvider):
+    """Wraps another BaseOtpDeliveryProvider's send_otp with a circuit
+    breaker + bulkhead + timeout (app/core/circuit_breaker.py).
+
+    Every call site in app/api/routers/auth.py calls
+    `otp_delivery_provider.send_otp(...)` directly from a synchronous route
+    handler with no try/except around it and no timeout — those routes run
+    on the shared anyio worker-thread pool used by every other sync endpoint
+    in the app. Without this wrapper, a hung live delivery gateway would
+    hold that shared thread indefinitely per request, and enough concurrent
+    OTP requests would starve the pool for unrelated endpoints (guardian,
+    payments, transactions...) too.
+
+    No fallback is registered here deliberately: OTP delivery is a
+    safety-relevant action, so a failed/open circuit re-raises
+    (CircuitBreakerOpenError, DependencyTimeoutError, or the provider's own
+    exception) rather than silently reporting a fabricated "delivered"
+    result. Callers already run inside FastAPI's normal exception handling,
+    so this surfaces as a 500 exactly as an uncaught provider exception
+    already would have before this wrapper existed — the change is that the
+    failure is now bounded (call_timeout) and fast (once OPEN) instead of
+    hanging a shared thread on every single request.
+    """
+
+    def __init__(self, delegate: BaseOtpDeliveryProvider, breaker: CircuitBreaker) -> None:
+        self._delegate = delegate
+        self._breaker = breaker
+
+    @property
+    def provider_name(self) -> str:
+        return self._delegate.provider_name
+
+    @property
+    def is_live_provider(self) -> bool:
+        return self._delegate.is_live_provider
+
+    def send_otp(self, target: str, otp: str, purpose: str = "ACCOUNT_VERIFICATION") -> bool:
+        return self._breaker.call(self._delegate.send_otp, target, otp, purpose)
+
+    def __getattr__(self, item: str) -> Any:
+        # Transparent passthrough for provider-specific extras that aren't
+        # part of BaseOtpDeliveryProvider — e.g. MockOtpDeliveryProvider's
+        # get_last_otp_for_target(), used directly by the test suite.
+        return getattr(self._delegate, item)
+
+
+otp_delivery_breaker = CircuitBreaker(
+    name="otp_delivery",
+    failure_threshold=settings.otp_delivery_breaker_failure_threshold,
+    window_size=settings.otp_delivery_breaker_window_size,
+    recovery_timeout=settings.otp_delivery_breaker_recovery_timeout_seconds,
+    call_timeout=settings.otp_delivery_breaker_call_timeout_seconds,
+    max_concurrent=settings.otp_delivery_breaker_max_concurrent,
+    max_queue=settings.otp_delivery_breaker_max_queue,
+)
+
+# Singleton delivery provider instance — every call site in auth.py goes
+# through the circuit breaker, regardless of which underlying provider is
+# configured.
+otp_delivery_provider: BaseOtpDeliveryProvider = CircuitBreakerProtectedOtpProvider(
+    get_otp_delivery_provider(), otp_delivery_breaker
+)

@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 
 import { RiskDecisionCard } from "@/app/design-system/risk-card-preview/risk-card-preview"
+import { OffsetShift } from "./offset-shift"
 
 /**
  * Embed target for the landing page's phone frames. Renders the real
@@ -36,22 +38,29 @@ import { RiskDecisionCard } from "@/app/design-system/risk-card-preview/risk-car
  * margin is a render-time fact — no script, no ordering, nothing to clamp.
  *
  * Not linked from anywhere and noindex: this is scaffolding, not a page.
+ *
+ * CACHING — this route is identical for every viewer at a given `y`
+ * (RiskDecisionCard's numbers are the fixed illustrative FUSION constant,
+ * not live/per-user data — see risk-card-preview.tsx), and it only changes
+ * when someone edits that copy or those numbers. Originally the page read
+ * `searchParams` directly, which forces Next to render it dynamically on
+ * every single request (confirmed via `next build`'s route list: this was
+ * the only `ƒ Dynamic` route in the app, next to five fully `○ Static`
+ * ones) — real cost for a route meant to sit in three iframes on the
+ * highest-traffic page in the app. The `y` offset is the one thing that
+ * legitimately varies per embed, so it now lives in OffsetShift, a small
+ * client component reading useSearchParams() inside a Suspense boundary.
+ * That's the only per-request "hole"; the page around it has nothing left
+ * that depends on the request, so Next prerenders it once at build time
+ * and serves that same cached HTML for every `y` — regenerating only on
+ * the next deploy that changes this file or RiskDecisionCard.
  */
 export const metadata: Metadata = {
   title: "Avaran — risk decision card (embed)",
   robots: { index: false, follow: false },
 }
 
-export default async function RiskCardEmbedPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ y?: string }>
-}) {
-  const { y } = await searchParams
-  const offset = Number.parseInt(y ?? "0", 10)
-
-  const shift = Number.isFinite(offset) && offset > 0 ? offset : 0
-
+export default function RiskCardEmbedPage() {
   return (
     // Forced dark, via the `.dark` class rather than the theme provider.
     // This route exists only to be framed inside the cinematic landing, and a
@@ -60,9 +69,13 @@ export default async function RiskCardEmbedPage({
     // /design-system/risk-card-preview is untouched and stays light-first.
     <div className="dark">
       <div className="bg-background min-h-dvh overflow-hidden">
-        <div className="p-4" style={{ marginTop: `-${shift}px` }}>
+        <Suspense fallback={<div className="p-4">
           <RiskDecisionCard />
-        </div>
+        </div>}>
+          <OffsetShift>
+            <RiskDecisionCard />
+          </OffsetShift>
+        </Suspense>
       </div>
     </div>
   )

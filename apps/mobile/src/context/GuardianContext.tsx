@@ -73,7 +73,10 @@ interface GuardianContextType {
     userId: number,
     contact: Omit<TrustedContact, "id" | "addedAt">
   ) => Promise<{ success: boolean; error?: string }>;
-  removeContact: (userId: number, contactId: string) => Promise<void>;
+  removeContact: (
+    userId: number,
+    contactId: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   isTrustedFeatureEnabled: boolean;
   toggleTrustedFeature: () => boolean;
@@ -105,7 +108,7 @@ const GuardianContext = createContext<GuardianContextType>({
   isLoadingContacts: false,
   loadContacts: async () => {},
   addContact: async () => ({ success: true }),
-  removeContact: async () => {},
+  removeContact: async () => ({ success: true }),
   isTrustedFeatureEnabled: true,
   toggleTrustedFeature: () => true,
   setTrustedFeatureEnabled: () => {},
@@ -253,22 +256,59 @@ export const GuardianProvider: React.FC<{ children: React.ReactNode }> = ({
       userId: number,
       contact: Omit<TrustedContact, "id" | "addedAt">
     ): Promise<{ success: boolean; error?: string }> => {
+      // Optimistic insert: show the new contact immediately under a
+      // temporary id so the screen feels instant. Reconciled with the
+      // server's real record on success, or rolled back on failure.
+      const tempId = `temp-${Date.now()}`;
+      const optimisticContact: TrustedContact = {
+        ...contact,
+        id: tempId,
+        addedAt: new Date().toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        }),
+      };
+      setTrustedContacts((prev) => [...prev, optimisticContact]);
+
       const res = await GuardianService.addTrustedContact(userId, contact);
       if (res.success && res.contact) {
-        setTrustedContacts((prev) => [...prev, res.contact!]);
+        const confirmed = res.contact;
+        setTrustedContacts((prev) => prev.map((c) => (c.id === tempId ? confirmed : c)));
         return { success: true };
       }
+
+      // Roll back the optimistic insert — the server never confirmed it.
+      setTrustedContacts((prev) => prev.filter((c) => c.id !== tempId));
       return { success: false, error: res.error || "Failed to add trusted contact" };
     },
     []
   );
 
-  const removeContact = useCallback(async (userId: number, contactId: string) => {
-    const res = await GuardianService.removeTrustedContact(userId, contactId);
-    if (res.success) {
+  const removeContact = useCallback(
+    async (userId: number, contactId: string): Promise<{ success: boolean; error?: string }> => {
+      // Optimistic delete: remove immediately, but remember the contact and
+      // its position so a failed server call can be undone in place.
+      const removedIndex = trustedContacts.findIndex((c) => c.id === contactId);
+      const removedContact = removedIndex >= 0 ? trustedContacts[removedIndex] : undefined;
       setTrustedContacts((prev) => prev.filter((c) => c.id !== contactId));
-    }
-  }, []);
+
+      const res = await GuardianService.removeTrustedContact(userId, contactId);
+      if (!res.success) {
+        if (removedContact) {
+          setTrustedContacts((prev) => {
+            const next = [...prev];
+            const insertAt = Math.min(removedIndex, next.length);
+            next.splice(insertAt < 0 ? next.length : insertAt, 0, removedContact);
+            return next;
+          });
+        }
+        return { success: false, error: res.error || "Failed to remove trusted contact" };
+      }
+      return { success: true };
+    },
+    [trustedContacts]
+  );
 
   const syncActiveRequestForTransaction = useCallback(
     async (tx: UserTransaction) => {
