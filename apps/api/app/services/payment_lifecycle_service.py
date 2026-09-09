@@ -19,7 +19,7 @@ from app.core.security import hash_identifier
 from app.models.enums import GuardianOutcome
 from app.models.enums import TransactionStatus as S
 from app.models.transaction import Transaction
-from app.repositories import guardian_repository, transaction_repository
+from app.repositories import guardian_repository, transaction_repository, user_pattern_repository
 from app.services import notification_service
 from app.services.exceptions import DomainError, TransactionNotFoundError
 from app.services.security_audit_service import SecurityAuditService
@@ -201,6 +201,15 @@ def confirm(db: Session, transaction_id: int, *, utr_reference: Optional[str] = 
 
     txn = transition(db, txn, S.COMPLETED)
     SecurityAuditService.log_event("TRANSACTION_COMPLETED", user_id=txn.user_id, transaction_id=txn.id, db=db)
+
+    # Demand-driven trigger for the personalized transaction-pattern engine
+    # (app/services/user_pattern_trainer.py) — a cheap counter bump, never
+    # allowed to fail the actual payment confirmation it rides on.
+    try:
+        user_pattern_repository.increment_pending_transactions(db, txn.user_id)
+    except Exception:
+        pass
+
     notification_service.notify(
         db,
         user_id=txn.user_id,

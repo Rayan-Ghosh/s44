@@ -114,6 +114,25 @@ See `docs/ML_ARCHITECTURE.md` for full detail. Architecturally:
 never inside the API process; the API loads versioned artifacts
 (`ml/models/*.pkl`, `*.json`) at inference time via `ml/inference/predict.py`.
 
+**DELIBERATE, BOUNDED EXCEPTION**: the personalized transaction-pattern
+engine (`app/services/user_pattern_trainer.py`, `ml/training/
+train_user_pattern.py`) fits a per-user micro model *inside* the API
+process — the opposite of the rule above. This is intentional, not drift:
+a per-user model can't be trained offline in the usual sense (there's
+nothing to train until that user has transacted), and the fit itself is
+bounded tightly enough that it doesn't violate the spirit of "never inside
+the API process, unbounded": `app/core/concurrency.py`'s
+`TRAINING_SEMAPHORE` caps it at 2 concurrent fits system-wide, and every
+fit runs via `asyncio.to_thread` on a dedicated worker pool, never on the
+event loop that serves live payment requests. The heavy, shared global
+models this rule was written for (transaction fraud XGBoost, behaviour
+anomaly forest) are unaffected and still trained exactly as described
+above. See `docs/ML_ARCHITECTURE.md` §6 for the model itself, and
+`app/services/user_pattern_trainer.py`'s docstring for why the DB
+reads/writes around the fit stay un-threaded (same choice
+`guardian_service.py`'s sweep worker already makes for its own, cheaper
+queries).
+
 **CONFIRMED**: independently trained models per detection problem
 (transaction fraud, behaviour anomaly, device risk, voice/social-engineering),
 combined only at the fusion layer — not one monolithic model.

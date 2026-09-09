@@ -61,6 +61,30 @@ class Settings(BaseSettings):
     # worker on its own thread would race that per-test schema teardown.
     enable_guardian_expiry_worker: bool = True
 
+    # Personalized transaction-pattern engine (app/services/
+    # user_pattern_scheduler.py, user_pattern_trainer.py). Opportunistic
+    # sweep interval — kept long (30 min default) since retraining is
+    # demand-driven, not time-driven; this is just the backstop that
+    # eventually picks up eligible users between app opens. Disabled under
+    # the test harness for the same schema-teardown-race reason as the
+    # guardian worker above.
+    user_pattern_sweep_interval_seconds: int = 1800
+    enable_user_pattern_scheduler: bool = True
+    user_pattern_sweep_batch_size: int = 10
+    # Retraining eligibility gates (all three required) — see
+    # user_pattern_trainer.py::is_eligible_for_retrain.
+    user_pattern_retrain_cooldown_hours: int = 72
+    user_pattern_min_new_transactions: int = 15
+    user_pattern_active_within_days: int = 14
+    # Below this many total transactions (live + statement-derived), skip
+    # sklearn entirely and ship a quantile-only artifact — see
+    # ml/training/train_user_pattern.py.
+    user_pattern_min_transactions_for_model: int = 30
+
+    # Statement upload (app/services/statement_parser_service.py).
+    statement_upload_max_bytes: int = 5 * 1024 * 1024
+    statement_upload_max_pages: int = 12
+
     # Symmetric key for app/core/contact_encryption.py (Fernet). Guards the
     # one place raw, reversible contact info (email/phone) is allowed to
     # live — see docs/PROFILE_CONTACT_INFO_DECISION.md. This dev default is

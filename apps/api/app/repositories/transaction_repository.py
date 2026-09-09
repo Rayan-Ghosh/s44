@@ -56,3 +56,23 @@ def list_transactions(
     if status is not None:
         query = query.filter(Transaction.status == status)
     return query.order_by(Transaction.timestamp.desc()).offset(offset).limit(limit).all()
+
+
+def get_confirmed_transactions(db: Session, user_id: int) -> list[Transaction]:
+    """Confirmed/completed transactions for one user — the live-history
+    half of the personalized transaction-pattern baseline (see
+    ml/profiles/user_pattern.py, app/services/user_pattern_trainer.py).
+    Only these two terminal-success statuses count: a PENDING or BLOCKED
+    row was never actually an example of "how this user normally spends."
+    """
+    return (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.status.in_(
+                [TransactionStatus.CONFIRMED, TransactionStatus.COMPLETED]
+            ),
+        )
+        .order_by(Transaction.timestamp.asc())
+        .all()
+    )

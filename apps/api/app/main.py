@@ -22,6 +22,7 @@ from app.api.routers import (
     alerts,
     auth,
     demo,
+    financial_profile,
     guardian,
     institution,
     notifications,
@@ -35,6 +36,7 @@ from app.api.routers import (
 from app.core.config import settings
 from app.core.database import SessionLocal, get_db
 from app.services import guardian_service
+from app.services.user_pattern_scheduler import user_pattern_sweep_worker
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +61,19 @@ async def _guardian_expiry_worker() -> None:
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI):
     task = asyncio.create_task(_guardian_expiry_worker()) if settings.enable_guardian_expiry_worker else None
+    pattern_task = (
+        asyncio.create_task(user_pattern_sweep_worker())
+        if settings.enable_user_pattern_scheduler
+        else None
+    )
     try:
         yield
     finally:
-        if task is not None:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        for t in (task, pattern_task):
+            if t is not None:
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -139,6 +147,7 @@ app.include_router(voice_stream.router)
 app.include_router(payments.router)
 app.include_router(demo.router)
 app.include_router(notifications.router)
+app.include_router(financial_profile.router)
 
 
 

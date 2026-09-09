@@ -114,6 +114,66 @@ the comparison baseline for deviation-based features. Must be
 privacy-minimized (spec §7, §21): not a permanent store of unnecessary
 sensitive information.
 
+> **Note on this profile's actual population status**: `User.risk_profile`
+> (the JSON column this section describes) is only ever written by the
+> demo/simulator seed scripts (`app/api/routers/demo.py`,
+> `simulator.py`) — real transaction flow never populates it, so every
+> real user's `/api/v1/risk/evaluate` call falls back to the same
+> hardcoded defaults in `ml/features/transaction_features.py`. The engine
+> below (`ml/profiles/user_pattern.py`,
+> `app/services/user_pattern_trainer.py`) is a separate, genuinely-
+> populated-from-real-data personalization layer — predictions run
+> on-device via an exported micro model, never feeding
+> `/api/v1/risk/evaluate`'s authoritative score (see
+> `apps/mobile/src/services/user-pattern-service.ts`'s docstring). It does
+> not replace the fix this profile still needs; it's an additive,
+> narrower-scope (amount/time only, not recipients/devices/locations)
+> personalization signal.
+
+**PROPOSED** — personalized transaction-pattern engine
+(`ml/profiles/user_pattern.py`, `ml/training/train_user_pattern.py`,
+`app/services/user_pattern_trainer.py`), added to give a user's own
+amount/time history somewhere real to land, on-device:
+
+- **Baseline**: interpretable statistics only (percentiles + a
+  Bayesian-shrunk mean/std toward a per-`UserPersonaArchetype` prior),
+  never a hidden second model — same constraint `ml/profiles/
+  user_risk_profile.py` already follows. `ARCHETYPE_PRIORS` are round,
+  clearly-labeled **PLACEHOLDER** values (no dataset in this repo
+  segments users by archetype yet), the same status this section's own
+  fusion-weights note already applies elsewhere in this doc.
+- **Model**: below `user_pattern_min_transactions_for_model` (default 30)
+  transactions, no model is fit at all — the shrunk percentiles are
+  shipped directly as a `"quantile-json"` artifact, compared arithmetically
+  on-device. At or above that count, a micro IsolationForest
+  (`n_estimators=30, max_samples=64, contamination=0.03`) is fit and
+  exported to ONNX via `skl2onnx`. Verified directly against this repo's
+  installed skl2onnx/onnxruntime (not assumed from docs): the ONNX
+  `scores` output is on a different scale than sklearn's own
+  `score_samples()` — lower score = more anomalous, matching sklearn's
+  convention, but not numerically comparable to it — so each artifact
+  bundles a threshold computed from that model's own training scores (see
+  `ml/training/train_user_pattern.py`'s module docstring), the same
+  self-referential-threshold pattern `ml/export/to_onnx.py` already uses
+  for the recipient model's raw/calibrated scale gap.
+- **Where it runs**: training (the fit above) happens server-side, inside
+  `app/services/user_pattern_trainer.py`, bounded by
+  `app/core/concurrency.py`'s semaphore + dedicated thread pool (see
+  `docs/ARCHITECTURE.md` §4's note on this exception). Prediction happens
+  entirely on-device (`apps/mobile/src/services/user-pattern-service.ts`,
+  `onnxruntime-react-native`) — the server never scores a live amount
+  against this model.
+- **Retraining**: demand-driven (a confirmed transaction, an app
+  foreground) with an opportunistic 30-minute sweep as backstop
+  (`app/services/user_pattern_scheduler.py`), gated by three eligibility
+  conditions (72h cooldown, ≥15 new transactions, active within 14 days) —
+  never a fixed schedule that retrains every profile at once.
+- **Bootstrap**: a user can seed pre-signup history via bank-statement PDF
+  upload (`app/services/statement_parser_service.py`) — best-effort
+  header-driven table parsing (verified against a synthetic test
+  statement, not any real bank's actual export format; see that module's
+  docstring), never a fixed column-position assumption.
+
 ## 7. Rule engine
 
 **CONFIRMED** (spec §8.1): deterministic rules run alongside ML models,

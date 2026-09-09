@@ -33,6 +33,10 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 # app/main.py / app/core/config.py. Guardian expiry itself is still
 # covered directly via app/services/guardian_service.py in tests.
 os.environ["ENABLE_GUARDIAN_EXPIRY_WORKER"] = "false"
+# Same race as the guardian worker above, same fix — see
+# app/services/user_pattern_scheduler.py. Covered directly in
+# test_user_pattern_trainer.py instead.
+os.environ["ENABLE_USER_PATTERN_SCHEDULER"] = "false"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

@@ -169,6 +169,13 @@ Avaran.db.before-*
 *.STALE*
 
 # --------------------------------------------------------------------------
+# Per-user pattern-engine artifacts (apps/api/app/services/user_pattern_trainer.py)
+# --------------------------------------------------------------------------
+# Generated on demand from each user's own transaction history — same
+# "reproducible from a script, not committed" reasoning as Avaran.db above.
+/storage/
+
+# --------------------------------------------------------------------------
 # Docker / infra local overrides
 # --------------------------------------------------------------------------
 docker-compose.override.yml

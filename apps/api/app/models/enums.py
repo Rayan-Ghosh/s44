@@ -115,3 +115,20 @@ class PaymentWorkflowStage(str, enum.Enum):
     PAYMENT_SUBMITTED = "PAYMENT_SUBMITTED"
     PAYMENT_COMPLETED = "PAYMENT_COMPLETED"
 
+
+class UserPersonaArchetype(str, enum.Enum):
+    """Coarse spending-pattern prior for a user's personalized baseline
+    (ml/profiles/user_pattern.py). PLACEHOLDER taxonomy: no dataset in this
+    repo segments users this way yet, so this exists only to give the
+    Bayesian-shrinkage prior somewhere sane to start before a user has
+    enough history of their own — not a calibrated segmentation model."""
+
+    STUDENT = "STUDENT"
+    SALARIED = "SALARIED"
+    HOMEMAKER = "HOMEMAKER"
+    BUSINESS = "BUSINESS"
+    RETIRED_ELDERLY = "RETIRED_ELDERLY"
+    GIG_WORKER = "GIG_WORKER"
+    FARMER_RURAL = "FARMER_RURAL"
+    GENERAL = "GENERAL"
+
