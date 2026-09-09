@@ -336,6 +336,43 @@ def get_guardian_request_by_transaction(transaction_id: int, db: Session = Depen
     return get_guardian_request_detail(req.id, db)
 
 
+@router.get("/requests/incoming/{user_id}", response_model=list[GuardianRequestRead])
+def list_incoming_requests_for_user(user_id: int, db: Session = Depends(get_db)) -> list[GuardianRequestRead]:
+    """Find all pending guardian requests where this user is enrolled as a trusted contact by phone number."""
+    user = user_repository.get_user(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
+
+    from app.models.trusted_contact import TrustedContact
+    from app.models.guardian_request import GuardianRequest
+    from app.models.enums import GuardianOutcome
+
+    # Automatically resolve & link any unlinked contacts matching this guardian's phone
+    guardian_repository.link_unbound_trusted_contacts_for_user(
+        db, user_id=user_id, phone_hash=user.phone_hash
+    )
+
+    # Find trusted contact records matching this user's phone hash
+    matching_contacts = db.query(TrustedContact).filter(
+        TrustedContact.contact_phone_hash == user.phone_hash
+    ).all()
+    if not matching_contacts:
+        return []
+
+    contact_ids = [c.id for c in matching_contacts]
+    reqs = (
+        db.query(GuardianRequest)
+        .filter(
+            GuardianRequest.trusted_contact_id.in_(contact_ids),
+            GuardianRequest.outcome == GuardianOutcome.PENDING,
+        )
+        .order_by(GuardianRequest.requested_at.desc())
+        .all()
+    )
+
+    return _serialize_pending_requests(db, reqs)
+
+
 @router.get("/requests/{request_id}", response_model=GuardianRequestRead)
 def get_guardian_request_detail(request_id: int, db: Session = Depends(get_db)) -> GuardianRequestRead:
     req = guardian_repository.get_guardian_request(db, request_id)

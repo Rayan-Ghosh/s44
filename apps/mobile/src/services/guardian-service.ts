@@ -305,4 +305,136 @@ export class GuardianService {
     }
     return { success: true };
   }
+
+  // -------------------------------------------------------------------------
+  // Pre-payment Evaluation Guardian Escalation Boundary
+  // -------------------------------------------------------------------------
+
+  /**
+   * Pre-payment Evaluation Guardian Escalation Service Boundary.
+   *
+   * Connects to backend Guardian approval request endpoint for pre-payment evaluations.
+   * Invariants:
+   * - Uses existing authenticated user and evaluation identifiers.
+   * - Does NOT create or modify transaction records.
+   * - Does NOT fake Guardian approval.
+   * - If backend rejects pre-transaction requests or endpoint is missing/unclear,
+   *   captures the error/blocker without fabricating success.
+   */
+  static async requestEvaluationGuardianApproval(params: {
+    evaluationId: string;
+    userId: number;
+    amount: number;
+    recipient: string;
+    riskScore: number;
+    riskLevel: string;
+    reasons: string[];
+    trustedContactId?: number;
+  }): Promise<{
+    success: boolean;
+    requestId?: string;
+    expiresAt?: string;
+    remainingSeconds?: number;
+    error?: string;
+    blockerNotice?: string;
+  }> {
+    if (!IS_DEMO_MODE) {
+      try {
+        // Attempt backend evaluation guardian request endpoint
+        const res = await ApiClient.post<any>("/api/v1/guardian/requests/evaluation", {
+          evaluation_id: params.evaluationId,
+          user_id: params.userId,
+          amount: params.amount,
+          recipient: params.recipient,
+          risk_score: params.riskScore,
+          risk_level: params.riskLevel,
+          reasons: params.reasons,
+          trusted_contact_id: params.trustedContactId,
+        });
+
+        if (res.data && (res.status === 200 || res.status === 201)) {
+          return {
+            success: true,
+            requestId: String(res.data.id || res.data.request_id),
+            expiresAt: res.data.expires_at,
+            remainingSeconds: res.data.remaining_seconds ?? 120,
+          };
+        }
+
+        // If endpoint is not found (404) or requires persisted transaction_id, report exact blocker
+        if (res.status === 404 || res.status === 400 || res.status === 422) {
+          const detail = res.error || (res.data && res.data.detail) || "Backend endpoint not found";
+          return {
+            success: false,
+            error: detail,
+            blockerNotice:
+              "Backend Guardian request endpoint requires a persisted transaction ID. In adherence to phase safety rules, no transaction record is created before authorization.",
+          };
+        }
+
+        return {
+          success: false,
+          error: res.error || "Unable to initiate Guardian approval request.",
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          error: err?.message || "Guardian approval request service unavailable.",
+        };
+      }
+    }
+
+    // Demo Mode: simulate realistic 2-minute Guardian hold for testing UI lifecycle
+    const now = new Date();
+    const expires = new Date(now.getTime() + 120000);
+    const mockId = `EVAL-REQ-${Date.now()}`;
+    return {
+      success: true,
+      requestId: mockId,
+      expiresAt: expires.toISOString(),
+      remainingSeconds: 120,
+    };
+  }
+
+  /**
+   * Poll or check status of an active pre-payment evaluation Guardian request.
+   */
+  static async checkEvaluationGuardianStatus(
+    requestId: string
+  ): Promise<{
+    success: boolean;
+    status?: "PENDING" | "APPROVED" | "REJECTED" | "TIMEOUT";
+    resolutionNotes?: string;
+    remainingSeconds?: number;
+    error?: string;
+  }> {
+    if (!IS_DEMO_MODE) {
+      try {
+        const numId = parseInt(requestId, 10);
+        const endpoint = isNaN(numId)
+          ? `/api/v1/guardian/requests/evaluation/${requestId}`
+          : `/api/v1/guardian/requests/${numId}`;
+
+        const res = await ApiClient.get<any>(endpoint);
+        if (res.data && res.status === 200) {
+          return {
+            success: true,
+            status: res.data.outcome || (res.data.status as any) || "PENDING",
+            resolutionNotes: res.data.resolution_notes,
+            remainingSeconds: res.data.remaining_seconds,
+          };
+        }
+        return { success: false, error: res.error || "Failed to check guardian status." };
+      } catch (err: any) {
+        return { success: false, error: err?.message || "Failed to check guardian status." };
+      }
+    }
+
+    return {
+      success: true,
+      status: "PENDING",
+      remainingSeconds: 120,
+    };
+  }
 }
+

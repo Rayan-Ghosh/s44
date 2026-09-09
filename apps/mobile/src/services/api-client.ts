@@ -36,11 +36,20 @@ const getHostIp = (): string | null => {
  * with fallback to local development server.
  */
 const getDefaultFallbackUrl = (): string => {
+  if (Platform.OS === "web" && typeof window !== "undefined" && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+    if (hostname) {
+      return `http://${hostname}:8000`;
+    }
+  }
   const hostIp = getHostIp();
   if (hostIp) {
     return `http://${hostIp}:8000`;
   }
-  return "http://10.160.81.164:8000";
+  return "http://10.160.81.205:8000";
 };
 
 let _customApiBaseUrl: string | null = null;
@@ -50,6 +59,19 @@ let _customApiBaseUrl: string | null = null;
  * On physical devices (Android/iOS), rewrites localhost/127.0.0.1 to the computer's LAN IP.
  */
 export const sanitizeApiUrl = (url: string): string => {
+  // When running in a web browser, route requests dynamically:
+  // - If loaded on localhost/127.0.0.1, always target localhost:8000 for direct host-to-host reliability
+  // - If loaded via LAN/remote IP, target that host on port 8000
+  if (Platform.OS === "web" && typeof window !== "undefined" && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+    if (hostname) {
+      return `http://${hostname}:8000`;
+    }
+  }
+
   let clean = url.trim();
 
   if (!clean) {
@@ -66,7 +88,7 @@ export const sanitizeApiUrl = (url: string): string => {
   // On physical devices, localhost/127.0.0.1 points to the device itself.
   // Rewrite to the computer's LAN IP so network requests reach the backend.
   if (Platform.OS !== "web" && (clean.includes("://localhost") || clean.includes("://127.0.0.1"))) {
-    const hostIp = getHostIp() || "10.160.81.164";
+    const hostIp = getHostIp() || "10.160.81.205";
     clean = clean.replace("://localhost", `://${hostIp}`).replace("://127.0.0.1", `://${hostIp}`);
   }
 
@@ -294,8 +316,11 @@ export class ApiClient {
       // Device information is optional.
     }
 
+    const isFormData =
+      typeof FormData !== "undefined" && options.body instanceof FormData;
+
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
 
       ...(devInfo
@@ -309,6 +334,10 @@ export class ApiClient {
       ...(options.headers as Record<string, string>),
     };
 
+    if (isFormData && headers["Content-Type"] === "application/json") {
+      delete headers["Content-Type"];
+    }
+
     if (_authToken) {
       headers["Authorization"] = `Bearer ${_authToken}`;
     }
@@ -316,9 +345,20 @@ export class ApiClient {
     try {
       const controller = new AbortController();
 
+      const timeoutMs = isFormData ? 30000 : 10000;
       const timeoutId = setTimeout(() => {
         controller.abort();
-      }, 10000);
+      }, timeoutMs);
+
+      if (options.signal) {
+        if (options.signal.aborted) {
+          controller.abort();
+        } else {
+          options.signal.addEventListener("abort", () => controller.abort(), {
+            once: true,
+          });
+        }
+      }
 
       const response = await fetch(url, {
         ...options,
@@ -439,6 +479,22 @@ export class ApiClient {
       method: "PATCH",
       headers,
       body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  static upload<T>(
+    endpoint: string,
+    formData: FormData,
+    options?: {
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
+    }
+  ) {
+    return this.request<T>(endpoint, {
+      method: "POST",
+      headers: options?.headers,
+      body: formData,
+      signal: options?.signal,
     });
   }
 }

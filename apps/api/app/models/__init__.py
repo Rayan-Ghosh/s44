@@ -23,6 +23,7 @@ from app.models.trusted_contact import TrustedContact
 from app.models.trusted_device_binding import TrustedDeviceBinding
 from app.models.user import User
 from app.models.user_contact_info import UserContactInfo
+from app.models.user_credentials import UserCredentials
 from app.models.user_feedback import UserFeedback
 from app.models.user_financial_profile import UserFinancialProfile
 from app.models.user_model_artifact import UserModelArtifact
@@ -49,6 +50,7 @@ __all__ = [
     "TrustedDeviceBinding",
     "User",
     "UserContactInfo",
+    "UserCredentials",
     "UserFeedback",
     "UserFinancialProfile",
     "UserModelArtifact",

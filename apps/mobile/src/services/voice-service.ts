@@ -1,6 +1,40 @@
-import { CallSnapshot, CallerInfo, DetectedPattern, TranscriptLine } from "../types/voice";
+import {
+  CallSnapshot,
+  CallerInfo,
+  DetectedPattern,
+  TranscriptLine,
+  TranscriptAnalysis,
+  AudioBufferMetadata,
+  AudioBufferIngestionResult,
+  buildCombinedVoiceAnalysis,
+  createUnavailableAcousticAnalysis,
+} from "../types/voice";
 import { RiskLevel } from "../types/risk";
 import { getApiBaseUrl } from "./api-client";
+import {
+  PATTERN_MAP,
+  mapDetectedPatterns,
+  coercionToLevel,
+  scoreToRiskLevel,
+  validateRiskScore,
+  normalizeTranscriptResponse,
+  normalizeAcousticResponse,
+  normalizeCombinedResponse,
+  parseWebSocketMessage,
+} from "./voice-analysis-adapter";
+
+// Re-export adapter utilities for convenient consumption
+export {
+  PATTERN_MAP,
+  mapDetectedPatterns,
+  coercionToLevel,
+  scoreToRiskLevel,
+  validateRiskScore,
+  normalizeTranscriptResponse,
+  normalizeAcousticResponse,
+  normalizeCombinedResponse,
+  parseWebSocketMessage,
+};
 
 export const DEFAULT_CALLER: CallerInfo = {
   displayName: "Unknown / Toll-Free Support",
@@ -46,27 +80,7 @@ export const SIMULATION_TRANSCRIPT: { speaker: "caller" | "user"; text: string; 
   },
 ];
 
-// Matches voice/classifier.py's `active_threat_dimensions` vocabulary
-// exactly (URGENCY, LEGAL_THREAT, AUTHORITY_IMPERSONATION,
-// FINANCIAL_EXTRACTION, CREDENTIAL_HARVESTING) — see that file for the
-// authoritative list.
-const PATTERN_MAP: Record<string, DetectedPattern> = {
-  authority_impersonation: "AUTHORITY_IMPERSONATION",
-  urgency: "URGENT_LANGUAGE",
-  legal_threat: "SUSPICIOUS_CALL_PATTERN",
-  financial_extraction: "FINANCIAL_CREDENTIAL_EXTRACTION",
-  credential_harvesting: "OTP_SOLICITATION",
-};
-
-const mapDetectedPatterns = (intents: string[]): DetectedPattern[] => {
-  const mapped = intents.map((i) => PATTERN_MAP[i.toLowerCase()]).filter(Boolean) as DetectedPattern[];
-  return Array.from(new Set(mapped));
-};
-
-const coercionToLevel = (level: string): RiskLevel =>
-  level === "CRITICAL" ? "HIGH" : level === "ELEVATED" ? "MEDIUM" : "LOW";
-
-interface ClassifierResponse {
+export interface ClassifierResponse {
   accumulated_risk: number;
   coercion_level: "SAFE" | "ELEVATED" | "CRITICAL";
   detected_intents: string[];
@@ -112,7 +126,40 @@ class VoiceStreamSession {
       this.socket!.onmessage = (event) => {
         clearTimeout(timeout);
         try {
-          resolve(JSON.parse(event.data as string));
+          const parsedMsg = parseWebSocketMessage(event.data);
+          if (parsedMsg.category === "legacy_classifier") {
+            resolve(parsedMsg.payload as ClassifierResponse);
+          } else if (
+            parsedMsg.category === "transcript_analysis" ||
+            parsedMsg.category === "combined_analysis"
+          ) {
+            const transcript = normalizeTranscriptResponse(parsedMsg.payload);
+            resolve({
+              accumulated_risk: transcript.accumulatedRisk ?? transcript.riskScore / 100,
+              coercion_level:
+                transcript.coercionLevel ??
+                (transcript.riskLevel === "HIGH"
+                  ? "CRITICAL"
+                  : transcript.riskLevel === "MEDIUM"
+                  ? "ELEVATED"
+                  : "SAFE"),
+              detected_intents: transcript.intents ?? [],
+              matched_phrases: transcript.matchedPhrases,
+              is_scam_alert:
+                transcript.riskScore >= 61 || transcript.coercionLevel === "CRITICAL",
+              message:
+                transcript.message ||
+                (transcript.reasons && transcript.reasons.length > 0
+                  ? transcript.reasons.join(". ")
+                  : "Voice analysis completed"),
+            });
+          } else if (parsedMsg.category === "analysis_error") {
+            resolve(null);
+          } else if (parsedMsg.payload && typeof parsedMsg.payload === "object") {
+            resolve(parsedMsg.payload as ClassifierResponse);
+          } else {
+            resolve(null);
+          }
         } catch {
           resolve(null);
         }
@@ -132,6 +179,20 @@ const activeSession = new VoiceStreamSession();
 
 export class VoiceService {
   static getInitialSnapshot(): CallSnapshot {
+    const transcriptAnalysis: TranscriptAnalysis = {
+      status: "available",
+      riskScore: 0,
+      riskLevel: "LOW",
+      detectedPatterns: [],
+      matchedPhrases: [],
+      reasons: ["No active call"],
+    };
+
+    const analysis = buildCombinedVoiceAnalysis(
+      transcriptAnalysis,
+      createUnavailableAcousticAnalysis()
+    );
+
     return {
       status: "inactive",
       caller: DEFAULT_CALLER,
@@ -157,6 +218,7 @@ export class VoiceService {
         explanation: "",
         recommendedAction: "",
       },
+      analysis,
     };
   }
 
@@ -188,6 +250,20 @@ export class VoiceService {
     if (!latest) {
       // Classifier unreachable — surface a real "unknown" state rather than
       // a fabricated risk number.
+      const unavailableTranscript: TranscriptAnalysis = {
+        status: "unavailable",
+        riskScore: 0,
+        riskLevel: "LOW",
+        detectedPatterns: [],
+        matchedPhrases: [],
+        errorMessage: "Could not reach the voice classifier.",
+        reasons: ["Unable to reach the voice classifier backend."],
+      };
+      const analysis = buildCombinedVoiceAnalysis(
+        unavailableTranscript,
+        createUnavailableAcousticAnalysis()
+      );
+
       return {
         status: "active",
         caller: DEFAULT_CALLER,
@@ -208,12 +284,36 @@ export class VoiceService {
         ],
         reasons: ["Unable to reach the voice classifier backend."],
         alert: { triggered: false, pattern: null, title: "", explanation: "", recommendedAction: "" },
+        analysis,
       };
     }
 
     const riskLevel = coercionToLevel(latest.coercion_level);
     const patterns = mapDetectedPatterns(latest.detected_intents);
     const riskScore = Math.round(latest.accumulated_risk * 100);
+
+    const transcriptAnalysis: TranscriptAnalysis = {
+      status: "available",
+      riskScore,
+      riskLevel,
+      detectedPatterns: patterns,
+      matchedPhrases: latest.matched_phrases,
+      intents: latest.detected_intents,
+      coercionLevel: latest.coercion_level,
+      accumulatedRisk: latest.accumulated_risk,
+      message: latest.message,
+      reasons: latest.matched_phrases.length > 0 ? latest.matched_phrases : [latest.message],
+    };
+
+    const analysis = buildCombinedVoiceAnalysis(
+      transcriptAnalysis,
+      createUnavailableAcousticAnalysis(),
+      {
+        timestamp: new Date().toISOString(),
+        durationSec: duration,
+        audioSource: "simulation",
+      }
+    );
 
     return {
       status: latest.is_scam_alert ? "fraud_alert" : "active",
@@ -246,10 +346,46 @@ export class VoiceService {
             recommendedAction: "Refuse any OTP/PIN request, end this call immediately, and report the caller.",
           }
         : { triggered: false, pattern: null, title: "", explanation: "", recommendedAction: "" },
+      analysis,
     };
   }
 
   static resetSession(): void {
     activeSession.close();
+  }
+
+  /**
+   * Ingestion boundary for real-time audio buffer events.
+   *
+   * Prepared for future acoustic-analysis ML transport:
+   * - Does NOT compute risk locally.
+   * - Does NOT fabricate acoustic detection scores.
+   * - Does NOT modify transcript analysis or WebSocket { text_chunk } traffic.
+   * - Explicitly returns 'unavailable' while the acoustic ML backend is pending.
+   */
+  static ingestAudioBuffer(metadata: AudioBufferMetadata): AudioBufferIngestionResult {
+    // Validate metadata
+    if (
+      !metadata ||
+      typeof metadata !== "object" ||
+      typeof metadata.bufferSize !== "number" ||
+      isNaN(metadata.bufferSize) ||
+      metadata.bufferSize <= 0
+    ) {
+      return {
+        status: "rejected",
+        reason: "Malformed or invalid audio buffer metadata (bufferSize must be a positive number)",
+        timestamp: Date.now(),
+      };
+    }
+
+    // Since the backend acoustic-analysis model is not yet implemented:
+    // Safely ignore audio buffers for risk calculation and return explicit unavailable state
+    return {
+      status: "unavailable",
+      reason: "Acoustic ML backend is not yet implemented; audio buffer recorded for metadata telemetry only",
+      timestamp: Date.now(),
+      bufferMetadata: metadata,
+    };
   }
 }

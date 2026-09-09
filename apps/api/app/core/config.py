@@ -94,6 +94,14 @@ class Settings(BaseSettings):
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     contact_info_encryption_key: str = "_SiZeLTNC9qRCBhjjnil3lbCAYqQYDheLL-DYZ0fq1g="
 
+    # Authentication & JWT Configuration
+    jwt_secret_key: str = "s40-dev-insecure-jwt-secret-key-change-in-production-1234567890"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 30
+    max_failed_login_attempts: int = 5
+    account_lockout_minutes: int = 15
+
     # OTP Delivery Configuration
     # Options: "mock" (default in-memory test/dev), "console" (stdout logger), "none"
     # Live integrations (e.g. "twilio", "sendgrid") can be plugged in when configured.
@@ -158,6 +166,7 @@ INSECURE_DEV_SECRETS = {
     "avaran-dedicated-txn-integrity-key-dev-only",
     "avaran-integrity-hmac-pepper-2026",
     "_SiZeLTNC9qRCBhjjnil3lbCAYqQYDheLL-DYZ0fq1g=",
+    "s40-dev-insecure-jwt-secret-key-change-in-production-1234567890",
 }
 
 

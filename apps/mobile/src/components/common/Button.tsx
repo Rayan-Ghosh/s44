@@ -26,6 +26,7 @@ interface ButtonProps {
   style?: ViewStyle;
   textStyle?: TextStyle;
   accessibilityLabel?: string;
+  testID?: string;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -40,6 +41,7 @@ export const Button: React.FC<ButtonProps> = ({
   style,
   textStyle,
   accessibilityLabel,
+  testID,
 }) => {
   const getContainerStyle = (): ViewStyle => {
     let bg: string = colors.btnPrimaryBg;
@@ -117,6 +119,7 @@ export const Button: React.FC<ButtonProps> = ({
       activeOpacity={0.75}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel || label}
+      testID={testID}
     >
       {loading ? (
         <ActivityIndicator size="small" color={textColor} />

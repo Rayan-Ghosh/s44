@@ -21,7 +21,14 @@ import {
   validatePaymentSubmissionStage,
   validatePaymentCompletionStage,
   assertNotEvaluationStage,
+  PaymentInputSource,
+  PreparedPaymentDraft,
 } from "../types/transaction";
+import {
+  validateUpiIdInput,
+  validateMobileNumberInput,
+  validateAmountInput,
+} from "../utils/recipient-type";
 import { buildRiskEvaluationPayload } from "./risk-service";
 import {
   parseUpiPaymentPayload,
@@ -148,6 +155,28 @@ export interface CreatePaymentDraftFailure {
 }
 
 export type CreatePaymentDraftResult = CreatePaymentDraftSuccess | CreatePaymentDraftFailure;
+
+export interface PreparePaymentInputParams {
+  source: PaymentInputSource;
+  recipient: string;
+  amount: number | string;
+  note?: string;
+  recipientName?: string;
+  qrPayload?: string;
+  requestId?: string;
+}
+
+export interface PreparePaymentInputSuccess {
+  success: true;
+  draft: PreparedPaymentDraft;
+}
+
+export interface PreparePaymentInputFailure {
+  success: false;
+  error: string;
+}
+
+export type PreparePaymentInputResult = PreparePaymentInputSuccess | PreparePaymentInputFailure;
 
 export interface RiskEvaluationRequest {
   draft: PaymentDraft;
@@ -567,6 +596,101 @@ class CentralPaymentManager {
   }
 
   /**
+   * Unified Payment Preparation intake.
+   * Validates input from QR, UPI_ID, MOBILE, or PAYMENT_REQUEST sources
+   * and produces a canonical PreparedPaymentDraft.
+   *
+   * Pure intake:
+   * - Does NOT evaluate risk
+   * - Does NOT create or mutate backend transactions
+   * - Does NOT authorize or launch payments
+   * - Does NOT produce fake settlement/success state
+   */
+  public preparePaymentInput(params: PreparePaymentInputParams): PreparePaymentInputResult {
+    if (!params || typeof params !== "object") {
+      return { success: false, error: "Payment preparation parameters are required." };
+    }
+
+    const { source, recipient, amount, note, recipientName, qrPayload, requestId } = params;
+    if (!source) {
+      return { success: false, error: "Payment source is required." };
+    }
+
+    let normalizedRecipient: string;
+    let recipientType: "UPI_ID" | "PHONE";
+
+    if (source === "UPI_ID") {
+      const upiValidation = validateUpiIdInput(recipient);
+      if (!upiValidation.valid) {
+        return { success: false, error: upiValidation.error || "Invalid UPI ID." };
+      }
+      normalizedRecipient = upiValidation.normalized!;
+      recipientType = "UPI_ID";
+    } else if (source === "MOBILE") {
+      const mobileValidation = validateMobileNumberInput(recipient);
+      if (!mobileValidation.valid) {
+        return { success: false, error: mobileValidation.error || "Invalid mobile number." };
+      }
+      normalizedRecipient = mobileValidation.normalized!;
+      recipientType = "PHONE";
+    } else if (source === "QR") {
+      const trimmedRec = (recipient || "").trim();
+      if (!trimmedRec) {
+        return { success: false, error: "QR code did not contain a valid payee address." };
+      }
+      if (trimmedRec.includes("@")) {
+        const upiValidation = validateUpiIdInput(trimmedRec);
+        if (!upiValidation.valid) {
+          return { success: false, error: upiValidation.error || "Invalid UPI ID in QR code." };
+        }
+        normalizedRecipient = upiValidation.normalized!;
+        recipientType = "UPI_ID";
+      } else {
+        const mobileValidation = validateMobileNumberInput(trimmedRec);
+        if (!mobileValidation.valid) {
+          return { success: false, error: mobileValidation.error || "Invalid mobile recipient in QR code." };
+        }
+        normalizedRecipient = mobileValidation.normalized!;
+        recipientType = "PHONE";
+      }
+    } else if (source === "PAYMENT_REQUEST") {
+      const trimmedRec = (recipient || "").trim();
+      if (!trimmedRec) {
+        return { success: false, error: "Payment request missing recipient identifier." };
+      }
+      normalizedRecipient = trimmedRec;
+      recipientType = trimmedRec.includes("@") ? "UPI_ID" : "PHONE";
+    } else {
+      return { success: false, error: `Unsupported payment source '${source}'.` };
+    }
+
+    const amountValidation = validateAmountInput(amount);
+    if (!amountValidation.valid) {
+      return { success: false, error: amountValidation.error || "Invalid payment amount." };
+    }
+
+    const cleanNote = typeof note === "string" ? note.trim() : undefined;
+
+    const draft: PreparedPaymentDraft = {
+      source,
+      recipient: normalizedRecipient,
+      recipientType,
+      recipientName: recipientName?.trim() || undefined,
+      amount: amountValidation.amount!,
+      note: cleanNote && cleanNote.length > 0 ? cleanNote : undefined,
+      qrPayload,
+      requestId,
+      preparedAt: new Date().toISOString(),
+      status: "PREPARED",
+    };
+
+    return {
+      success: true,
+      draft,
+    };
+  }
+
+  /**
    * Risk-evaluation boundary contract.
    *
    * Accepts a validated PaymentDraft, performs no risk calculation, makes no backend call,
@@ -715,6 +839,35 @@ class CentralPaymentManager {
         error: typeof detail === "string" ? detail : JSON.stringify(detail),
       };
     }
+  }
+
+  /**
+   * Evaluates an intake-prepared payment draft using the authoritative backend ML risk engine.
+   *
+   * Calls POST /api/v1/risk/evaluate with canonical recipient, amount, note, and context.
+   * Guarantees:
+   * - Pure advisory evaluation: creates NO transaction, changes NO transaction status,
+   *   creates NO alert, initiates NO guardian approval, and performs NO settlement.
+   */
+  public async evaluatePreparedPayment(
+    draft: PreparedPaymentDraft,
+    userId?: number
+  ): Promise<PaymentEvaluationResult> {
+    if (!draft || typeof draft !== "object") {
+      return {
+        success: false,
+        error: "Prepared payment draft is required for risk evaluation.",
+      };
+    }
+
+    return this.evaluatePayment({
+      recipient: draft.recipient,
+      recipient_type: draft.recipientType,
+      amount: draft.amount,
+      note: draft.note,
+      qr_data: draft.qrPayload,
+      user_id: userId,
+    });
   }
 
 

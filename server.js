@@ -82,7 +82,22 @@ const env = {
 
 const api = spawn(
   VENV_PYTHON,
-  ["-m", "uvicorn", "app.main:app", "--reload", "--app-dir", "apps/api"],
+  [
+    "-m",
+    "uvicorn",
+    "app.main:app",
+    "--reload",
+    "--reload-dir",
+    "apps/api",
+    "--reload-dir",
+    "ml",
+    "--app-dir",
+    "apps/api",
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "8000",
+  ],
   { cwd: REPO_ROOT, stdio: "inherit", env }
 );
 

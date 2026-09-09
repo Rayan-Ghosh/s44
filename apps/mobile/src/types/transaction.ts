@@ -330,7 +330,90 @@ export function assertNotEvaluationStage(
     stage,
   };
 }
+/**
+ * Supported payment sources in AVARAN PAY.
+ */
+export type PaymentInputSource = "QR" | "UPI_ID" | "MOBILE" | "PAYMENT_REQUEST";
 
+export const PAYMENT_INPUT_SOURCES: readonly PaymentInputSource[] = [
+  "QR",
+  "UPI_ID",
+  "MOBILE",
+  "PAYMENT_REQUEST",
+] as const;
 
+/**
+ * Non-persisted, non-executed prepared payment draft from the unified input phase.
+ * Represents the intake result before risk evaluation or payment authorization.
+ */
+export interface PreparedPaymentDraft {
+  source: PaymentInputSource;
+  recipient: string;
+  recipientType: "UPI_ID" | "PHONE";
+  recipientName?: string;
+  amount: number;
+  note?: string;
+  qrPayload?: string;
+  requestId?: string;
+  preparedAt: string;
+  status: "PREPARED";
+}
 
+/**
+ * Result of inline payment field validation.
+ */
+export interface PaymentFieldValidation {
+  valid: boolean;
+  error?: string;
+  normalized?: string;
+}
 
+/**
+ * Lifecycle status of the pre-payment risk evaluation.
+ */
+export type PaymentRiskEvaluationStatus =
+  | "IDLE"
+  | "ANALYZING"
+  | "EVALUATED"
+  | "ERROR"
+  | "EXPIRED";
+
+/**
+ * State container for pre-payment risk analysis and evaluation.
+ */
+export interface PaymentRiskEvaluationState {
+  status: PaymentRiskEvaluationStatus;
+  data?: any;
+  error?: string;
+  evaluatedAt?: string;
+  expiresAt?: string;
+}
+
+/**
+ * Lifecycle status of the pre-payment Guardian escalation and authorization preparation flow.
+ */
+export type GuardianEscalationStatus =
+  | "IDLE"
+  | "APPROVAL_REQUIRED"
+  | "REQUESTING_APPROVAL"
+  | "APPROVAL_PENDING"
+  | "APPROVED"
+  | "DECLINED"
+  | "ERROR"
+  | "EXPIRED"
+  | "AUTHORIZATION_READY";
+
+/**
+ * State container for Guardian escalation and payment authorization readiness.
+ */
+export interface GuardianEscalationState {
+  status: GuardianEscalationStatus;
+  requestId?: string;
+  requestedAt?: string;
+  expiresAt?: string;
+  remainingSeconds?: number;
+  error?: string;
+  blockerNotice?: string;
+  resolutionNotes?: string;
+  authorizedStage?: string;
+}
