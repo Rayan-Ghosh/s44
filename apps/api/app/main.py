@@ -13,6 +13,7 @@ import contextlib
 import logging
 
 from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy import text
@@ -156,6 +157,12 @@ app.include_router(notifications.router)
 app.include_router(financial_profile.router)
 app.include_router(statements.router)
 
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Redirect root to Swagger documentation UI."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")

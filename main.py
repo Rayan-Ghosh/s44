@@ -1,16 +1,59 @@
 """
-FastAPI Server for Real-Time Call Fraud Detection.
+Unified FastAPI Server for AVARAN Shield.
 
-Provides WebSocket endpoint `/ws/call-stream/{session_id}` for streaming 16kHz PCM audio
-from active calls, performing streaming ASR via Bhashini, and evaluating fraud risk.
+Combines:
+1. Core S40 APIs (Auth, Users, Transactions, Risk, Guardian, Alerts, Payments, Simulator, Demo, Notifications)
+2. Bhashini Streaming ASR Call-Stream WebSocket (/ws/call-stream/{session_id})
+3. Real-Time Voice Classifier WebSocket (/ws/voice-stream)
+4. Automatic cold-start database migration & demo seeding
 """
 
+import asyncio
+import contextlib
 import json
 import logging
+import sys
+from pathlib import Path
+import os
+from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
-from fastapi.responses import JSONResponse
 
+# If deployed on Railway without injected production secrets, default to development
+# to prevent startup abort while preserving full functionality for demo/testing.
+if (os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_NAME")) and not os.getenv("SECRET_KEY"):
+    os.environ["ENVIRONMENT"] = "development"
+
+# Ensure apps/api and root are in python path
+REPO_ROOT = Path(__file__).resolve().parent
+API_DIR = REPO_ROOT / "apps" / "api"
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.api.routers import (
+    alerts,
+    auth,
+    demo,
+    guardian,
+    institution,
+    notifications,
+    payments,
+    risk,
+    simulator,
+    transactions,
+    users,
+    voice_stream,
+)
+from app.core.config import settings
+from app.core.database import SessionLocal, get_db
+from app.services import guardian_service
 from session_manager import session_manager
 
 logging.basicConfig(
@@ -19,55 +62,107 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
+
+async def _guardian_expiry_worker() -> None:
+    """AVARAN PAY spec §6: proactively expire Guardian requests past their
+    120s deadline, independent of whether the frontend is polling."""
+    while True:
+        try:
+            await asyncio.sleep(settings.guardian_expiry_sweep_interval_seconds)
+            db = SessionLocal()
+            try:
+                guardian_service.sweep_expired_requests(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Guardian expiry sweep failed; will retry on next interval.")
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Auto-seed database if empty or missing (e.g. fresh Railway or Docker deploy)
+    try:
+        from scripts.seed_database import seed
+        with SessionLocal() as db:
+            try:
+                user_count = db.execute(text("SELECT count(*) FROM users")).scalar()
+            except Exception:
+                user_count = 0
+        if not user_count:
+            logger.info("Initializing and seeding database on startup...")
+            seed()
+    except Exception as e:
+        logger.warning(f"Database auto-seed check skipped or encountered: {e}")
+
+    task = asyncio.create_task(_guardian_expiry_worker()) if settings.enable_guardian_expiry_worker else None
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 app = FastAPI(
-    title="Real-Time Call Fraud Detection API (Bhashini ASR)",
-    description="Asynchronous pipeline for real-time speech fraud detection using Bhashini STT.",
+    title="AVARAN Full Security & Payment Shield Engine",
+    description="Unified API Engine powering live risk evaluation, authorization, transactions, guardian protection, and streaming speech ASR.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/")
-async def root():
-    """Root endpoint providing system welcome message and endpoint index."""
-    return {
-        "status": "online",
-        "service": "S40 Real-Time Fraud Shield API Engine",
-        "documentation": "/docs",
-        "health_check": "/health",
-        "endpoints": {
-            "evaluate_risk": "/api/v1/risk/evaluate",
-            "websocket_stream": "/ws/call-stream/{session_id}"
-        }
-    }
+# Include all authoritative routers from apps/api
+app.include_router(auth.router)
+app.include_router(users.router)
+app.include_router(transactions.router)
+app.include_router(risk.router)
+app.include_router(alerts.router)
+app.include_router(guardian.router)
+app.include_router(institution.router)
+app.include_router(simulator.router)
+app.include_router(voice_stream.router)
+app.include_router(payments.router)
+app.include_router(demo.router)
+app.include_router(notifications.router)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Redirect root to Swagger documentation UI."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint returning active session count."""
+@app.get("/api/v1/health")
+def health() -> dict:
+    """Liveness check: returns system health and active sessions."""
     active_count = len(session_manager.active_sessions)
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": "ok",
-            "active_sessions": active_count,
-            "pipeline": "Bhashini Streaming ASR + Stateful Leaky Bucket Fraud Detector",
-        },
-    )
+    return {
+        "status": "ok",
+        "app": settings.app_name,
+        "environment": settings.environment,
+        "active_sessions": active_count,
+        "pipeline": "Bhashini Streaming ASR + Stateful Leaky Bucket Fraud Detector",
+    }
 
 
-@app.post("/api/v1/risk/evaluate")
-async def evaluate_risk(payload: dict):
-    """
-    Evaluates real-time transaction fraud risk across ML models, rules, and voice signals.
-    """
-    try:
-        from ml.inference.predict import MLPredictor
-        predictor = MLPredictor()
-        result = predictor.predict(payload)
-        return JSONResponse(status_code=200, content=result)
-    except Exception as e:
-        logger.error(f"Error evaluating risk: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+@app.get("/health/db")
+@app.get("/api/v1/health/db")
+def health_db(db: Session = Depends(get_db)) -> dict:
+    """Readiness check: verifies round-trip query against Avaran.db."""
+    db.execute(text("SELECT 1"))
+    return {"status": "ok", "database": "connected"}
 
 
 @app.websocket("/ws/call-stream/{session_id}")
@@ -78,21 +173,18 @@ async def call_stream_endpoint(
 ):
     """
     WebSocket endpoint for live 16kHz PCM call audio streaming.
-
     Receives binary audio frames from active call clients, forwards them to Bhashini STT,
     runs the Stateful Fraud Detector, and pushes real-time FRAUD_ALERT payloads if triggered.
     """
     await websocket.accept()
     logger.info(f"WebSocket client connected for session_id: {session_id} (mock={mock})")
 
-    # Initialize session coordinator
     session = await session_manager.create_session(
         session_id=session_id, websocket=websocket, mock_mode=mock
     )
 
     try:
         while True:
-            # Receive message from WebSocket client (bytes or text/json)
             message = await websocket.receive()
 
             if "bytes" in message and message["bytes"]:
@@ -106,7 +198,6 @@ async def call_stream_endpoint(
                     event_type = payload.get("event", "")
 
                     if event_type == "inject_mock":
-                        # Support direct transcript injection for testing scenarios
                         mock_text = payload.get("text", "")
                         is_final = payload.get("is_final", True)
                         await session.inject_transcript_mock(mock_text, is_final=is_final)

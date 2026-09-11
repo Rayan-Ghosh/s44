@@ -601,8 +601,9 @@ def seed_trusted_contacts(db) -> None:
 
 
 def seed() -> None:
-    print("Running Alembic migrations...")
-    run_migrations()
+    print("Creating database tables if missing...")
+    from app.core.database import Base, engine
+    Base.metadata.create_all(bind=engine)
 
     with SessionLocal() as db:
         print("Seeding users and transactions...")

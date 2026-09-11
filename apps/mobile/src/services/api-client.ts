@@ -49,14 +49,14 @@ const getDefaultFallbackUrl = (): string => {
   if (hostIp) {
     return `http://${hostIp}:8000`;
   }
-  return "http://10.160.81.205:8000";
+  return "https://s44-production.up.railway.app";
 };
 
 let _customApiBaseUrl: string | null = null;
 
 /**
  * Cleans and normalizes an API URL.
- * On physical devices (Android/iOS), rewrites localhost/127.0.0.1 to the computer's LAN IP.
+ * Automatically handles ADB reverse forwarding (127.0.0.1:8000) and Expo host URI.
  */
 export const sanitizeApiUrl = (url: string): string => {
   // When running in a web browser, route requests dynamically:
@@ -85,10 +85,9 @@ export const sanitizeApiUrl = (url: string): string => {
     clean = `http://${clean}`;
   }
 
-  // On physical devices, localhost/127.0.0.1 points to the device itself.
-  // Rewrite to the computer's LAN IP so network requests reach the backend.
-  if (Platform.OS !== "web" && (clean.includes("://localhost") || clean.includes("://127.0.0.1"))) {
-    const hostIp = getHostIp() || "10.160.81.205";
+  // In Expo Go or on physical devices, route localhost to packager hostIp
+  const hostIp = getHostIp();
+  if (hostIp && (clean.includes("://localhost") || clean.includes("://127.0.0.1"))) {
     clean = clean.replace("://localhost", `://${hostIp}`).replace("://127.0.0.1", `://${hostIp}`);
   }
 
