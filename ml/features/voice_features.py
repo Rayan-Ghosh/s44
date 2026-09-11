@@ -11,7 +11,7 @@ Extracts normalized linguistic risk markers from transcribed audio text:
 """
 
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 
 # Comprehensive linguistic lexicons tailored to modern Indian cyber-crime & coercion patterns
@@ -72,18 +72,48 @@ CREDENTIAL_KEYWORDS = [
 # to", "never share", "cannot share", etc. in one pass instead of trying
 # to enumerate every phrasing.
 NEGATION_MARKER_PATTERNS = [
+    # English markers
     r"\bdon't\b", r"\bdo not\b", r"\bdoesn't\b", r"\bdoes not\b",
     r"\bwon't\b", r"\bwill not\b", r"\bshouldn't\b", r"\bshould not\b",
     r"\bcan't\b", r"\bcannot\b", r"\bavoid\b",
     r"\bnot\b", r"\bnever\b",
+    
+    # Hindi markers (Devanagari script: Unicode boundary safe; Romanized: \b boundary)
+    r"(?<![^\s\.,!?:;\"'()\[\]])मत(?![^\s\.,!?:;\"'()\[\]])",
+    r"(?<![^\s\.,!?:;\"'()\[\]])नहीं(?![^\s\.,!?:;\"'()\[\]])",
+    r"(?<![^\s\.,!?:;\"'()\[\]])ना(?![^\s\.,!?:;\"'()\[\]])",
+    r"(?<![^\s\.,!?:;\"'()\[\]])कभी\s+नहीं(?![^\s\.,!?:;\"'()\[\]])",
+    r"\bmat\b", r"\bnahi\b", r"\bnahin\b", r"\bna\s+karein\b",
+    r"\bmat\s+karna\b", r"\bmat\s+dena\b", r"\bmat\s+batao\b", r"\bkabhi\s+nahi\b",
+
+    # Bengali markers (Bengali script: Unicode boundary safe; Romanized: \b boundary)
+    r"(?<![^\s\.,!?:;\"'()\[\]])না(?![^\s\.,!?:;\"'()\[\]])",
+    r"(?<![^\s\.,!?:;\"'()\[\]])নয়(?![^\s\.,!?:;\"'()\[\]])",
+    r"(?<![^\s\.,!?:;\"'()\[\]])করবেন\s+না(?![^\s\.,!?:;\"'()\[\]])",
+    r"(?<![^\s\.,!?:;\"'()\[\]])দেবেন\s+না(?![^\s\.,!?:;\"'()\[\]])",
+    r"(?<![^\s\.,!?:;\"'()\[\]])কখনো\s+না(?![^\s\.,!?:;\"'()\[\]])",
+    r"\bna\b", r"\bnoy\b", r"\bkorben\s+na\b", r"\bdeben\s+na\b", r"\bkokhono\s+na\b",
+
+    # TODO: Native Odia speaker review required before activating Odia negation patterns.
+    # Placeholder per AVARAN Phase 1 Build Spec Guardrail 5:
+    # r"ନାହିଁ", r"କରନ୍ତୁ\s+ନାହିଁ", r"ଦିଅନ୍ତୁ\s+ନାହିଁ", r"\bnahi\b", r"\bkuhantu\s+nahi\b"
 ]
 NEGATION_WINDOW_CHARS = 40
 
 
-def _is_negated(lower_text: str, match_start: int) -> bool:
-    """True if a negation marker appears shortly before a keyword match."""
+def _is_negated(lower_text: str, match_start: int, match_end: Optional[int] = None) -> bool:
+    """
+    True if a negation marker appears shortly before or after a keyword match.
+    Checks the 40-character preceding backward window and 25-character following window.
+    """
     preceding = lower_text[max(0, match_start - NEGATION_WINDOW_CHARS):match_start]
-    return any(re.search(pattern, preceding) for pattern in NEGATION_MARKER_PATTERNS)
+    if any(re.search(pattern, preceding) for pattern in NEGATION_MARKER_PATTERNS):
+        return True
+
+    # Check immediate following window for post-position negations (e.g. "OTP mat dena")
+    end_pos = match_end if match_end is not None else match_start + 1
+    following = lower_text[end_pos:min(len(lower_text), end_pos + 30)]
+    return any(re.search(pattern, following) for pattern in NEGATION_MARKER_PATTERNS)
 
 
 class VoiceFeatureExtractor:

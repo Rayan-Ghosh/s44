@@ -63,6 +63,8 @@ async def voice_stream_endpoint(websocket: WebSocket):
                 "coercion_level": coercion_level,
                 "detected_intents": intents,
                 "matched_phrases": matched,
+                "scam_categories": result.get("scam_categories", []),
+                "columbo_trap_prompt": result.get("columbo_trap_prompt") if coercion_level in ("ELEVATED", "CRITICAL") else None,
                 "is_scam_alert": is_scam,
                 "message": msg,
             }
