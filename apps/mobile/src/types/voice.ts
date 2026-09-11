@@ -30,6 +30,11 @@ export interface FraudAlert {
   title: string;
   explanation: string;
   recommendedAction: string;
+  scamCategory?: string;
+  columboTrapPrompt?: string | null;
+  isSyntheticVoice?: boolean;
+  isDeepfake?: boolean;
+  copilotGuidance?: AdaptiveCopilotGuidance | null;
 }
 
 /**
@@ -134,6 +139,9 @@ export interface AcousticAnalysisResponse {
   confidence?: number | null; // 0.0 - 1.0 or null
   features?: AcousticFeatures | null;
   detectedAnomalies?: string[];
+  audio_spoof_prob?: number;
+  is_synthetic_voice?: boolean;
+  acoustic_evidence?: string[];
   modelMetadata?: VoiceModelMetadata;
   reason?: string | null;
   errorCode?: string | null;
@@ -150,12 +158,35 @@ export interface TranscriptAnalysisResponse {
   coercion_level?: CoercionLevel;
   detected_intents?: string[];
   matched_phrases?: string[];
+  scam_categories?: string[];
+  columbo_trap_prompt?: string | null;
+  language_detected?: string;
   is_scam_alert?: boolean;
   message?: string;
   riskScore?: number;
   riskLevel?: RiskLevel;
   modelMetadata?: VoiceModelMetadata;
   errorMessage?: string | null;
+}
+
+export interface VideoDeepfakeResponse {
+  video_deepfake_score?: number;
+  is_deepfake?: boolean;
+  visual_threat_flags?: string[];
+}
+
+export interface AdaptiveCopilotResponse {
+  challenge_type?: string;
+  escalation_action?: string;
+  recommended_challenge?: string | null;
+  explanation?: string | null;
+}
+
+export interface MultimodalFusionResponse {
+  fused_risk_score?: number;
+  risk_level?: RiskLevel | string;
+  decision?: "ALLOW" | "WARN_CHOICE" | "CONFIRM_OR_CANCEL" | string;
+  primary_risk_factors?: string[];
 }
 
 /**
@@ -167,6 +198,9 @@ export interface CombinedVoiceAnalysisResponse {
   riskLevel: RiskLevel;
   transcriptAnalysis: TranscriptAnalysisResponse;
   acousticAnalysis?: AcousticAnalysisResponse | null;
+  videoDeepfake?: VideoDeepfakeResponse | null;
+  copilot?: AdaptiveCopilotResponse | null;
+  multimodalFusion?: MultimodalFusionResponse | null;
   hasAcousticData?: boolean;
   detectedPatterns?: DetectedPattern[];
   metadata?: VoiceAnalysisMetadata;
@@ -250,6 +284,9 @@ export interface TranscriptAnalysis {
   riskLevel: RiskLevel; // LOW, MEDIUM, HIGH
   detectedPatterns: DetectedPattern[];
   matchedPhrases: string[];
+  scamCategories?: string[];
+  columboTrapPrompt?: string | null;
+  languageDetected?: string;
   intents?: string[];
   coercionLevel?: CoercionLevel;
   accumulatedRisk?: number; // 0.0 - 1.0 raw score from classifier
@@ -260,7 +297,7 @@ export interface TranscriptAnalysis {
 }
 
 /**
- * Acoustic features extracted from audio (when acoustic processing is available).
+ * Acoustic features extracted from audio.
  */
 export interface AcousticFeatures {
   stressScore?: number | null;
@@ -275,122 +312,78 @@ export interface AcousticFeatures {
 
 /**
  * Strongly typed acoustic analysis.
- *
- * NOTE: The acoustic backend is NOT yet implemented.
- * - All acoustic score and feature fields must remain optional or nullable.
- * - Under NO circumstances should default fake scores (e.g. 0, 50, 100) be fabricated.
- * - When unavailable, status is "unavailable" and riskScore/riskLevel are null.
  */
 export interface AcousticAnalysis {
-  /**
-   * Operational state of acoustic analysis.
-   * Defaults to "unavailable" because acoustic backend is not yet implemented.
-   */
   status: VoiceAnalysisStatus;
-
-  /**
-   * Normalized acoustic risk score (0-100), or null if unavailable / not implemented.
-   * DO NOT assign fake scores such as 0, 50, or 100 when unavailable.
-   */
   riskScore: number | null;
-
-  /**
-   * Risk level derived solely from acoustic signals, or null if unavailable.
-   */
   riskLevel: RiskLevel | null;
-
-  /**
-   * Confidence level of the acoustic detection (0.0 - 1.0), or null.
-   */
   confidence?: number | null;
-
-  /**
-   * Extracted acoustic features (nullable / optional).
-   */
   features?: AcousticFeatures | null;
-
-  /**
-   * Detected acoustic anomaly tags (e.g. synthetic voice cues, background patterns).
-   */
   detectedAnomalies?: string[];
-
-  /**
-   * Descriptive reason or status note (e.g., "Acoustic backend not implemented yet").
-   */
+  audioSpoofProb?: number;
+  isSyntheticVoice?: boolean;
+  acousticEvidence?: string[];
   reason?: string | null;
-
-  /**
-   * Error message if status is "failed".
-   */
   errorMessage?: string | null;
 }
 
 /**
- * Combined voice analysis uniting transcript and acoustic evaluations.
- * Preserves strict separation between transcript risk and acoustic risk.
+ * Phase 3: Video Deepfake & Telemetry Analysis.
+ */
+export interface VideoDeepfakeAnalysis {
+  status: VoiceAnalysisStatus;
+  videoDeepfakeScore: number | null;
+  isDeepfake: boolean;
+  visualThreatFlags: string[];
+  reason?: string | null;
+  errorMessage?: string | null;
+}
+
+/**
+ * Phase 4: Adaptive Copilot Counter-Inquiry Guidance.
+ */
+export interface AdaptiveCopilotGuidance {
+  challengeType: "VOICE_LIVENESS" | "VISUAL_LIVENESS" | "BACKGROUND_PAN" | "ADMINISTRATIVE_TRAP" | "NONE" | string;
+  escalationAction: "NONE" | "PROMPT_CHALLENGE" | "TERMINATE_CALL" | string;
+  recommendedChallenge?: string | null;
+  explanation?: string | null;
+}
+
+/**
+ * Phase 4: Multimodal Bayesian Saturation Fusion Metrics.
+ */
+export interface MultimodalFusionMetrics {
+  fusedRiskScore: number;
+  riskLevel: RiskLevel;
+  decision: "ALLOW" | "WARN_CHOICE" | "CONFIRM_OR_CANCEL" | string;
+  primaryRiskFactors: string[];
+}
+
+/**
+ * Combined voice and multimodal call analysis.
  */
 export interface CombinedVoiceAnalysis {
-  /**
-   * Overall synthesis status.
-   */
   status: VoiceAnalysisStatus;
-
-  /**
-   * Synthesized overall risk score (0-100).
-   * When acoustic analysis is unavailable (null), this strictly reflects transcript risk.
-   */
   riskScore: number;
-
-  /**
-   * Synthesized overall risk level (LOW, MEDIUM, HIGH).
-   */
   riskLevel: RiskLevel;
-
-  /**
-   * Strongly typed linguistic / NLP transcript analysis.
-   */
   transcriptAnalysis: TranscriptAnalysis;
-
-  /**
-   * Strongly typed acoustic analysis, or null if unavailable / not implemented.
-   */
   acousticAnalysis: AcousticAnalysis | null;
-
-  /**
-   * Explicit flag indicating whether acoustic data was evaluated and contributed to the score.
-   * Must be false when the acoustic subsystem is not implemented or unavailable.
-   */
+  videoDeepfakeAnalysis?: VideoDeepfakeAnalysis | null;
+  copilotGuidance?: AdaptiveCopilotGuidance | null;
+  multimodalFusion?: MultimodalFusionMetrics | null;
   hasAcousticData: boolean;
-
-  /**
-   * Threat patterns detected across active analyzers.
-   */
+  hasVideoData?: boolean;
   detectedPatterns: DetectedPattern[];
-
-  /**
-   * Detector signals formatted for UI and risk engine compatibility.
-   */
+  scamCategories?: string[];
+  columboTrapPrompt?: string | null;
   signals: DetectorResult[];
-
-  /**
-   * Explanatory reasons or matched phrases.
-   */
   reasons: string[];
-
-  /**
-   * Warning alert object if risk threshold is exceeded.
-   */
   alert: FraudAlert;
-
-  /**
-   * Optional metadata about the analysis execution.
-   */
   metadata?: VoiceAnalysisMetadata;
 }
 
 /**
  * Snapshot of an active or recent call state.
- * Preserves full backward compatibility with existing VoiceScreen and voice-service implementations.
  */
 export interface CallSnapshot {
   status: CallStatus;
@@ -400,13 +393,12 @@ export interface CallSnapshot {
   riskScore: number;
   riskLevel: RiskLevel;
   detectedPatterns: DetectedPattern[];
+  scamCategories?: string[];
+  columboTrapPrompt?: string | null;
+  copilotGuidance?: AdaptiveCopilotGuidance | null;
   signals: DetectorResult[];
   reasons: string[];
   alert: FraudAlert;
-
-  /**
-   * Strongly-typed combined analysis distinguishing transcript risk from acoustic risk.
-   */
   analysis?: CombinedVoiceAnalysis;
 }
 
@@ -460,17 +452,25 @@ export function isAcousticAnalysisAvailable(
 export function buildCombinedVoiceAnalysis(
   transcript: TranscriptAnalysis,
   acoustic?: AcousticAnalysis | null,
-  metadata?: VoiceAnalysisMetadata
+  metadata?: VoiceAnalysisMetadata,
+  videoDeepfake?: VideoDeepfakeAnalysis | null,
+  copilotGuidance?: AdaptiveCopilotGuidance | null,
+  multimodalFusion?: MultimodalFusionMetrics | null
 ): CombinedVoiceAnalysis {
   const acousticResult = acoustic ?? createUnavailableAcousticAnalysis();
   const hasAcoustic = isAcousticAnalysisAvailable(acousticResult);
+  const hasVideo = Boolean(videoDeepfake && videoDeepfake.status === "available");
 
-  // When acoustic backend is not available, overall risk strictly mirrors transcript risk
-  const overallRiskScore = hasAcoustic && typeof acousticResult.riskScore === "number"
+  // When multimodal fusion is provided, its calibrated score takes authoritative precedence
+  const overallRiskScore = multimodalFusion && typeof multimodalFusion.fusedRiskScore === "number"
+    ? multimodalFusion.fusedRiskScore
+    : hasAcoustic && typeof acousticResult.riskScore === "number"
     ? Math.round(0.7 * transcript.riskScore + 0.3 * acousticResult.riskScore)
     : transcript.riskScore;
 
-  const overallRiskLevel = transcript.riskLevel;
+  const overallRiskLevel = multimodalFusion
+    ? (multimodalFusion.riskLevel as RiskLevel)
+    : transcript.riskLevel;
 
   const patterns = Array.from(new Set([
     ...transcript.detectedPatterns,
@@ -496,15 +496,60 @@ export function buildCombinedVoiceAnalysis(
     },
   ];
 
-  const isAlertTriggered = overallRiskScore >= 61 || transcript.coercionLevel === "CRITICAL";
+  if (hasAcoustic && typeof acousticResult.riskScore === "number") {
+    signals.push({
+      key: "acoustic",
+      label: "Audio Anti-Spoofing Detector",
+      score: acousticResult.riskScore / 100,
+      status: acousticResult.status === "available" ? "ok" : "unavailable",
+      factors: (acousticResult.acousticEvidence || []).map((ev) => ({
+        label: ev.replace(/_/g, " "),
+        contribution: (acousticResult.riskScore || 0) / 100,
+        direction: "increases" as const,
+      })),
+    });
+  }
+
+  if (hasVideo && typeof videoDeepfake?.videoDeepfakeScore === "number") {
+    signals.push({
+      key: "video",
+      label: "Video Deepfake & Feed Integrity",
+      score: videoDeepfake.videoDeepfakeScore,
+      status: "ok",
+      factors: (videoDeepfake.visualThreatFlags || []).map((flag) => ({
+        label: flag.replace(/_/g, " "),
+        contribution: videoDeepfake.videoDeepfakeScore || 0,
+        direction: "increases" as const,
+      })),
+    });
+  }
+
+  const isAlertTriggered =
+    overallRiskScore >= 61 ||
+    transcript.coercionLevel === "CRITICAL" ||
+    acousticResult.isSyntheticVoice ||
+    Boolean(videoDeepfake?.isDeepfake);
+
+  const alertTitle = videoDeepfake?.isDeepfake
+    ? "Visual Deepfake & Video Tampering Detected"
+    : acousticResult.isSyntheticVoice
+    ? "Synthetic AI Voice Clone Detected"
+    : transcript.scamCategories && transcript.scamCategories.length > 0
+    ? `${transcript.scamCategories[0].replace(/_/g, " ")} In Progress`
+    : "High-Threat Social Engineering Attack";
 
   const alert: FraudAlert = isAlertTriggered
     ? {
         triggered: true,
         pattern: patterns[0] || "SUSPICIOUS_CALL_PATTERN",
-        title: "High-Threat Social Engineering Attack",
+        title: alertTitle,
         explanation: transcript.message || "High-risk social engineering patterns detected.",
-        recommendedAction: "Refuse any OTP/PIN request, end this call immediately, and report the caller.",
+        recommendedAction: copilotGuidance?.recommendedChallenge || "Refuse any OTP/PIN request, end this call immediately, and report the caller.",
+        scamCategory: transcript.scamCategories ? transcript.scamCategories[0] : undefined,
+        columboTrapPrompt: transcript.columboTrapPrompt,
+        isSyntheticVoice: acousticResult.isSyntheticVoice,
+        isDeepfake: videoDeepfake?.isDeepfake,
+        copilotGuidance,
       }
     : {
         triggered: false,
@@ -520,8 +565,14 @@ export function buildCombinedVoiceAnalysis(
     riskLevel: overallRiskLevel,
     transcriptAnalysis: transcript,
     acousticAnalysis: acousticResult,
+    videoDeepfakeAnalysis: videoDeepfake,
+    copilotGuidance,
+    multimodalFusion,
     hasAcousticData: hasAcoustic,
+    hasVideoData: hasVideo,
     detectedPatterns: patterns,
+    scamCategories: transcript.scamCategories,
+    columboTrapPrompt: transcript.columboTrapPrompt,
     signals,
     reasons,
     alert,

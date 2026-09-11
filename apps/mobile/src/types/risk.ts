@@ -4,7 +4,14 @@ export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
 export type Decision = "ALLOW" | "WARN" | "CONFIRM_OR_CANCEL";
 
-export type DetectorKey = "transaction" | "behaviour" | "device" | "voice" | "rules";
+export type DetectorKey =
+  | "transaction"
+  | "behaviour"
+  | "device"
+  | "voice"
+  | "rules"
+  | "acoustic"
+  | "video";
 
 export interface DetectorFactor {
   label: string;

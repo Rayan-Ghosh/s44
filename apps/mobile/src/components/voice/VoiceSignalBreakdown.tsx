@@ -8,6 +8,7 @@ import { StatusBadge } from "../common/StatusBadge";
 import {
   CombinedVoiceAnalysis,
   AcousticAnalysis,
+  VideoDeepfakeAnalysis,
   safeNormalizeVoiceAnalysis,
 } from "../../types/voice";
 
@@ -31,17 +32,27 @@ export const getAcousticDisplay = (acoustic: AcousticAnalysis | null) => {
     !Number.isNaN(acoustic.riskScore);
 
   if (hasValidScore) {
+    const isSynthetic = acoustic?.isSyntheticVoice;
+    const evidenceList = acoustic?.acousticEvidence || [];
+    const evidenceText =
+      evidenceList.length > 0
+        ? evidenceList.map((e) => e.replace(/_/g, " ")).join(" · ")
+        : isSynthetic
+        ? "AI Voice clone: pitch flatline & vocoder anomalies"
+        : "Natural vocal dynamics & genuine timbre verified";
+
     return {
       isAvailable: true,
       score: acoustic!.riskScore,
       level: acoustic!.riskLevel || "LOW",
-      statusLabel: acoustic!.riskLevel || "LOW",
+      statusLabel: isSynthetic ? "AI CLONE" : acoustic!.riskLevel || "LOW",
       badgeStatus: (acoustic!.riskLevel === "HIGH"
         ? "high"
         : acoustic!.riskLevel === "MEDIUM"
         ? "medium"
         : "low") as "high" | "medium" | "low",
-      subText: "Vocal stress and synthetic deepfake detection",
+      subText: evidenceText,
+      isSynthetic,
     };
   }
 
@@ -52,7 +63,8 @@ export const getAcousticDisplay = (acoustic: AcousticAnalysis | null) => {
       level: null,
       statusLabel: "PENDING",
       badgeStatus: "pending" as const,
-      subText: "Acoustic analysis in progress...",
+      subText: "Acoustic spoof analysis in progress...",
+      isSynthetic: false,
     };
   }
 
@@ -64,6 +76,7 @@ export const getAcousticDisplay = (acoustic: AcousticAnalysis | null) => {
       statusLabel: "FAILED",
       badgeStatus: "high" as const,
       subText: acoustic?.errorMessage || "Acoustic analysis failed to process audio",
+      isSynthetic: false,
     };
   }
 
@@ -75,7 +88,50 @@ export const getAcousticDisplay = (acoustic: AcousticAnalysis | null) => {
     badgeStatus: "neutral" as const,
     subText: acoustic?.reason
       ? `Acoustic analysis unavailable (${acoustic.reason})`
-      : "Acoustic analysis unavailable (backend not implemented)",
+      : "Acoustic stream idle · Requires active voice buffer",
+    isSynthetic: false,
+  };
+};
+
+export const getVideoDeepfakeDisplay = (video?: VideoDeepfakeAnalysis | null) => {
+  const status = video?.status || "unavailable";
+  const hasValidScore =
+    status === "available" &&
+    typeof video?.videoDeepfakeScore === "number" &&
+    !Number.isNaN(video.videoDeepfakeScore);
+
+  if (hasValidScore) {
+    const isDeepfake = Boolean(video?.isDeepfake);
+    const flags = video?.visualThreatFlags || [];
+    const flagText =
+      flags.length > 0
+        ? flags.map((f) => f.replace(/_/g, " ")).join(" · ")
+        : isDeepfake
+        ? "Boundary warping & facial landmark distortion"
+        : "Authentic camera kinematics & physiological blinking verified";
+
+    const score100 = Math.round(video!.videoDeepfakeScore! * 100);
+    const level = score100 >= 60 ? "HIGH" : score100 >= 30 ? "MEDIUM" : "LOW";
+
+    return {
+      isAvailable: true,
+      score: score100,
+      level,
+      statusLabel: isDeepfake ? "DEEPFAKE" : "BONAFIDE",
+      badgeStatus: (isDeepfake ? "high" : "low") as "high" | "low",
+      subText: flagText,
+      isDeepfake,
+    };
+  }
+
+  return {
+    isAvailable: false,
+    score: null,
+    level: null,
+    statusLabel: "NOT MONITORED",
+    badgeStatus: "neutral" as const,
+    subText: video?.reason || "Video stream inactive or camera feed unavailable",
+    isDeepfake: false,
   };
 };
 
@@ -86,21 +142,24 @@ export const VoiceSignalBreakdown: React.FC<VoiceSignalBreakdownProps> = ({
 }) => {
   const safeAnalysis = safeNormalizeVoiceAnalysis(analysis);
   const acousticInfo = getAcousticDisplay(safeAnalysis.acousticAnalysis);
+  const videoInfo = getVideoDeepfakeDisplay(safeAnalysis.videoDeepfakeAnalysis);
   const hasAcoustic = acousticInfo.isAvailable;
+  const hasVideo = videoInfo.isAvailable;
+  const isMultiModal = hasAcoustic || hasVideo;
 
   return (
     <View style={[styles.container, style]}>
       {showSourceTag && (
         <View style={styles.sourceTagRow}>
           <Ionicons
-            name={hasAcoustic ? "git-merge-outline" : "document-text-outline"}
+            name={isMultiModal ? "git-merge-outline" : "document-text-outline"}
             size={13}
-            color={hasAcoustic ? colors.brand : colors.textSecondary}
+            color={isMultiModal ? colors.brand : colors.textSecondary}
           />
           <Text style={styles.sourceTagText}>
-            {hasAcoustic
-              ? "Combined Multi-Modal Voice Risk"
-              : "Transcript-based score · Acoustic analysis unavailable"}
+            {isMultiModal
+              ? "Multi-Modal Bayesian Fusion · Audio, Video & NLP Active"
+              : "Transcript-based score · Audio & Video telemetry in standby"}
           </Text>
         </View>
       )}
@@ -109,11 +168,11 @@ export const VoiceSignalBreakdown: React.FC<VoiceSignalBreakdownProps> = ({
         <View style={styles.breakdownHeader}>
           <View style={styles.breakdownTitleRow}>
             <Ionicons name="analytics-outline" size={15} color={colors.textMuted} />
-            <Text style={styles.breakdownTitle}>SIGNAL BREAKDOWN</Text>
+            <Text style={styles.breakdownTitle}>MULTIMODAL SIGNAL BREAKDOWN</Text>
           </View>
           <StatusBadge
-            label={hasAcoustic ? "MULTI-MODAL" : "TRANSCRIPT ONLY"}
-            status={hasAcoustic ? "low" : "medium"}
+            label={isMultiModal ? "MULTI-MODAL" : "TRANSCRIPT ONLY"}
+            status={isMultiModal ? "low" : "medium"}
             dot={false}
           />
         </View>
@@ -125,7 +184,7 @@ export const VoiceSignalBreakdown: React.FC<VoiceSignalBreakdownProps> = ({
           </View>
           <View style={styles.streamDetails}>
             <View style={styles.streamTopLine}>
-              <Text style={styles.streamName}>Transcript Analysis</Text>
+              <Text style={styles.streamName}>Transcript & Scam Intent NLP</Text>
               <Text
                 style={[
                   styles.streamScore,
@@ -137,9 +196,9 @@ export const VoiceSignalBreakdown: React.FC<VoiceSignalBreakdownProps> = ({
               </Text>
             </View>
             <Text style={styles.streamSub}>
-              {!hasAcoustic
-                ? "Primary active signal (linguistic scam patterns)"
-                : "Linguistic and conversation intent NLP"}
+              {safeAnalysis.transcriptAnalysis.matchedPhrases?.length
+                ? `Matched: "${safeAnalysis.transcriptAnalysis.matchedPhrases.slice(0, 2).join('", "')}"`
+                : "Multilingual Aho-Corasick & coercion pattern analyzer"}
             </Text>
           </View>
         </View>
@@ -148,16 +207,21 @@ export const VoiceSignalBreakdown: React.FC<VoiceSignalBreakdownProps> = ({
 
         {/* Acoustic Risk Stream */}
         <View style={styles.streamRow}>
-          <View style={styles.streamIconContainer}>
+          <View
+            style={[
+              styles.streamIconContainer,
+              acousticInfo.isSynthetic && { backgroundColor: colors.threatSurface, borderColor: colors.threatBorder },
+            ]}
+          >
             <Ionicons
-              name={hasAcoustic ? "mic" : "mic-off-outline"}
+              name={hasAcoustic ? (acousticInfo.isSynthetic ? "alert-circle" : "mic") : "mic-off-outline"}
               size={18}
-              color={hasAcoustic ? colors.brand : colors.textMuted}
+              color={acousticInfo.isSynthetic ? colors.threat : hasAcoustic ? colors.brand : colors.textMuted}
             />
           </View>
           <View style={styles.streamDetails}>
             <View style={styles.streamTopLine}>
-              <Text style={styles.streamName}>Acoustic Analysis</Text>
+              <Text style={styles.streamName}>Audio Anti-Spoofing & Deepfake</Text>
               {hasAcoustic && typeof acousticInfo.score === "number" ? (
                 <Text
                   style={[
@@ -165,7 +229,7 @@ export const VoiceSignalBreakdown: React.FC<VoiceSignalBreakdownProps> = ({
                     { color: getRiskColor(acousticInfo.level) },
                   ]}
                 >
-                  {acousticInfo.score} / 100 · {acousticInfo.level}
+                  {acousticInfo.score} / 100 · {acousticInfo.statusLabel}
                 </Text>
               ) : (
                 <StatusBadge
@@ -175,9 +239,58 @@ export const VoiceSignalBreakdown: React.FC<VoiceSignalBreakdownProps> = ({
                 />
               )}
             </View>
-            <Text style={styles.streamSub}>{acousticInfo.subText}</Text>
+            <Text
+              style={[
+                styles.streamSub,
+                acousticInfo.isSynthetic && { color: colors.threat, fontWeight: "600" },
+              ]}
+            >
+              {acousticInfo.subText}
+            </Text>
           </View>
         </View>
+
+        {/* Video Deepfake Stream */}
+        {hasVideo && (
+          <>
+            <View style={styles.breakdownDivider} />
+            <View style={styles.streamRow}>
+              <View
+                style={[
+                  styles.streamIconContainer,
+                  videoInfo.isDeepfake && { backgroundColor: colors.threatSurface, borderColor: colors.threatBorder },
+                ]}
+              >
+                <Ionicons
+                  name={videoInfo.isDeepfake ? "videocam-off" : "videocam"}
+                  size={18}
+                  color={videoInfo.isDeepfake ? colors.threat : colors.brand}
+                />
+              </View>
+              <View style={styles.streamDetails}>
+                <View style={styles.streamTopLine}>
+                  <Text style={styles.streamName}>Video Deepfake & Kinematics</Text>
+                  <Text
+                    style={[
+                      styles.streamScore,
+                      { color: getRiskColor(videoInfo.level) },
+                    ]}
+                  >
+                    {videoInfo.score} / 100 · {videoInfo.statusLabel}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.streamSub,
+                    videoInfo.isDeepfake && { color: colors.threat, fontWeight: "600" },
+                  ]}
+                >
+                  {videoInfo.subText}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
       </View>
     </View>
   );

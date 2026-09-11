@@ -11,6 +11,8 @@ import { CallTranscriptView } from "../components/voice/CallTranscriptView";
 import { FraudWarningBanner } from "../components/voice/FraudWarningBanner";
 import { RiskScoreBadge } from "../components/risk/RiskScoreBadge";
 import { VoiceSignalBreakdown } from "../components/voice/VoiceSignalBreakdown";
+import { ColumboTrapCard } from "../components/voice/ColumboTrapCard";
+import { AdaptiveCopilotCard } from "../components/voice/AdaptiveCopilotCard";
 import { Button } from "../components/common/Button";
 import { useSecurity } from "../context/SecurityContext";
 import {
@@ -20,7 +22,7 @@ import {
   subscribeToCallGuardEvents,
   CallGuardEvent,
 } from "../services/call-guard";
-import { VoiceService } from "../services/voice-service";
+import { VoiceService, SimulationScenarioId } from "../services/voice-service";
 import { safeNormalizeVoiceAnalysis } from "../types/voice";
 
 export const VoiceScreen: React.FC = () => {
@@ -36,6 +38,20 @@ export const VoiceScreen: React.FC = () => {
   } = useSecurity();
 
   const isDisconnected = activeCall.status === "disconnected";
+
+  const [selectedScenarioId, setSelectedScenarioId] = useState<SimulationScenarioId>(
+    VoiceService.getCurrentScenarioId()
+  );
+  const scenarios = VoiceService.getScenarios();
+  const currentScenario = VoiceService.getCurrentScenario();
+
+  const handleSelectScenario = (id: SimulationScenarioId) => {
+    setSelectedScenarioId(id);
+    VoiceService.setScenario(id);
+    if (isSimulatingCall) {
+      startCallSimulation();
+    }
+  };
 
   const analysis = safeNormalizeVoiceAnalysis(
     activeCall.analysis || {
@@ -196,6 +212,46 @@ export const VoiceScreen: React.FC = () => {
           durationSec={activeCall.durationSec}
         />
 
+        {/* Attack Scenario Lab Selector */}
+        <View style={styles.scenarioCard}>
+          <View style={styles.scenarioHeader}>
+            <View style={styles.scenarioTitleRow}>
+              <Ionicons name="flask-outline" size={15} color={colors.brand} />
+              <Text style={styles.scenarioHeaderTitle}>ATTACK SCENARIO LAB</Text>
+            </View>
+            <Text style={styles.scenarioActiveLang}>
+              {currentScenario.language.toUpperCase()} · {currentScenario.badge}
+            </Text>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.scenarioScrollContent}
+          >
+            {scenarios.map((sc) => {
+              const isSelected = sc.id === selectedScenarioId;
+              return (
+                <TouchableOpacity
+                  key={sc.id}
+                  style={[styles.scenarioPill, isSelected && styles.scenarioPillActive]}
+                  onPress={() => handleSelectScenario(sc.id)}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.scenarioPillText,
+                      isSelected && styles.scenarioPillTextActive,
+                    ]}
+                  >
+                    {sc.title}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <Text style={styles.scenarioDescription}>{currentScenario.description}</Text>
+        </View>
+
         {/* Simulation Controls when Standby / Disconnected */}
         {!isSimulatingCall && (
           <View style={styles.standbyCard}>
@@ -212,10 +268,10 @@ export const VoiceScreen: React.FC = () => {
             <Text style={styles.standbyDesc}>
               {isDisconnected
                 ? "Incident recorded in History and Alerts inbox. Security team notified."
-                : "Avaran runs on-device acoustic and linguistic NLP to detect phone scams and remote-access fraud in real time."}
+                : `Ready to simulate "${currentScenario.title}". Evaluates real-time acoustic spoofing, video deepfake kinematics, and linguistic NLP.`}
             </Text>
             <Button
-              label={isDisconnected ? "Simulate Another Scam Call" : "Simulate Incoming Phishing Call"}
+              label={isDisconnected ? `Simulate ${currentScenario.title}` : `Simulate ${currentScenario.title}`}
               onPress={startCallSimulation}
               variant="primary"
               size="lg"
@@ -269,6 +325,27 @@ export const VoiceScreen: React.FC = () => {
             />
             <VoiceSignalBreakdown analysis={analysis} />
           </View>
+        )}
+
+        {/* Adaptive Copilot Guidance Card (Phase 4) */}
+        {isSimulatingCall && activeCall.copilotGuidance && (
+          <AdaptiveCopilotCard
+            guidance={activeCall.copilotGuidance}
+            fusionMetrics={analysis.multimodalFusion}
+            onChallengeSuccess={() => {}}
+            onChallengeFailure={endCallSimulation}
+            onTerminateCall={endCallSimulation}
+          />
+        )}
+
+        {/* Columbo Counter-Inquiry Trap Card (Phase 1) */}
+        {isSimulatingCall && activeCall.columboTrapPrompt && (
+          <ColumboTrapCard
+            prompt={activeCall.columboTrapPrompt}
+            scamCategories={activeCall.scamCategories}
+            languageDetected={analysis.transcriptAnalysis?.languageDetected}
+            onCallerHungUp={endCallSimulation}
+          />
         )}
 
         {/* Fraud Warning Banner */}
@@ -467,5 +544,72 @@ const styles = StyleSheet.create({
   },
   manualActions: {
     marginTop: spacing.lg,
+  },
+  scenarioCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+    ...shadows.sm,
+  },
+  scenarioHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.xs,
+  },
+  scenarioTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  scenarioHeaderTitle: {
+    ...typography.caption,
+    fontWeight: "800",
+    color: colors.textPrimary,
+    letterSpacing: 0.6,
+  },
+  scenarioActiveLang: {
+    ...typography.caption,
+    fontSize: 10,
+    color: colors.brandDark,
+    fontWeight: "700",
+  },
+  scenarioScrollContent: {
+    flexDirection: "row",
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  scenarioPill: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  scenarioPillActive: {
+    backgroundColor: colors.brandSurface,
+    borderColor: colors.brandBorder,
+  },
+  scenarioPillText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.textSecondary,
+  },
+  scenarioPillTextActive: {
+    color: colors.brandDark,
+    fontWeight: "800",
+  },
+  scenarioDescription: {
+    ...typography.caption,
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+    lineHeight: 16,
   },
 });

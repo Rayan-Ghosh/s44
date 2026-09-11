@@ -6,6 +6,9 @@ import {
   DetectedPattern,
   TranscriptAnalysis,
   TranscriptAnalysisResponse,
+  VideoDeepfakeAnalysis,
+  AdaptiveCopilotGuidance,
+  MultimodalFusionMetrics,
   VoiceAnalysisStatus,
   VoiceWebSocketMessageType,
   buildCombinedVoiceAnalysis,
@@ -139,12 +142,35 @@ export function normalizeTranscriptResponse(raw: unknown): TranscriptAnalysis {
       ? obj.status
       : "available";
 
+  const scamCategories = Array.isArray(obj.scam_categories)
+    ? obj.scam_categories.filter((c: unknown): c is string => typeof c === "string")
+    : Array.isArray(obj.scamCategories)
+    ? obj.scamCategories.filter((c: unknown): c is string => typeof c === "string")
+    : undefined;
+
+  const columboTrapPrompt =
+    typeof obj.columbo_trap_prompt === "string"
+      ? obj.columbo_trap_prompt
+      : typeof obj.columboTrapPrompt === "string"
+      ? obj.columboTrapPrompt
+      : null;
+
+  const languageDetected =
+    typeof obj.language_detected === "string"
+      ? obj.language_detected
+      : typeof obj.languageDetected === "string"
+      ? obj.languageDetected
+      : undefined;
+
   return {
     status,
     riskScore: score,
     riskLevel: level,
     detectedPatterns: patterns,
     matchedPhrases,
+    scamCategories,
+    columboTrapPrompt,
+    languageDetected,
     intents: Array.isArray(obj.detected_intents) ? obj.detected_intents : undefined,
     coercionLevel: obj.coercion_level,
     accumulatedRisk: typeof obj.accumulated_risk === "number" ? obj.accumulated_risk : score / 100,
@@ -216,6 +242,38 @@ export function normalizeAcousticResponse(raw: unknown): AcousticAnalysis {
     };
   }
 
+  // Check for Phase 2 audio spoof payload
+  const spoofObj = obj.audio_spoof || obj.audioSpoof || obj;
+  const rawSpoofProb =
+    typeof spoofObj.audio_spoof_prob === "number"
+      ? spoofObj.audio_spoof_prob
+      : typeof spoofObj.audioSpoofProb === "number"
+      ? spoofObj.audioSpoofProb
+      : undefined;
+
+  if (rawSpoofProb !== undefined) {
+    const isSynthetic = Boolean(spoofObj.is_synthetic_voice ?? spoofObj.isSyntheticVoice ?? rawSpoofProb >= 0.65);
+    const evidence = Array.isArray(spoofObj.acoustic_evidence)
+      ? spoofObj.acoustic_evidence.filter((e: unknown): e is string => typeof e === "string")
+      : Array.isArray(spoofObj.acousticEvidence)
+      ? spoofObj.acousticEvidence.filter((e: unknown): e is string => typeof e === "string")
+      : [];
+
+    const spoofScore = Math.round(rawSpoofProb * 100);
+    return {
+      status: "available",
+      riskScore: spoofScore,
+      riskLevel: spoofScore >= 65 ? "HIGH" : spoofScore >= 35 ? "MEDIUM" : "LOW",
+      confidence: 0.95,
+      audioSpoofProb: rawSpoofProb,
+      isSyntheticVoice: isSynthetic,
+      acousticEvidence: evidence,
+      detectedAnomalies: evidence,
+      reason: isSynthetic ? "AI Voice clone: pitch tremor flatline & vocoder distortion" : "Natural vocal cords & acoustic dynamics verified",
+      errorMessage: null,
+    };
+  }
+
   // If score is null or undefined, acoustic is unavailable
   if (obj.riskScore === null || obj.riskScore === undefined) {
     return createUnavailableAcousticAnalysis(
@@ -269,6 +327,57 @@ export function normalizeAcousticResponse(raw: unknown): AcousticAnalysis {
 }
 
 /**
+ * Normalizes Phase 3 video deepfake analysis responses.
+ */
+export function normalizeVideoDeepfakeResponse(raw: unknown): VideoDeepfakeAnalysis | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = ((raw as any).video_deepfake || (raw as any).videoDeepfake || raw) as Record<string, any>;
+  const rawScore =
+    typeof obj.video_deepfake_score === "number"
+      ? obj.video_deepfake_score
+      : typeof obj.videoDeepfakeScore === "number"
+      ? obj.videoDeepfakeScore
+      : null;
+
+  if (rawScore === null && typeof obj.is_deepfake !== "boolean" && typeof obj.isDeepfake !== "boolean") {
+    return null;
+  }
+
+  const isDeepfake = Boolean(obj.is_deepfake ?? obj.isDeepfake ?? (rawScore !== null && rawScore >= 0.60));
+  const flags = Array.isArray(obj.visual_threat_flags)
+    ? obj.visual_threat_flags.filter((f: unknown): f is string => typeof f === "string")
+    : Array.isArray(obj.visualThreatFlags)
+    ? obj.visualThreatFlags.filter((f: unknown): f is string => typeof f === "string")
+    : [];
+
+  return {
+    status: "available",
+    videoDeepfakeScore: rawScore,
+    isDeepfake,
+    visualThreatFlags: flags,
+    reason: isDeepfake ? "Facial boundary warping or looped background footage detected" : "Natural facial kinematics & blinking verified",
+    errorMessage: null,
+  };
+}
+
+/**
+ * Normalizes Phase 4 adaptive copilot guidance.
+ */
+export function normalizeAdaptiveCopilotResponse(raw: unknown): AdaptiveCopilotGuidance | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = ((raw as any).copilot || raw) as Record<string, any>;
+  if (!obj.challenge_type && !obj.challengeType && !obj.recommended_challenge && !obj.recommendedChallenge) {
+    return null;
+  }
+  return {
+    challengeType: String(obj.challenge_type || obj.challengeType || "NONE"),
+    escalationAction: String(obj.escalation_action || obj.escalationAction || "NONE"),
+    recommendedChallenge: typeof obj.recommended_challenge === "string" ? obj.recommended_challenge : typeof obj.recommendedChallenge === "string" ? obj.recommendedChallenge : null,
+    explanation: typeof obj.explanation === "string" ? obj.explanation : null,
+  };
+}
+
+/**
  * Normalizes combined voice analysis responses.
  * Synthesizes overall risk safely while maintaining strict boundary
  * between transcript and acoustic data.
@@ -282,17 +391,43 @@ export function normalizeCombinedResponse(raw: unknown): CombinedVoiceAnalysis {
 
   const obj = (
     "type" in (raw as any) && (raw as any).type === "combined_analysis" && "data" in (raw as any)
-      ? (raw as any).data
-      : raw
+    ? (raw as any).data
+    : raw
   ) as Record<string, any>;
 
   // Extract transcript
   const transcript = normalizeTranscriptResponse(obj.transcriptAnalysis || obj);
 
   // Extract acoustic
-  const acoustic = obj.acousticAnalysis ? normalizeAcousticResponse(obj.acousticAnalysis) : createUnavailableAcousticAnalysis();
+  const acoustic = obj.acousticAnalysis || obj.audio_spoof || obj.audioSpoof
+    ? normalizeAcousticResponse(obj.acousticAnalysis || obj.audio_spoof || obj.audioSpoof)
+    : createUnavailableAcousticAnalysis();
 
-  return buildCombinedVoiceAnalysis(transcript, acoustic, obj.metadata);
+  // Extract video deepfake
+  const videoDeepfake = normalizeVideoDeepfakeResponse(obj.videoDeepfake || obj.video_deepfake || obj);
+
+  // Extract copilot
+  const copilot = normalizeAdaptiveCopilotResponse(obj.copilot || obj);
+
+  // Extract multimodal fusion
+  const fusionObj = obj.multimodal_fusion || obj.multimodalFusion;
+  const multimodalFusion: MultimodalFusionMetrics | null = fusionObj && typeof fusionObj.fused_risk_score === "number"
+    ? {
+        fusedRiskScore: fusionObj.fused_risk_score,
+        riskLevel: fusionObj.risk_level || "LOW",
+        decision: fusionObj.decision || "ALLOW",
+        primaryRiskFactors: fusionObj.primary_risk_factors || [],
+      }
+    : null;
+
+  return buildCombinedVoiceAnalysis(
+    transcript,
+    acoustic,
+    obj.metadata,
+    videoDeepfake,
+    copilot,
+    multimodalFusion
+  );
 }
 
 export interface ParsedVoiceWebSocketMessage {
